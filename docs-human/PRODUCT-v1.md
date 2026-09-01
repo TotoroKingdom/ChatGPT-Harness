@@ -1,4 +1,5 @@
 # ChatGPT-Harness v1需求
+ChatGPT-Harness 是一个通过 MCP 向 ChatGPT 提供受控本地执行能力的安全 Runtime，并通过 Tauri UI 提供配置、授权和审计控制。
 
 ### 1-连通runtime--tunnel--ChatGPT
 ChatGPT
@@ -108,4 +109,27 @@ cancelled
 ↓
 Local Machine
 
-Runtime 是核心产品，Tauri 是 Runtime 的控制台。
+Runtime 是核心产品，UI是ChatGPT-Harness 的本地 Control Plane。
+负责4件事
+配置、生命周期、权限、安全可见性
+
+布局
+| 页面           | 核心职责                        |
+| ------------ | --------------------------- |
+| **Overview** | 运行状态、启动停止、当前 Workspace、安全模式 |
+| **Tools**    | 当前暴露工具、工具能力、权限状态            |
+| **Policies** | DENY / ASK / ALLOW 规则及命中范围  |
+| **Activity** | Tool Call、审批、拒绝、错误、连接日志     |
+| **Settings** | Tunnel、Workspace、本机路径、配置管理  |
+┌──────────────────────────────────────────────┐
+│ ChatGPT Harness                  ● Connected │
+├────────────┬─────────────────────────────────┤
+│ Overview   │                                 │
+│ Tools      │          Main Content           │
+│ Policies   │                                 │
+│ Activity   │                                 │
+│ Settings   │                                 │
+│            │                                 │
+│            │                                 │
+│ v0.1.0     │                                 │
+└────────────┴─────────────────────────────────┘
