@@ -30,8 +30,24 @@
 
 ### 13-agentTeam--和6对应，后续在考虑
 
-V1 先实现工具调用，包含五个工具bash，read_file，write_file，edit_file，glob和权限检查1：拒绝列表 deny 永远禁止的操作（rm -rf /、sudo）
-2：询问 ask      命中之后询问用户
-3：运行 allow    用户审批
-还有一个UI层次
+## V1 
+#### 工具调用：包含五个工具bash，read_file，write_file，edit_file，glob
+#### 权限检查：
+DENY
+↓
+无条件拒绝，不允许用户临时批准
+
+ASK
+↓
+暂停执行
+UI 请求用户批准
+允许一次 / 拒绝一次
+
+ALLOW
+↓
+直接执行
+无需用户确认
+
+DENY > ASK > ALLOW
+#### UI层
 技术架构核心运行层次使用rust，UI层选Tauri
