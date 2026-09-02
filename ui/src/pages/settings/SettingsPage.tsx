@@ -1,0 +1,9 @@
+import type { ReactNode } from "react";
+import { Card, SectionHeading, StatusBadge } from "@/components/common/primitives";
+
+export function SettingsPage() {
+  return <div className="page-stack"><Card className="settings-banner"><div className="settings-lock">⌁</div><div><StatusBadge tone="warning">M2 controls locked</StatusBadge><h2>Configuration stays local and explicit</h2><p>These sections establish the future control surface without writing configuration in M1.</p></div></Card><div className="settings-grid"><SettingsSection eyebrow="Workspace" title="Active workspace"><ReadOnlyField label="Workspace root" value="Not configured" /></SettingsSection><SettingsSection eyebrow="Connection" title="Tunnel client"><ReadOnlyField label="Tunnel ID" value="Not configured" /><ReadOnlyField label="Client path" value="Auto-detect" /></SettingsSection><SettingsSection eyebrow="Security" title="Mode"><ReadOnlyField label="Security mode" value="Normal mode" /><ReadOnlyField label="Developer/Test mode" value="Disabled" /></SettingsSection><SettingsSection eyebrow="Local data" title="Storage boundaries"><div className="storage-note"><span className="status-dot" />Persistent configuration and secrets are managed by the Tauri backend in a later milestone.</div></SettingsSection></div><div className="settings-footnote">Configuration becomes available in M2. No API keys, workspace paths, or config files are written by this UI.</div></div>;
+}
+
+function SettingsSection({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) { return <Card className="settings-section"><SectionHeading eyebrow={eyebrow} title={title} />{children}</Card>; }
+function ReadOnlyField({ label, value }: { label: string; value: string }) { return <label className="readonly-field"><span>{label}</span><input value={value} readOnly disabled /></label>; }
