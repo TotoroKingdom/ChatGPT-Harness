@@ -19,7 +19,11 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
   configMetadata() { return this.call<ConfigMetadata>("config_metadata"); }
   async configSave(config: AppConfig, apiKey?: string) {
-    const saved = await this.call<AppConfig>("config_save", { config, apiKey: apiKey ?? null });
+    const response = await this.call<AppConfig>("config_save", {
+      config,
+      apiKey: apiKey ?? null,
+    });
+    const saved = response;
     this.mock.syncConfig(saved, apiKey?.trim() ? true : await this.apiKeyStatus());
     return saved;
   }
@@ -54,3 +58,6 @@ export class TauriHarnessControlClient implements HarnessControlClient {
 export function createLocalClient(): HarnessControlClient {
   return tauriAvailable() ? new TauriHarnessControlClient() : new MockHarnessControlClient("ready");
 }
+
+
+

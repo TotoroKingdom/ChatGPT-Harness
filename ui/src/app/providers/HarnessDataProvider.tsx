@@ -88,7 +88,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const [configError, setConfigError] = useState<HarnessClientError | null>(null);
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [components, setComponents] = useState<ComponentStates>(client.getComponentStates());
-  const [activeRevision, setActiveRevision] = useState<bigint | null>(null);
+  const [activeRevision, setActiveRevision] = useState<string | null>(null);
   const [lastDiagnostics, setLastDiagnostics] = useState<DiagnosticRun | null>(null);
 
   const refreshConfig = useCallback(async () => {
@@ -321,3 +321,4 @@ export function useHarnessData() {
   if (!value) throw new Error("useHarnessData must be used inside HarnessDataProvider");
   return value;
 }
+

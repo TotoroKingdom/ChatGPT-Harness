@@ -1,3 +1,4 @@
+use super::common::DecimalU64;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -6,7 +7,8 @@ use ts_rs::TS;
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub schema_version: u32,
-    pub config_revision: u64,
+    #[ts(type = "string")]
+    pub config_revision: DecimalU64,
     pub workspace: WorkspaceConfig,
     pub tunnel: TunnelConfig,
     pub security: SecurityConfig,
@@ -66,7 +68,8 @@ pub struct UiConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeConfigSnapshot {
-    pub config_revision: u64,
+    #[ts(type = "string")]
+    pub config_revision: DecimalU64,
     pub workspace: WorkspaceConfig,
     pub security: SecurityConfig,
     pub runtime_limits: RuntimeLimits,

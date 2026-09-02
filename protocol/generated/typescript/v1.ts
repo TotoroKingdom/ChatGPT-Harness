@@ -15,14 +15,14 @@ export type RpcMessage = RpcErrorResponse | RpcResponse | RpcRequest | RpcNotifi
 export type MachineErrorCode = "NOT_INITIALIZED" | "ALREADY_INITIALIZED" | "PROTOCOL_VERSION_MISMATCH" | "RUNTIME_NOT_READY" | "INVALID_ARGUMENT" | "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_RESOLVED" | "INTERNAL_ERROR";
 export type EmptyParams = Record<string, never>;
 export type PolicyDecision = "deny" | "ask" | "allow";
-export type AppConfig = { schemaVersion: number, configRevision: bigint, workspace: WorkspaceConfig, tunnel: TunnelConfig, security: SecurityConfig, ui: UiConfig, };
+export type AppConfig = { schemaVersion: number, configRevision: string, workspace: WorkspaceConfig, tunnel: TunnelConfig, security: SecurityConfig, ui: UiConfig, };
 export type WorkspaceConfig = { rootPath: string, };
 export type TunnelConfig = { tunnelId: string, tunnelClientPath?: string, autoDetect: boolean, apiKeyRef?: SecretReference, };
 export type SecretReference = { provider: string, key: string, };
 export type SecurityMode = "normal" | "developer_test";
 export type SecurityConfig = { mode: SecurityMode, developerTestMode: boolean, };
 export type UiConfig = { theme?: string, };
-export type RuntimeConfigSnapshot = { configRevision: bigint, workspace: WorkspaceConfig, security: SecurityConfig, runtimeLimits: RuntimeLimits, };
+export type RuntimeConfigSnapshot = { configRevision: string, workspace: WorkspaceConfig, security: SecurityConfig, runtimeLimits: RuntimeLimits, };
 export type RuntimeLimits = { maxConcurrentRequests: number, maxActivityEvents: number, };
 export type ClientInfo = { name: string, title: string, version: string, };
 export type ServerInfo = { name: string, title: string, version: string, };
@@ -36,7 +36,7 @@ export type RuntimeState = { runtimeId: string,
 /**
  * RFC3339 UTC timestamp.
  */
-startedAt: string, lifecycle: RuntimeLifecycle, readiness: RuntimeReadiness, configRevision: bigint, activeWorkspace: string, securityMode: SecurityMode, exposedToolCatalog: Array<ToolDescriptor>, activeRequests: number, pendingApprovals: number, runningExecutions: number, lastError?: RuntimeErrorSummary, };
+startedAt: string, lifecycle: RuntimeLifecycle, readiness: RuntimeReadiness, configRevision: string, activeWorkspace: string, securityMode: SecurityMode, exposedToolCatalog: Array<ToolDescriptor>, activeRequests: number, pendingApprovals: number, runningExecutions: number, lastError?: RuntimeErrorSummary, };
 export type RuntimeStopResult = { accepted: boolean, };
 export type ToolReadiness = "ready" | "unavailable";
 export type RiskLevel = "low" | "medium" | "high";
@@ -50,15 +50,15 @@ export type ActivityEvent = { eventId: string,
 /**
  * Runtime-local monotonically increasing sequence number.
  */
-sequence: bigint, eventType: ActivityEventType, requestId?: string, 
+sequence: string, eventType: ActivityEventType, requestId?: string, 
 /**
  * RFC3339 UTC timestamp.
  */
 timestamp: string, summary: string, metadata: { [key in string]?: string }, };
-export type ActivityListParams = { afterSequence?: bigint, limit?: number, };
-export type ActivityListResult = { items: Array<ActivityEvent>, latestSequence: bigint, };
-export type ActivitySubscribeParams = { afterSequence?: bigint, };
-export type ActivitySubscribeResult = { latestSequence: bigint, };
+export type ActivityListParams = { afterSequence?: string, limit?: number, };
+export type ActivityListResult = { items: Array<ActivityEvent>, latestSequence: string, };
+export type ActivitySubscribeParams = { afterSequence?: string, };
+export type ActivitySubscribeResult = { latestSequence: string, };
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type ApprovalDecision = "allow_once" | "deny";
 export type ApprovalRequest = { requestId: string, tool: string, sanitizedArguments: { [key in string]?: string }, createdAt: string, expiresAt: string, status: ApprovalStatus, resolvedAt?: string, decision?: ApprovalDecision, };

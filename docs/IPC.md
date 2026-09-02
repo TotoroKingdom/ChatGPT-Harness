@@ -38,7 +38,7 @@ Runtime request methods are:
 
 `initialized` and `activity.event` are notifications. No `files.*`, `git.*`, `database.*`, `shell.*`, `skills.*`, `memory.*`, `agent.*`, or `tasks.*` methods are defined by M0.
 
-`activity.list` accepts optional `afterSequence` and `limit`, and returns `items` with `latestSequence`. `activity.subscribe` accepts optional `afterSequence`; Runtime first replays events after that sequence, then sends subsequent `activity.event` notifications. Closing the connection cancels the subscription; no unsubscribe RPC exists.
+`activity.list` accepts optional `afterSequence` and `limit`, and returns `items` with `latestSequence`. `activity.subscribe` accepts optional `afterSequence`; Runtime first replays events after that sequence, then sends subsequent `activity.event` notifications. Closing the connection cancels the subscription; no unsubscribe RPC exists. `afterSequence`, event `sequence`, and `latestSequence` use non-negative decimal strings on the JSON wire.
 
 ## Canonical artifacts
 
@@ -51,3 +51,4 @@ cargo run -p harness-control-protocol --bin protocol-export -- generate-all
 ```
 
 Generated TypeScript is at `protocol/generated/typescript/v1.ts`; JSON Schema is at `protocol/generated/json-schema/`. Files are deterministic and marked `GENERATED FILE — DO NOT EDIT` (the JSON schema marker is its legal JSON `$comment`). Generation is never performed from `build.rs`.
+

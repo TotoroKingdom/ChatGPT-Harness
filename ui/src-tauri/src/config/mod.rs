@@ -1,4 +1,4 @@
-use harness_control_protocol::AppConfig;
+use harness_control_protocol::{AppConfig, DecimalU64};
 use serde::Serialize;
 use std::{
     fs,
@@ -72,9 +72,12 @@ impl ConfigStore {
         }
         let previous = self.load()?;
         config.config_revision = match previous {
-            None => 1,
+            None => DecimalU64::new(1),
             Some(old) if same_semantics(&old, &config) => old.config_revision,
-            Some(old) => old.config_revision.saturating_add(1),
+            Some(old) => old
+                .config_revision
+                .checked_add_one()
+                .ok_or_else(|| ConfigError::Invalid("configRevision overflow".into()))?,
         };
         let bytes =
             serde_json::to_vec_pretty(&config).map_err(|e| ConfigError::Io(e.to_string()))?;
@@ -96,8 +99,8 @@ impl ConfigStore {
 fn same_semantics(a: &AppConfig, b: &AppConfig) -> bool {
     let mut left = a.clone();
     let mut right = b.clone();
-    left.config_revision = 0;
-    right.config_revision = 0;
+    left.config_revision = DecimalU64::ZERO;
+    right.config_revision = DecimalU64::ZERO;
     left == right
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -153,7 +156,7 @@ mod tests {
     fn c() -> AppConfig {
         AppConfig {
             schema_version: 1,
-            config_revision: 0,
+            config_revision: DecimalU64::ZERO,
             workspace: WorkspaceConfig {
                 root_path: std::env::temp_dir().display().to_string(),
             },
@@ -180,11 +183,14 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let s = ConfigStore::new(d.path().into());
         let a = s.save(c()).unwrap();
-        assert_eq!(a.config_revision, 1);
-        assert_eq!(s.save(a.clone()).unwrap().config_revision, 1);
+        assert_eq!(a.config_revision, DecimalU64::new(1));
+        assert_eq!(
+            s.save(a.clone()).unwrap().config_revision,
+            DecimalU64::new(1)
+        );
         let mut b = a;
         b.tunnel.tunnel_id = "next".into();
-        assert_eq!(s.save(b).unwrap().config_revision, 2);
+        assert_eq!(s.save(b).unwrap().config_revision, DecimalU64::new(2));
     }
     #[test]
     fn invalid_json_is_error() {

@@ -5,7 +5,7 @@
     "startedAt": "2026-01-01T00:00:00Z",
     "lifecycle": "ready",
     "readiness": "ready",
-    "configRevision": 7,
+    "configRevision": "7",
     "activeWorkspace": "<workspace>",
     "securityMode": "normal",
     "exposedToolCatalog": [],
@@ -14,3 +14,5 @@
     "runningExecutions": 0
   }
 }
+
+

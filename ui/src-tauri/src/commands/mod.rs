@@ -378,7 +378,7 @@ mod validation_tests {
     fn valid_config(directory: &std::path::Path, client: &std::path::Path) -> AppConfig {
         AppConfig {
             schema_version: CURRENT_SCHEMA_VERSION,
-            config_revision: 0,
+            config_revision: harness_control_protocol::DecimalU64::ZERO,
             workspace: WorkspaceConfig {
                 root_path: directory.display().to_string(),
             },

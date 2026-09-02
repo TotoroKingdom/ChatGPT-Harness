@@ -159,3 +159,58 @@ fn m0_method_registry_is_exact() {
     );
     assert_eq!(NOTIFICATION_METHODS, ["initialized", "activity.event"]);
 }
+
+#[test]
+fn decimal_u64_has_strict_decimal_string_wire_roundtrip() {
+    for value in ["0", "1", "18446744073709551615"] {
+        let parsed: DecimalU64 = serde_json::from_str(&format!("\"{value}\"")).unwrap();
+        assert_eq!(
+            serde_json::to_string(&parsed).unwrap(),
+            format!("\"{value}\"")
+        );
+    }
+    for value in ["", "-1", "1.0", "1e3", "18446744073709551616"] {
+        assert!(
+            serde_json::from_str::<DecimalU64>(&format!("\"{value}\"")).is_err(),
+            "accepted invalid DecimalU64: {value}"
+        );
+    }
+    assert!(serde_json::from_str::<DecimalU64>("1").is_err());
+    assert!(DecimalU64::new(u64::MAX).checked_add_one().is_none());
+}
+
+#[test]
+fn config_and_activity_fixtures_validate_decimal_wire_fields() {
+    let config = fixture("app-config.example.json");
+    let activity = fixture("activity.list.response.json");
+    let config_revision = config.get("configRevision").unwrap();
+    let latest_sequence = activity
+        .get("result")
+        .unwrap()
+        .get("latestSequence")
+        .unwrap();
+    assert!(config_revision.is_string());
+    assert!(latest_sequence.is_string());
+    let _: AppConfig = validate(config);
+    let _: ActivityListResult = validate(activity.get("result").unwrap().clone());
+}
+
+#[test]
+fn generated_typescript_uses_strings_for_revision_and_sequence_fields() {
+    let generated = fs::read_to_string("generated/typescript/v1.ts").unwrap();
+    for field in [
+        "configRevision",
+        "sequence",
+        "afterSequence",
+        "latestSequence",
+    ] {
+        assert!(
+            !generated.contains(&format!("{field}: bigint")),
+            "generated {field} still uses bigint"
+        );
+    }
+    assert!(generated.contains("configRevision: string"));
+    assert!(generated.contains("sequence: string"));
+    assert!(generated.contains("afterSequence?: string"));
+    assert!(generated.contains("latestSequence: string"));
+}

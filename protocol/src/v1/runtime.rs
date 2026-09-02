@@ -1,4 +1,4 @@
-use super::tools::ToolDescriptor;
+use super::{common::DecimalU64, tools::ToolDescriptor};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -37,7 +37,8 @@ pub struct RuntimeState {
     pub started_at: String,
     pub lifecycle: RuntimeLifecycle,
     pub readiness: RuntimeReadiness,
-    pub config_revision: u64,
+    #[ts(type = "string")]
+    pub config_revision: DecimalU64,
     pub active_workspace: String,
     pub security_mode: super::config::SecurityMode,
     pub exposed_tool_catalog: Vec<ToolDescriptor>,

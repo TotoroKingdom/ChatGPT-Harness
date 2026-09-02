@@ -23,7 +23,7 @@ describe("MockHarnessControlClient", () => {
 
 const testConfig = (): AppConfig => ({
   schemaVersion: 1,
-  configRevision: 0n,
+  configRevision: "0",
   workspace: { rootPath: "D:\\workspace" },
   tunnel: { tunnelId: "tunnel", tunnelClientPath: "D:\\tunnel-client.exe", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } },
   security: { mode: "normal", developerTestMode: false },
@@ -37,13 +37,14 @@ afterEach(() => {
 describe("M2 mock configuration and lifecycle", () => {
   it("increments revision only when saved semantics change", async () => {
     const client = new MockHarnessControlClient("ready");
+    await client.configReset();
     const base = await client.configGet();
     const first = await client.configSave(testConfig());
     const same = await client.configSave({ ...first });
     const changed = await client.configSave({ ...same, tunnel: { ...same.tunnel, tunnelId: "next" } });
-    expect(first.configRevision).toBe((base?.configRevision ?? 0n) + 1n);
+    expect(first.configRevision).toBe("1");
     expect(same.configRevision).toBe(first.configRevision);
-    expect(changed.configRevision).toBe(first.configRevision + 1n);
+    expect(changed.configRevision).toBe("2");
   });
 
   it("captures the saved revision on start and clears the active snapshot on stop", async () => {
@@ -56,4 +57,26 @@ describe("M2 mock configuration and lifecycle", () => {
     expect(client.getComponentStates()).toEqual({ runtime: "stopped", tunnel: "stopped", mcp: "stopped" });
     expect((await client.runtimeStatus()).readiness).toBe("not_ready");
   });
+});
+
+
+it("serializes config, runtime, and activity wire models without bigint", async () => {
+  const client = new MockHarnessControlClient("ready");
+  const config = await client.configSave(testConfig());
+  expect(() => JSON.stringify(config)).not.toThrow();
+  const loaded = await client.configGet();
+  expect(() => JSON.stringify(loaded)).not.toThrow();
+
+  const runtime = await client.runtimeStart();
+  expect(() => JSON.stringify(runtime)).not.toThrow();
+  expect(runtime.configRevision).toBe(config.configRevision);
+
+  const activity = await client.activityList();
+  expect(() => JSON.stringify(activity)).not.toThrow();
+  expect(activity.latestSequence).toBeTypeOf("string");
+  const listener = vi.fn();
+  await client.activitySubscribe(listener);
+  await new Promise((resolve) => window.setTimeout(resolve, 260));
+  expect(listener).toHaveBeenCalled();
+  expect(() => JSON.stringify(listener.mock.calls[0][0])).not.toThrow();
 });

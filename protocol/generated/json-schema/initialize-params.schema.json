@@ -20,13 +20,15 @@
       ],
       "type": "object"
     },
+    "DecimalU64": {
+      "description": "A non-negative 64-bit integer represented as a decimal string on the JSON wire.\n\nKeeping revisions and cursors as strings avoids JSON number precision loss and\nmakes the representation identical across Tauri and future JSONL transports.",
+      "type": "string"
+    },
     "RuntimeConfigSnapshot": {
       "description": "The non-secret, immutable-at-startup configuration consumed by a Runtime.",
       "properties": {
         "configRevision": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
+          "$ref": "#/$defs/DecimalU64"
         },
         "runtimeLimits": {
           "$ref": "#/$defs/RuntimeLimits"

@@ -1,3 +1,4 @@
+use super::common::DecimalU64;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -29,7 +30,8 @@ pub type SanitizedMetadata = BTreeMap<String, String>;
 pub struct ActivityEvent {
     pub event_id: String,
     /// Runtime-local monotonically increasing sequence number.
-    pub sequence: u64,
+    #[ts(type = "string")]
+    pub sequence: DecimalU64,
     pub event_type: ActivityEventType,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -45,7 +47,8 @@ pub struct ActivityEvent {
 pub struct ActivityListParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub after_sequence: Option<u64>,
+    #[ts(type = "string")]
+    pub after_sequence: Option<DecimalU64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub limit: Option<u32>,
@@ -54,7 +57,8 @@ pub struct ActivityListParams {
 #[serde(rename_all = "camelCase")]
 pub struct ActivityListResult {
     pub items: Vec<ActivityEvent>,
-    pub latest_sequence: u64,
+    #[ts(type = "string")]
+    pub latest_sequence: DecimalU64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -62,11 +66,13 @@ pub struct ActivityListResult {
 pub struct ActivitySubscribeParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub after_sequence: Option<u64>,
+    #[ts(type = "string")]
+    pub after_sequence: Option<DecimalU64>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySubscribeResult {
-    pub latest_sequence: u64,
+    #[ts(type = "string")]
+    pub latest_sequence: DecimalU64,
 }
 pub type ActivityEventNotification = ActivityEvent;

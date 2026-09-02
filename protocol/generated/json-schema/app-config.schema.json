@@ -1,6 +1,10 @@
 {
   "$comment": "GENERATED FILE — DO NOT EDIT",
   "$defs": {
+    "DecimalU64": {
+      "description": "A non-negative 64-bit integer represented as a decimal string on the JSON wire.\n\nKeeping revisions and cursors as strings avoids JSON number precision loss and\nmakes the representation identical across Tauri and future JSONL transports.",
+      "type": "string"
+    },
     "SecretReference": {
       "description": "An opaque SecretStore lookup reference; it never contains a raw secret.",
       "properties": {
@@ -96,9 +100,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "configRevision": {
-      "format": "uint64",
-      "minimum": 0,
-      "type": "integer"
+      "$ref": "#/$defs/DecimalU64"
     },
     "schemaVersion": {
       "format": "uint32",
