@@ -18,6 +18,18 @@ For the desktop shell:
 npm run tauri -- dev
 ```
 
+## M2 First Run development flow
+
+The first launch shows the setup screen. Choose a workspace folder, enter a Tunnel ID, use **Auto Detect** or **Choose File** for `tunnel-client`, enter the API Key, select Normal or Developer/Test mode, then save. The setup flow runs local diagnostics before opening the normal application shell.
+
+To test the first-run flow in the browser mock, open the app with `?setup=first-run`. Existing M1 scenarios remain available with `?mock=empty`, `?mock=error`, or `?mock=disconnected`.
+
+## Local configuration and secrets
+
+The Tauri backend owns `AppConfig` and stores pretty-printed UTF-8 JSON at the OS application-data directory, on Windows under the Tauri application-data directory for identifier `com.chatgpt.harness` (typically `%APPDATA%\\com.chatgpt.harness\\config.json`). The exact resolved path is shown in Settings. Missing configuration means First Run; corrupt or unsupported configuration is reported as a structured error and can be reset from Settings. The repository never stores machine configuration.
+
+The API Key is passed only to the `SecretStore` abstraction. Windows uses the Windows Credential Manager through the `keyring` crate; development/browser mocks use an in-memory store. `config.json`, logs, and UI state contain only an opaque `SecretReference`, never the raw API Key.
+
 ## Checks
 
 ```bash
@@ -26,12 +38,6 @@ npm run test
 npm run build
 ```
 
-## Mock client architecture
+## Mock lifecycle and M3 boundary
 
-Pages consume data through the `HarnessControlClient` interface. The provider owns async loading state and subscription cleanup; the default factory injects `MockHarnessControlClient`, which returns deterministic M0-shaped data with a small delay.
-
-The mock scenario can be selected for local state checks with a query string such as `?mock=empty`, `?mock=error`, or `?mock=disconnected`. The selector is intentionally not exposed as a product control.
-
-## Replacing the mock
-
-A future `TauriHarnessControlClient` can be wired in `src/services/harness/factory.ts`. Pages and the provider continue to use the same typed client boundary, so no page-level RPC or Tauri `invoke` knowledge is required.
+M2 Start/Stop/Restart exercises independent Runtime, tunnel, and MCP mock component states. It does not launch a real Runtime executable, tunnel client, or MCP server. A future M3 Runtime adapter can replace the mock implementation behind `HarnessControlClient`; pages and the provider do not need direct Tauri calls.

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import App from "@/App";
 
@@ -50,5 +50,36 @@ describe("M1 application shell", () => {
     window.history.replaceState({}, "", "/?mock=error");
     render(<App />);
     expect(await screen.findByText("Couldn’t load this view")).toBeInTheDocument();
+  });
+});
+
+describe("M2 configuration and lifecycle experience", () => {
+  it("shows the first-run setup when no local configuration exists", async () => {
+    window.history.replaceState({}, "", "/?setup=first-run");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Connect your local workspace", level: 2 })).toBeInTheDocument();
+    expect(screen.getByText("First run setup")).toBeInTheDocument();
+  });
+
+  it("keeps a configured API Key out of the Settings form", async () => {
+    render(<App />);
+    fireEvent.click(nav("Settings"));
+    expect(await screen.findByText("Configured")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Enter API Key")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("tunnel-api-key")).not.toBeInTheDocument();
+  });
+
+  it("shows Config Mismatch in Settings and clears it after restart", async () => {
+    render(<App />);
+    fireEvent.click(nav("Settings"));
+    const tunnelId = await screen.findByDisplayValue("mock-tunnel");
+    fireEvent.change(tunnelId, { target: { value: "updated-tunnel" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    const restart = await screen.findByRole("button", { name: "Restart Harness" });
+    expect(screen.getByText("Config Mismatch — Restart Required")).toBeInTheDocument();
+    fireEvent.click(restart);
+    await waitFor(() => {
+      expect(screen.queryByText("Config Mismatch — Restart Required")).not.toBeInTheDocument();
+    });
   });
 });
