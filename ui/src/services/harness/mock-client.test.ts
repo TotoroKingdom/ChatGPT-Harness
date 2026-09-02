@@ -25,7 +25,7 @@ const testConfig = (): AppConfig => ({
   schemaVersion: 1,
   configRevision: "0",
   workspace: { rootPath: "D:\\workspace" },
-  tunnel: { tunnelId: "tunnel", tunnelClientPath: "D:\\tunnel-client.exe", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } },
+  tunnel: { tunnelId: "tunnel", tunnelClientPath: "D:\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } },
   security: { mode: "normal", developerTestMode: false },
   ui: {},
 });
@@ -45,6 +45,13 @@ describe("M2 mock configuration and lifecycle", () => {
     expect(first.configRevision).toBe("1");
     expect(same.configRevision).toBe(first.configRevision);
     expect(changed.configRevision).toBe("2");
+  });
+
+  it("returns the tunnel-client package directory from auto detect", async () => {
+    const client = new MockHarnessControlClient("ready");
+    await expect(client.detectTunnelClient()).resolves.toBe(
+      "D:\\example-project\\tunnel-client-v0.0.13-windows-amd64",
+    );
   });
 
   it("captures the saved revision on start and clears the active snapshot on stop", async () => {

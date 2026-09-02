@@ -56,7 +56,7 @@ impl ConfigStore {
             return Ok(None);
         }
         let text = fs::read_to_string(&self.file).map_err(|e| ConfigError::Io(e.to_string()))?;
-        let config: AppConfig =
+        let mut config: AppConfig =
             serde_json::from_str(&text).map_err(|e| ConfigError::Invalid(e.to_string()))?;
         if config.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(ConfigError::Invalid(format!(
@@ -64,11 +64,19 @@ impl ConfigStore {
                 config.schema_version
             )));
         }
+        if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
+            let normalized = crate::platform::normalize_tunnel_client_directory(path);
+            *path = normalized.display().to_string();
+        }
         Ok(Some(config))
     }
     pub fn save(&self, mut config: AppConfig) -> Result<AppConfig, ConfigError> {
         if config.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(ConfigError::Invalid("unsupported schemaVersion".into()));
+        }
+        if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
+            let normalized = crate::platform::normalize_tunnel_client_directory(path);
+            *path = normalized.display().to_string();
         }
         let previous = self.load()?;
         config.config_revision = match previous {
@@ -191,6 +199,41 @@ mod tests {
         let mut b = a;
         b.tunnel.tunnel_id = "next".into();
         assert_eq!(s.save(b).unwrap().config_revision, DecimalU64::new(2));
+    }
+    #[test]
+    fn load_normalizes_legacy_executable_path_and_save_persists_directory() {
+        let d = tempfile::tempdir().unwrap();
+        let package_dir = d.path().join("tunnel-client-v0.0.13-windows-amd64");
+        fs::create_dir_all(&package_dir).unwrap();
+        let executable = package_dir.join("tunnel-client.exe");
+        fs::write(&executable, b"mock").unwrap();
+
+        let mut legacy = c();
+        legacy.tunnel.tunnel_client_path = Some(executable.display().to_string());
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&legacy).unwrap(),
+        )
+        .unwrap();
+
+        let store = ConfigStore::new(d.path().into());
+        let loaded = store.load().unwrap().unwrap();
+        assert_eq!(
+            loaded.tunnel.tunnel_client_path.as_deref(),
+            Some(package_dir.to_str().unwrap())
+        );
+
+        let saved = store.save(loaded).unwrap();
+        assert_eq!(
+            saved.tunnel.tunnel_client_path.as_deref(),
+            Some(package_dir.to_str().unwrap())
+        );
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&fs::read(d.path().join("config.json")).unwrap()).unwrap();
+        assert_eq!(
+            persisted["tunnel"]["tunnelClientPath"].as_str(),
+            Some(package_dir.to_str().unwrap())
+        );
     }
     #[test]
     fn invalid_json_is_error() {

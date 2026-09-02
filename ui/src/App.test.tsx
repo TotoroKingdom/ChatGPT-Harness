@@ -74,9 +74,10 @@ describe("M2 configuration and lifecycle experience", () => {
     expect(await screen.findByRole("heading", { name: "Connection", level: 2 })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Workspace", level: 2 })).not.toBeInTheDocument();
 
+    expect(screen.queryByRole("button", { name: "Choose File" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Enter tunnel ID"), { target: { value: "mock-tunnel" } });
-    fireEvent.click(screen.getByRole("button", { name: "Choose File" }));
-    expect(await screen.findByDisplayValue("D:\\example-project\\tunnel-client.exe")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Choose Folder" }));
+    expect(await screen.findByDisplayValue("D:\\example-project\\tunnel-client-v0.0.13-windows-amd64")).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Enter API Key"), { target: { value: "test-api-key" } });
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
     expect(await screen.findByRole("heading", { name: "Security", level: 2 })).toBeInTheDocument();

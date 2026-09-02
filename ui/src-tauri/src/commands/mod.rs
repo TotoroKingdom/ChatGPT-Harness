@@ -65,6 +65,10 @@ pub fn config_save(
     if config.schema_version == 0 {
         config.schema_version = CURRENT_SCHEMA_VERSION;
     }
+    if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
+        let normalized = crate::platform::normalize_tunnel_client_directory(path);
+        *path = normalized.display().to_string();
+    }
     validate_config(&config)?;
     if let Some(secret) = api_key.filter(|value| !value.trim().is_empty()) {
         let reference = api_key_ref();
@@ -169,14 +173,20 @@ pub fn workspace_choose(app: AppHandle) -> Result<Option<String>, ControlError> 
 
 #[tauri::command]
 pub fn tunnel_client_choose(app: AppHandle) -> Result<Option<String>, ControlError> {
-    Ok(app
+    let Some(path) = app
         .dialog()
         .file()
-        .set_title("Choose tunnel-client executable")
-        .add_filter("Executable", &["exe", "bin", ""])
-        .blocking_pick_file()
+        .set_title("Choose tunnel-client folder")
+        .blocking_pick_folder()
         .and_then(|path| path.into_path().ok())
-        .map(|path| path.display().to_string()))
+    else {
+        return Ok(None);
+    };
+    crate::platform::resolve_tunnel_client_executable(&path).map_err(|message| ControlError {
+        code: "TUNNEL_CLIENT_NOT_FOUND".into(),
+        message: message.into(),
+    })?;
+    Ok(Some(path.display().to_string()))
 }
 
 #[tauri::command]
@@ -240,21 +250,23 @@ pub fn local_diagnostics_run(
         .tunnel
         .tunnel_client_path
         .as_deref()
-        .map(crate::platform::is_valid_file)
-        .unwrap_or(false);
+        .map(std::path::Path::new)
+        .and_then(|path| crate::platform::resolve_tunnel_client_executable(path).ok())
+        .is_some();
     checks.push(DiagnosticCheck {
         id: "tunnel_client".into(),
         status: if client_ok {
             DiagnosticStatus::Pass
         } else {
-            DiagnosticStatus::Warning
+            DiagnosticStatus::Fail
         },
         summary: if client_ok {
-            "tunnel-client file was found.".into()
+            "Tunnel client found".into()
         } else {
-            "tunnel-client execution check is unavailable in M2.".into()
+            "This folder does not contain tunnel-client.exe.".into()
         },
-        remediation: None,
+        remediation: (!client_ok)
+            .then(|| "Choose a tunnel-client package folder in Settings.".into()),
     });
     let api_key_ok = if let Some(reference) = config.tunnel.api_key_ref {
         state
@@ -352,17 +364,24 @@ fn validate_config(config: &AppConfig) -> Result<(), ControlError> {
             message: "Tunnel ID is required.".into(),
         });
     }
-    let tunnel_client_path = config
+    let tunnel_client_directory = config
         .tunnel
         .tunnel_client_path
         .as_deref()
         .filter(|path| !path.trim().is_empty());
-    if !tunnel_client_path.is_some_and(crate::platform::is_valid_file) {
+    let Some(tunnel_client_directory) = tunnel_client_directory else {
         return Err(ControlError {
             code: "TUNNEL_CLIENT_NOT_FOUND".into(),
-            message: "Selected tunnel-client file is missing or inaccessible.".into(),
+            message: "Tunnel client directory is missing or inaccessible.".into(),
         });
-    }
+    };
+    crate::platform::resolve_tunnel_client_executable(std::path::Path::new(
+        tunnel_client_directory,
+    ))
+    .map_err(|message| ControlError {
+        code: "TUNNEL_CLIENT_NOT_FOUND".into(),
+        message: message.into(),
+    })?;
     Ok(())
 }
 
@@ -375,7 +394,7 @@ mod validation_tests {
     use super::*;
     use harness_control_protocol::{SecurityConfig, TunnelConfig, UiConfig, WorkspaceConfig};
 
-    fn valid_config(directory: &std::path::Path, client: &std::path::Path) -> AppConfig {
+    fn valid_config(directory: &std::path::Path) -> AppConfig {
         AppConfig {
             schema_version: CURRENT_SCHEMA_VERSION,
             config_revision: harness_control_protocol::DecimalU64::ZERO,
@@ -384,7 +403,7 @@ mod validation_tests {
             },
             tunnel: TunnelConfig {
                 tunnel_id: "tunnel".into(),
-                tunnel_client_path: Some(client.display().to_string()),
+                tunnel_client_path: Some(directory.display().to_string()),
                 auto_detect: false,
                 api_key_ref: None,
             },
@@ -401,7 +420,7 @@ mod validation_tests {
         let directory = tempfile::tempdir().unwrap();
         let client = directory.path().join("tunnel-client.exe");
         std::fs::write(&client, b"mock").unwrap();
-        let config = valid_config(directory.path(), &client);
+        let config = valid_config(directory.path());
         assert!(validate_config(&config).is_ok());
 
         let mut empty_tunnel = config.clone();

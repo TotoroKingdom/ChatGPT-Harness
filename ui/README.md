@@ -20,7 +20,7 @@ npm run tauri -- dev
 
 ## M2 First Run development flow
 
-The first launch shows the setup screen. Choose a workspace folder, enter a Tunnel ID, use **Auto Detect** or **Choose File** for `tunnel-client`, enter the API Key, select Normal or Developer/Test mode, then save. The setup flow runs local diagnostics before opening the normal application shell.
+The first launch shows the setup screen. Choose a workspace folder, enter a Tunnel ID, use **Auto Detect** or **Choose Folder** for the `tunnel-client` package directory, enter the API Key, select Normal or Developer/Test mode, then save. The setup flow runs local diagnostics before opening the normal application shell.
 
 To test the first-run flow in the browser mock, open the app with `?setup=first-run`. Existing M1 scenarios remain available with `?mock=empty`, `?mock=error`, or `?mock=disconnected`.
 

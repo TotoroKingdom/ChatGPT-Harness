@@ -19,7 +19,7 @@ function checkLabel(id: string) {
   return ({
     workspace: "Workspace",
     tunnel_id: "Tunnel ID",
-    tunnel_client: "Tunnel client",
+    tunnel_client: "Tunnel client directory",
     api_key: "API Key",
     security: "Security configuration",
   } as Record<string, string>)[id] ?? id;
@@ -75,7 +75,7 @@ export function SettingsPage() {
     setError("");
     if (!form.workspace.rootPath.trim()) return setError("Choose a workspace folder.");
     if (!form.tunnel.tunnelId.trim()) return setError("Tunnel ID is required.");
-    if (!form.tunnel.tunnelClientPath?.trim()) return setError("Choose or detect a tunnel-client file.");
+    if (!form.tunnel.tunnelClientPath?.trim()) return setError("Choose or detect a tunnel-client folder.");
     if (replacingApiKey && !apiKey.trim()) return setError("Enter an API Key or cancel replacement.");
 
     setSaving(true);
@@ -164,11 +164,11 @@ export function SettingsPage() {
           </label>
           <div className="form-row">
             <label className="form-field grow">
-              <span>Tunnel client</span>
+              <span>Tunnel client directory</span>
               <input className="path-input" value={form.tunnel.tunnelClientPath ?? ""} readOnly placeholder="Not selected" title={form.tunnel.tunnelClientPath || undefined} />
             </label>
             <button className="button button-secondary align-end" onClick={() => void detect()}>Auto Detect</button>
-            <button className="button button-secondary align-end" onClick={() => void chooseClient()}>Choose File</button>
+            <button className="button button-secondary align-end" onClick={() => void chooseClient()}>Choose Folder</button>
           </div>
           <label className="form-field">
             <span>API Key</span>
@@ -278,7 +278,7 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
 
   const continueFromConnection = () => {
     if (!form.tunnel.tunnelId.trim()) return setError("Tunnel ID is required.");
-    if (!form.tunnel.tunnelClientPath?.trim()) return setError("Choose or detect a tunnel-client file.");
+    if (!form.tunnel.tunnelClientPath?.trim()) return setError("Choose or detect a tunnel-client folder.");
     if (!apiKey.trim() && (!data.apiKeyConfigured || replacingApiKey)) return setError("Enter an API Key to continue.");
     setError("");
     setStep(2);
@@ -310,7 +310,7 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
   const fallbackChecks = [
     { id: "workspace", status: "pass", summary: "Workspace configuration is ready." },
     { id: "tunnel_id", status: "pass", summary: "Tunnel ID is configured." },
-    { id: "tunnel_client", status: form.tunnel.tunnelClientPath ? "pass" : "fail", summary: form.tunnel.tunnelClientPath ? "Tunnel client is selected." : "Choose or detect a tunnel client." },
+    { id: "tunnel_client", status: form.tunnel.tunnelClientPath ? "pass" : "fail", summary: form.tunnel.tunnelClientPath ? "Tunnel client is selected." : "Choose or detect a tunnel-client folder." },
     { id: "api_key", status: data.apiKeyConfigured || Boolean(apiKey.trim()) ? "pass" : "fail", summary: data.apiKeyConfigured || Boolean(apiKey.trim()) ? "API Key is configured securely." : "API Key is required." },
     { id: "security", status: "pass", summary: "Security configuration is selected." },
   ];
@@ -356,7 +356,7 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
             <section aria-labelledby="connection-step-title">
               <SectionHeading title="Connection" description="Connect the local tunnel client to your workspace." />
               <label className="form-field"><span>Tunnel ID</span><input value={form.tunnel.tunnelId} onChange={(event) => update({ tunnel: { ...form.tunnel, tunnelId: event.target.value } })} placeholder="Enter tunnel ID" /></label>
-              <label className="form-field"><span>Tunnel client</span><div className="input-action-row"><input className="path-input" value={form.tunnel.tunnelClientPath ?? ""} readOnly placeholder="Auto-detect or choose a file" title={form.tunnel.tunnelClientPath || undefined} /><button className="button button-secondary" onClick={() => void detect()}>Auto Detect</button><button className="button button-secondary" onClick={() => void chooseClient()}>Choose File</button></div></label>
+              <label className="form-field"><span>Tunnel client directory</span><div className="input-action-row"><input className="path-input" value={form.tunnel.tunnelClientPath ?? ""} readOnly placeholder="Auto-detect or choose a folder" title={form.tunnel.tunnelClientPath || undefined} /><button className="button button-secondary" onClick={() => void detect()}>Auto Detect</button><button className="button button-secondary" onClick={() => void chooseClient()}>Choose Folder</button></div></label>
               <label className="form-field">
                 <span>API Key</span>
                 {data.apiKeyConfigured && !replacingApiKey ? (

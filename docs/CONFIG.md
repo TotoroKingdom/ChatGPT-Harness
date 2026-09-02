@@ -4,7 +4,7 @@ The Tauri backend is the only persistent configuration authority. The frontend n
 
 `AppConfig`, `RuntimeConfigSnapshot`, and `RuntimeState` are deliberately different models.
 
-- `AppConfig` is versioned desired state: `schemaVersion`, `configRevision`, `workspace`, `tunnel`, `security`, and `ui`. Workspace has `rootPath`; tunnel has `tunnelId`, optional `tunnelClientPath`, `autoDetect`, and optional `apiKeyRef`; security has `mode` and `developerTestMode`.
+- `AppConfig` is versioned desired state: `schemaVersion`, `configRevision`, `workspace`, `tunnel`, `security`, and `ui`. Workspace has `rootPath`; tunnel has `tunnelId`, optional `tunnelClientPath` (the tunnel-client installation/package directory; the backend resolves `tunnel-client.exe` inside it), `autoDetect`, and optional `apiKeyRef`; security has `mode` and `developerTestMode`.
 
 On the JSON wire, `configRevision` is a non-negative decimal string (for example, `"7"`), not a JSON number.
 - `apiKeyRef` is a `{ provider, key }` SecretStore reference. No model stores an API key value.
