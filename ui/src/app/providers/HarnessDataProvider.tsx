@@ -112,6 +112,26 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let unsubscribe: Unsubscribe | undefined;
+    void client.componentStatesSubscribe((nextComponents, runtime) => {
+      if (!mounted) return;
+      setComponents(nextComponents);
+      if (runtime) {
+        setActiveRevision(runtime.runtimeId ? runtime.configRevision : null);
+        setResources((current) => ({ ...current, runtime: { status: "success", data: runtime } }));
+      }
+    }).then((cleanup) => {
+      if (mounted) unsubscribe = cleanup;
+      else cleanup();
+    });
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
+  }, [client]);
+
+  useEffect(() => {
+    let mounted = true;
     void refreshConfig();
     setResources({
       runtime: { status: "loading" },

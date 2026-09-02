@@ -17,6 +17,7 @@ pub fn run() {
         .manage(std::sync::Mutex::new(crate::commands::BackendState {
             secrets,
         }))
+        .manage(crate::runtime::RuntimeSupervisor::new())
         .invoke_handler(tauri::generate_handler![
             crate::commands::config_get,
             crate::commands::config_metadata,
@@ -28,7 +29,17 @@ pub fn run() {
             crate::commands::tunnel_client_choose,
             crate::commands::tunnel_client_detect,
             crate::commands::validate_path,
-            crate::commands::local_diagnostics_run
+            crate::commands::local_diagnostics_run,
+            crate::commands::runtime_start,
+            crate::commands::runtime_status,
+            crate::commands::runtime_stop,
+            crate::commands::runtime_tools_list,
+            crate::commands::runtime_policies_list,
+            crate::commands::runtime_activity_list,
+            crate::commands::runtime_activity_subscribe,
+            crate::commands::runtime_approvals_list,
+            crate::commands::runtime_approvals_resolve,
+            crate::commands::runtime_diagnostics_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running ChatGPT-Harness application");
@@ -37,4 +48,5 @@ pub fn run() {
 mod commands;
 mod config;
 mod platform;
+mod runtime;
 mod secrets;

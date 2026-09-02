@@ -1,0 +1,15 @@
+[package]
+name = "chatgpt-harness-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "chatgpt-harness-runtime"
+path = "src/main.rs"
+
+[dependencies]
+harness-control-protocol = { path = "../protocol" }
+chrono = { version = "0.4", features = ["clock"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

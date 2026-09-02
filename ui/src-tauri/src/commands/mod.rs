@@ -1,10 +1,15 @@
 use crate::{
     config::{ConfigError, ConfigMetadata, ConfigStore, CURRENT_SCHEMA_VERSION},
+    runtime::{RuntimeSupervisor, SupervisorError},
     secrets::{api_key_ref, SecretStore},
 };
 use chrono::{SecondsFormat, Utc};
 use harness_control_protocol::{
-    AppConfig, DiagnosticCheck, DiagnosticRun, DiagnosticStatus, SecurityMode,
+    ActivityListParams, ActivityListResult, ActivitySubscribeParams, ActivitySubscribeResult,
+    AppConfig, ApprovalsListParams, ApprovalsListResult, ApprovalsResolveParams,
+    ApprovalsResolveResult, DiagnosticCheck, DiagnosticRun, DiagnosticStatus, PoliciesListResult,
+    RuntimeLifecycle, RuntimeReadiness, RuntimeState, RuntimeStopResult, SecurityMode,
+    ToolsListResult,
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -17,6 +22,14 @@ pub struct ControlError {
     pub message: String,
 }
 
+impl From<SupervisorError> for ControlError {
+    fn from(error: SupervisorError) -> Self {
+        Self {
+            code: error.code,
+            message: error.message,
+        }
+    }
+}
 impl From<ConfigError> for ControlError {
     fn from(error: ConfigError) -> Self {
         Self {
@@ -203,6 +216,129 @@ pub fn validate_path(path: String, file: bool) -> bool {
     }
 }
 
+#[tauri::command]
+pub fn runtime_start(
+    app: AppHandle,
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<RuntimeState, ControlError> {
+    let config = store(&app)?.load()?.ok_or(ControlError {
+        code: "CONFIG_NOT_FOUND".into(),
+        message: "Save configuration before starting the Runtime.".into(),
+    })?;
+    validate_config(&config)?;
+    runtime.start(&app, &config).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_status(
+    app: AppHandle,
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<RuntimeState, ControlError> {
+    match runtime.status() {
+        Ok(state) => Ok(state),
+        Err(error) if error.code == "RUNTIME_DISCONNECTED" => {
+            let config = store(&app)?.load()?;
+            Ok(stopped_runtime_state(config.as_ref()))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[tauri::command]
+pub fn runtime_stop(
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<RuntimeStopResult, ControlError> {
+    runtime.stop().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_tools_list(
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<ToolsListResult, ControlError> {
+    runtime.tools_list().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_policies_list(
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<PoliciesListResult, ControlError> {
+    runtime.policies_list().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_activity_list(
+    runtime: State<'_, RuntimeSupervisor>,
+    params: Option<ActivityListParams>,
+) -> Result<ActivityListResult, ControlError> {
+    runtime
+        .activity_list(params.unwrap_or_default())
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_activity_subscribe(
+    runtime: State<'_, RuntimeSupervisor>,
+    params: Option<ActivitySubscribeParams>,
+) -> Result<ActivitySubscribeResult, ControlError> {
+    runtime
+        .activity_subscribe(params.unwrap_or_default())
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_approvals_list(
+    runtime: State<'_, RuntimeSupervisor>,
+    params: Option<ApprovalsListParams>,
+) -> Result<ApprovalsListResult, ControlError> {
+    runtime
+        .approvals_list(params.unwrap_or_default())
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_approvals_resolve(
+    runtime: State<'_, RuntimeSupervisor>,
+    params: ApprovalsResolveParams,
+) -> Result<ApprovalsResolveResult, ControlError> {
+    runtime.approvals_resolve(params).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_diagnostics_run(
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<DiagnosticRun, ControlError> {
+    runtime.diagnostics().map_err(Into::into)
+}
+
+fn stopped_runtime_state(config: Option<&AppConfig>) -> RuntimeState {
+    let (config_revision, active_workspace, security_mode) = config
+        .map(|value| {
+            (
+                value.config_revision,
+                value.workspace.root_path.clone(),
+                value.security.mode.clone(),
+            )
+        })
+        .unwrap_or((
+            harness_control_protocol::DecimalU64::ZERO,
+            String::new(),
+            SecurityMode::Normal,
+        ));
+    RuntimeState {
+        runtime_id: String::new(),
+        started_at: current_timestamp(),
+        lifecycle: RuntimeLifecycle::Initializing,
+        readiness: RuntimeReadiness::NotReady,
+        config_revision,
+        active_workspace,
+        security_mode,
+        exposed_tool_catalog: Vec::new(),
+        active_requests: 0,
+        pending_approvals: 0,
+        running_executions: 0,
+        last_error: None,
+    }
+}
 #[tauri::command]
 pub fn local_diagnostics_run(
     app: AppHandle,

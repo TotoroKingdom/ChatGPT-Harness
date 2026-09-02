@@ -1,6 +1,6 @@
 import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, PolicyRule, RuntimeState, SecurityMode, ToolDescriptor, ToolsListResult } from "@protocol/v1";
 import { HarnessClientError } from "./errors";
-import type { ActivityEventListener, ComponentStates, HarnessControlClient, Unsubscribe } from "./client";
+import type { ActivityEventListener, ComponentStates, ComponentStatesListener, HarnessControlClient, Unsubscribe } from "./client";
 export type MockScenario = "ready" | "disconnected" | "empty" | "error";
 const delay = (ms=120) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 const MAX_DECIMAL_U64 = "18446744073709551615";
@@ -59,7 +59,7 @@ export class MockHarnessControlClient implements HarnessControlClient {
  async runtimeStart(){this.components={runtime:"starting",tunnel:"stopped",mcp:"stopped"}; await delay(90); this.components={runtime:"ready",tunnel:"starting",mcp:"stopped"}; await delay(90); this.components={runtime:"ready",tunnel:"ready",mcp:"starting"}; await delay(90); this.components={runtime:"ready",tunnel:"ready",mcp:"ready"}; this.activeRevision=this.config?.configRevision??"1"; this.recordActivity("runtime_started","Runtime started in mock mode."); return this.respond(this.runtime());}
  runtimeStatus(){return this.respond(this.runtime());}
  async runtimeStop(){if(this.components.runtime==="stopped")return this.respond({accepted:false});this.components={runtime:"ready",tunnel:"ready",mcp:"stopping"};await delay(90);this.components={runtime:"ready",tunnel:"stopping",mcp:"stopped"};await delay(90);this.components={runtime:"stopping",tunnel:"stopped",mcp:"stopped"};await delay(90);this.components={runtime:"stopped",tunnel:"stopped",mcp:"stopped"};this.activeRevision="0";this.recordActivity("runtime_stopped","Runtime stopped in mock mode.");return this.respond({accepted:true});}
- getComponentStates(){return this.components;} setComponentStates(s:ComponentStates){this.components=s;if(s.runtime==="stopped"&&s.tunnel==="stopped"&&s.mcp==="stopped")this.activeRevision="0";}
+ getComponentStates(){return this.components;} setComponentStates(s:ComponentStates){this.components=s;if(s.runtime==="stopped"&&s.tunnel==="stopped"&&s.mcp==="stopped")this.activeRevision="0";} async componentStatesSubscribe(_listener:ComponentStatesListener):Promise<Unsubscribe>{return ()=>{};}
  toolsList(){return this.respond({items:this.scenario==="empty"?[]:tools});} policiesList(){return this.respond({items:this.scenario==="empty"?[]:policies});}
  activityList():Promise<ActivityListResult>{return this.respond({items:this.activities,latestSequence:decrementDecimal(this.nextSequence)});}
  async activitySubscribe(listener:ActivityEventListener):Promise<Unsubscribe>{await this.respond<ActivitySubscribeResult>({latestSequence:decrementDecimal(this.nextSequence)});let active=true;const timer=window.setTimeout(()=>{if(active&&this.scenario==="ready"){listener(event(this.nextSequence,"execution_completed","Mock activity stream received a completion event.",{source:"mock-subscription"},"request_mock_02"));this.nextSequence=incrementDecimal(this.nextSequence);}},220);return()=>{active=false;window.clearTimeout(timer);};}
