@@ -1,0 +1,10 @@
+{
+  "id": "diagnostics-1",
+  "result": {
+    "runId": "diagnostic_example_01",
+    "startedAt": "2026-01-01T00:00:00Z",
+    "finishedAt": "2026-01-01T00:00:01Z",
+    "overallStatus": "pass",
+    "checks": [ { "id": "configuration", "status": "pass", "summary": "Configuration contract is available." } ]
+  }
+}

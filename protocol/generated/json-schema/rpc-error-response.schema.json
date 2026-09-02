@@ -1,0 +1,83 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "MachineErrorCode": {
+      "enum": [
+        "NOT_INITIALIZED",
+        "ALREADY_INITIALIZED",
+        "PROTOCOL_VERSION_MISMATCH",
+        "RUNTIME_NOT_READY",
+        "INVALID_ARGUMENT",
+        "APPROVAL_NOT_FOUND",
+        "APPROVAL_ALREADY_RESOLVED",
+        "INTERNAL_ERROR"
+      ],
+      "type": "string"
+    },
+    "RequestId": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "JSON-RPC request IDs may be either an integer or a string."
+    },
+    "RpcError": {
+      "properties": {
+        "code": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "data": {
+          "$ref": "#/$defs/RpcErrorData"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "data"
+      ],
+      "type": "object"
+    },
+    "RpcErrorData": {
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/MachineErrorCode",
+          "description": "Stable machine-readable error code. Do not parse `message`."
+        },
+        "details": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "error": {
+      "$ref": "#/$defs/RpcError"
+    },
+    "id": {
+      "$ref": "#/$defs/RequestId"
+    }
+  },
+  "required": [
+    "id",
+    "error"
+  ],
+  "title": "RpcErrorResponse",
+  "type": "object"
+}

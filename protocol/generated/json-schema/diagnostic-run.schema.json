@@ -1,0 +1,68 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "DiagnosticCheck": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "remediation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/DiagnosticStatus"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "DiagnosticStatus": {
+      "enum": [
+        "pass",
+        "warning",
+        "fail"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/DiagnosticCheck"
+      },
+      "type": "array"
+    },
+    "finishedAt": {
+      "type": "string"
+    },
+    "overallStatus": {
+      "$ref": "#/$defs/DiagnosticStatus"
+    },
+    "runId": {
+      "type": "string"
+    },
+    "startedAt": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "runId",
+    "startedAt",
+    "finishedAt",
+    "overallStatus",
+    "checks"
+  ],
+  "title": "DiagnosticRun",
+  "type": "object"
+}

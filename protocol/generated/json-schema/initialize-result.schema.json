@@ -1,0 +1,52 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "ServerInfo": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "capabilities": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "type": "object"
+    },
+    "protocolVersion": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "runtimeId": {
+      "type": "string"
+    },
+    "serverInfo": {
+      "$ref": "#/$defs/ServerInfo"
+    }
+  },
+  "required": [
+    "serverInfo",
+    "protocolVersion",
+    "runtimeId",
+    "capabilities"
+  ],
+  "title": "InitializeResult",
+  "type": "object"
+}

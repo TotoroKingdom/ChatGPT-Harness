@@ -1,0 +1,1 @@
+{ "id": "resolve-1", "method": "approvals.resolve", "params": { "requestId": "approval_example_01", "decision": "allow_once" } }

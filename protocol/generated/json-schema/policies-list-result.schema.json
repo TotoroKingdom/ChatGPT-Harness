@@ -1,0 +1,73 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "PolicyDecision": {
+      "enum": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "type": "string"
+    },
+    "PolicyRule": {
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/PolicySource"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "decision",
+        "scope",
+        "reason",
+        "source",
+        "editable",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "PolicySource": {
+      "enum": [
+        "system",
+        "user"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "items": {
+      "items": {
+        "$ref": "#/$defs/PolicyRule"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "title": "PoliciesListResult",
+  "type": "object"
+}

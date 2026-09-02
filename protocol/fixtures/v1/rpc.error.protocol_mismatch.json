@@ -1,0 +1,1 @@
+{ "id": 1, "error": { "code": -32002, "message": "Protocol version mismatch.", "data": { "code": "PROTOCOL_VERSION_MISMATCH", "details": "client=2 server=1" } } }

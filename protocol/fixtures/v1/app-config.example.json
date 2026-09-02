@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "configRevision": 7,
+  "workspace": { "rootPath": "<workspace>" },
+  "tunnel": { "tunnelId": "example-tunnel-id", "autoDetect": true, "apiKeyRef": { "provider": "os_secret_store", "key": "chatgpt-harness-api-key" } },
+  "security": { "mode": "normal", "developerTestMode": false },
+  "ui": { "theme": "system" }
+}

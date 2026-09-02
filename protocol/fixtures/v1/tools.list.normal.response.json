@@ -1,0 +1,10 @@
+{
+  "id": "tools-normal",
+  "result": {
+    "items": [
+      { "name": "read_file", "description": "Read a workspace file.", "implemented": true, "enabled": true, "exposed": true, "effectivePolicy": "allow", "scope": "active_workspace", "readiness": "ready", "riskLevel": "low" },
+      { "name": "glob", "description": "Find workspace paths.", "implemented": true, "enabled": true, "exposed": true, "effectivePolicy": "allow", "scope": "active_workspace", "readiness": "ready", "riskLevel": "low" },
+      { "name": "bash", "description": "Developer test command execution.", "implemented": true, "enabled": false, "exposed": false, "effectivePolicy": "ask", "scope": "active_workspace", "readiness": "unavailable", "riskLevel": "high" }
+    ]
+  }
+}

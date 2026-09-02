@@ -1,0 +1,16 @@
+{
+  "id": "status-1",
+  "result": {
+    "runtimeId": "runtime_example_01",
+    "startedAt": "2026-01-01T00:00:00Z",
+    "lifecycle": "ready",
+    "readiness": "ready",
+    "configRevision": 7,
+    "activeWorkspace": "<workspace>",
+    "securityMode": "normal",
+    "exposedToolCatalog": [],
+    "activeRequests": 0,
+    "pendingApprovals": 0,
+    "runningExecutions": 0
+  }
+}

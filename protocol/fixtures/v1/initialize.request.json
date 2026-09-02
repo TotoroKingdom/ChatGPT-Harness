@@ -1,0 +1,15 @@
+{
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "clientInfo": { "name": "harness-control-client", "title": "ChatGPT-Harness", "version": "0.1.0" },
+    "protocolVersion": 1,
+    "capabilities": { "activityReplay": true },
+    "runtimeConfig": {
+      "configRevision": 7,
+      "workspace": { "rootPath": "<workspace>" },
+      "security": { "mode": "normal", "developerTestMode": false },
+      "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 1000 }
+    }
+  }
+}

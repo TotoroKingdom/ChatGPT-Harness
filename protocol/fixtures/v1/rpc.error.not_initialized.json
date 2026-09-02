@@ -1,0 +1,1 @@
+{ "id": "tools-before-init", "error": { "code": -32001, "message": "Runtime is not initialized.", "data": { "code": "NOT_INITIALIZED" } } }

@@ -1,0 +1,130 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "ClientInfo": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "version"
+      ],
+      "type": "object"
+    },
+    "RuntimeConfigSnapshot": {
+      "description": "The non-secret, immutable-at-startup configuration consumed by a Runtime.",
+      "properties": {
+        "configRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runtimeLimits": {
+          "$ref": "#/$defs/RuntimeLimits"
+        },
+        "security": {
+          "$ref": "#/$defs/SecurityConfig"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceConfig"
+        }
+      },
+      "required": [
+        "configRevision",
+        "workspace",
+        "security",
+        "runtimeLimits"
+      ],
+      "type": "object"
+    },
+    "RuntimeLimits": {
+      "properties": {
+        "maxActivityEvents": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maxConcurrentRequests": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maxConcurrentRequests",
+        "maxActivityEvents"
+      ],
+      "type": "object"
+    },
+    "SecurityConfig": {
+      "properties": {
+        "developerTestMode": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/SecurityMode"
+        }
+      },
+      "required": [
+        "mode",
+        "developerTestMode"
+      ],
+      "type": "object"
+    },
+    "SecurityMode": {
+      "enum": [
+        "normal",
+        "developer_test"
+      ],
+      "type": "string"
+    },
+    "WorkspaceConfig": {
+      "properties": {
+        "rootPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rootPath"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "capabilities": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "type": "object"
+    },
+    "clientInfo": {
+      "$ref": "#/$defs/ClientInfo"
+    },
+    "protocolVersion": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "runtimeConfig": {
+      "$ref": "#/$defs/RuntimeConfigSnapshot"
+    }
+  },
+  "required": [
+    "clientInfo",
+    "protocolVersion",
+    "capabilities",
+    "runtimeConfig"
+  ],
+  "title": "InitializeParams",
+  "type": "object"
+}

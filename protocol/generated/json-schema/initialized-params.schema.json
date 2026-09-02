@@ -1,0 +1,6 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InitializedParams",
+  "type": "object"
+}

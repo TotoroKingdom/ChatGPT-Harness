@@ -1,0 +1,83 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "RuntimeLimits": {
+      "properties": {
+        "maxActivityEvents": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maxConcurrentRequests": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maxConcurrentRequests",
+        "maxActivityEvents"
+      ],
+      "type": "object"
+    },
+    "SecurityConfig": {
+      "properties": {
+        "developerTestMode": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/SecurityMode"
+        }
+      },
+      "required": [
+        "mode",
+        "developerTestMode"
+      ],
+      "type": "object"
+    },
+    "SecurityMode": {
+      "enum": [
+        "normal",
+        "developer_test"
+      ],
+      "type": "string"
+    },
+    "WorkspaceConfig": {
+      "properties": {
+        "rootPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rootPath"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The non-secret, immutable-at-startup configuration consumed by a Runtime.",
+  "properties": {
+    "configRevision": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "runtimeLimits": {
+      "$ref": "#/$defs/RuntimeLimits"
+    },
+    "security": {
+      "$ref": "#/$defs/SecurityConfig"
+    },
+    "workspace": {
+      "$ref": "#/$defs/WorkspaceConfig"
+    }
+  },
+  "required": [
+    "configRevision",
+    "workspace",
+    "security",
+    "runtimeLimits"
+  ],
+  "title": "RuntimeConfigSnapshot",
+  "type": "object"
+}

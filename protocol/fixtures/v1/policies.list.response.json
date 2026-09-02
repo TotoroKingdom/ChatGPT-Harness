@@ -1,0 +1,9 @@
+{
+  "id": "policies-1",
+  "result": {
+    "items": [
+      { "id": "system-read-workspace", "name": "Allow workspace reads", "decision": "allow", "scope": "active_workspace", "reason": "Read-only default capability.", "source": "system", "editable": false, "enabled": true },
+      { "id": "system-deny-outside", "name": "Deny outside workspace", "decision": "deny", "scope": "outside_active_workspace", "reason": "Workspace boundary.", "source": "system", "editable": false, "enabled": true }
+    ]
+  }
+}

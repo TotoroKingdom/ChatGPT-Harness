@@ -1,0 +1,85 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "PolicyDecision": {
+      "enum": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "type": "string"
+    },
+    "RiskLevel": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "type": "string"
+    },
+    "ToolDescriptor": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "effectivePolicy": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "exposed": {
+          "type": "boolean"
+        },
+        "implemented": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "readiness": {
+          "$ref": "#/$defs/ToolReadiness"
+        },
+        "riskLevel": {
+          "$ref": "#/$defs/RiskLevel"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "implemented",
+        "enabled",
+        "exposed",
+        "effectivePolicy",
+        "scope",
+        "readiness",
+        "riskLevel"
+      ],
+      "type": "object"
+    },
+    "ToolReadiness": {
+      "enum": [
+        "ready",
+        "unavailable"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "items": {
+      "items": {
+        "$ref": "#/$defs/ToolDescriptor"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "title": "ToolsListResult",
+  "type": "object"
+}

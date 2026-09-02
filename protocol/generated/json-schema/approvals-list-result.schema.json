@@ -1,0 +1,86 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "ApprovalDecision": {
+      "enum": [
+        "allow_once",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "ApprovalRequest": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "resolvedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sanitizedArguments": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "status": {
+          "$ref": "#/$defs/ApprovalStatus"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "tool",
+        "sanitizedArguments",
+        "createdAt",
+        "expiresAt",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ApprovalStatus": {
+      "enum": [
+        "pending",
+        "approved",
+        "denied",
+        "expired",
+        "cancelled"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "items": {
+      "items": {
+        "$ref": "#/$defs/ApprovalRequest"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "title": "ApprovalsListResult",
+  "type": "object"
+}

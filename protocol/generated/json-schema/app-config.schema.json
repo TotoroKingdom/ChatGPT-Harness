@@ -1,0 +1,131 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "SecretReference": {
+      "description": "An opaque SecretStore lookup reference; it never contains a raw secret.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "key"
+      ],
+      "type": "object"
+    },
+    "SecurityConfig": {
+      "properties": {
+        "developerTestMode": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/$defs/SecurityMode"
+        }
+      },
+      "required": [
+        "mode",
+        "developerTestMode"
+      ],
+      "type": "object"
+    },
+    "SecurityMode": {
+      "enum": [
+        "normal",
+        "developer_test"
+      ],
+      "type": "string"
+    },
+    "TunnelConfig": {
+      "properties": {
+        "apiKeyRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SecretReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "autoDetect": {
+          "type": "boolean"
+        },
+        "tunnelClientPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tunnelId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tunnelId",
+        "autoDetect"
+      ],
+      "type": "object"
+    },
+    "UiConfig": {
+      "properties": {
+        "theme": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WorkspaceConfig": {
+      "properties": {
+        "rootPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rootPath"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "configRevision": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schemaVersion": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "security": {
+      "$ref": "#/$defs/SecurityConfig"
+    },
+    "tunnel": {
+      "$ref": "#/$defs/TunnelConfig"
+    },
+    "ui": {
+      "$ref": "#/$defs/UiConfig"
+    },
+    "workspace": {
+      "$ref": "#/$defs/WorkspaceConfig"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "configRevision",
+    "workspace",
+    "tunnel",
+    "security",
+    "ui"
+  ],
+  "title": "AppConfig",
+  "type": "object"
+}

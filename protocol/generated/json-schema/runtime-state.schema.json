@@ -1,0 +1,185 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "PolicyDecision": {
+      "enum": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "type": "string"
+    },
+    "RiskLevel": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "type": "string"
+    },
+    "RuntimeErrorSummary": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RuntimeLifecycle": {
+      "enum": [
+        "initializing",
+        "ready",
+        "stopping",
+        "error"
+      ],
+      "type": "string"
+    },
+    "RuntimeReadiness": {
+      "enum": [
+        "not_ready",
+        "initializing",
+        "ready",
+        "degraded"
+      ],
+      "type": "string"
+    },
+    "SecurityMode": {
+      "enum": [
+        "normal",
+        "developer_test"
+      ],
+      "type": "string"
+    },
+    "ToolDescriptor": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "effectivePolicy": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "exposed": {
+          "type": "boolean"
+        },
+        "implemented": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "readiness": {
+          "$ref": "#/$defs/ToolReadiness"
+        },
+        "riskLevel": {
+          "$ref": "#/$defs/RiskLevel"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "implemented",
+        "enabled",
+        "exposed",
+        "effectivePolicy",
+        "scope",
+        "readiness",
+        "riskLevel"
+      ],
+      "type": "object"
+    },
+    "ToolReadiness": {
+      "enum": [
+        "ready",
+        "unavailable"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Ephemeral observed Runtime state, distinct from persistent AppConfig.",
+  "properties": {
+    "activeRequests": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "activeWorkspace": {
+      "type": "string"
+    },
+    "configRevision": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "exposedToolCatalog": {
+      "items": {
+        "$ref": "#/$defs/ToolDescriptor"
+      },
+      "type": "array"
+    },
+    "lastError": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RuntimeErrorSummary"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/RuntimeLifecycle"
+    },
+    "pendingApprovals": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "readiness": {
+      "$ref": "#/$defs/RuntimeReadiness"
+    },
+    "runningExecutions": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "runtimeId": {
+      "type": "string"
+    },
+    "securityMode": {
+      "$ref": "#/$defs/SecurityMode"
+    },
+    "startedAt": {
+      "description": "RFC3339 UTC timestamp.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtimeId",
+    "startedAt",
+    "lifecycle",
+    "readiness",
+    "configRevision",
+    "activeWorkspace",
+    "securityMode",
+    "exposedToolCatalog",
+    "activeRequests",
+    "pendingApprovals",
+    "runningExecutions"
+  ],
+  "title": "RuntimeState",
+  "type": "object"
+}

@@ -1,0 +1,9 @@
+{
+  "id": 1,
+  "result": {
+    "serverInfo": { "name": "harness-runtime", "title": "ChatGPT-Harness Runtime", "version": "0.1.0" },
+    "protocolVersion": 1,
+    "runtimeId": "runtime_example_01",
+    "capabilities": { "activityReplay": true }
+  }
+}

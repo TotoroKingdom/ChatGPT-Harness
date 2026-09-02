@@ -1,0 +1,33 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "RequestId": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "JSON-RPC request IDs may be either an integer or a string."
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/RequestId"
+    },
+    "method": {
+      "type": "string"
+    },
+    "params": true
+  },
+  "required": [
+    "id",
+    "method"
+  ],
+  "title": "RpcRequest",
+  "type": "object"
+}

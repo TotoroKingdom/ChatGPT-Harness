@@ -1,0 +1,87 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "ActivityEvent": {
+      "properties": {
+        "eventId": {
+          "type": "string"
+        },
+        "eventType": {
+          "$ref": "#/$defs/ActivityEventType"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "requestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sequence": {
+          "description": "Runtime-local monotonically increasing sequence number.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "RFC3339 UTC timestamp.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "eventId",
+        "sequence",
+        "eventType",
+        "timestamp",
+        "summary",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "ActivityEventType": {
+      "enum": [
+        "runtime_started",
+        "runtime_stopped",
+        "tool_requested",
+        "validation_failed",
+        "workspace_violation",
+        "policy_evaluated",
+        "approval_requested",
+        "approval_resolved",
+        "execution_started",
+        "execution_completed",
+        "execution_failed",
+        "execution_timed_out",
+        "execution_cancelled"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "items": {
+      "items": {
+        "$ref": "#/$defs/ActivityEvent"
+      },
+      "type": "array"
+    },
+    "latestSequence": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "items",
+    "latestSequence"
+  ],
+  "title": "ActivityListResult",
+  "type": "object"
+}
