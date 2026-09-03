@@ -22,6 +22,7 @@ import type {
   ConfigMetadata,
   HarnessControlClient,
   RuntimeProcessEvent,
+  RuntimeProcessStatus,
   Unsubscribe,
 } from "./client";
 import { MockHarnessControlClient } from "./mock-client";
@@ -123,6 +124,10 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     const state = await this.call<RuntimeState>("runtime_status");
     this.applyRuntimeState(state);
     return state;
+  }
+
+  runtimeProcessStatus() {
+    return this.call<RuntimeProcessStatus>("runtime_process_status");
   }
 
   async runtimeStop() {

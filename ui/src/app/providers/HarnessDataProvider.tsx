@@ -85,6 +85,80 @@ async function load<T>(fn: () => Promise<T>, empty: (data: T) => boolean): Promi
   }
 }
 
+function runtimeComponentState(state: RuntimeState): ComponentStates["runtime"] {
+  if (state.lifecycle === "error") return "error";
+  if (!state.runtimeId) return "stopped";
+  if (state.lifecycle === "stopping") return "stopping";
+  if (state.lifecycle === "ready" && state.readiness === "ready") return "ready";
+  if (state.readiness === "degraded") return "degraded";
+  return "starting";
+}
+
+type RuntimeRehydration = {
+  resource: AsyncState<RuntimeState>;
+  components: ComponentStates;
+  activeRevision: string | null;
+};
+
+async function rehydrateRuntime(client: HarnessControlClient): Promise<RuntimeRehydration> {
+  const current = client.getComponentStates();
+  try {
+    const process = await client.runtimeProcessStatus();
+    switch (process.phase) {
+      case "running": {
+        const resource = await load(() => client.runtimeStatus(), () => false);
+        if (resource.status === "success" || resource.status === "empty") {
+          return {
+            resource,
+            components: { ...client.getComponentStates(), runtime: runtimeComponentState(resource.data) },
+            activeRevision: resource.data.configRevision,
+          };
+        }
+        return { resource, components: { ...current, runtime: "error" }, activeRevision: null };
+      }
+      case "stopped":
+        return {
+          resource: { status: "idle" },
+          components: { ...current, runtime: "stopped" },
+          activeRevision: null,
+        };
+      case "crashed":
+        return {
+          resource: {
+            status: "error",
+            error: new HarnessClientError(
+              "error",
+              process.last_error?.message ?? "Runtime crashed.",
+              undefined,
+              process.last_error?.code,
+            ),
+          },
+          components: { ...current, runtime: "error" },
+          activeRevision: null,
+        };
+      case "starting":
+        return {
+          resource: { status: "idle" },
+          components: { ...current, runtime: "starting" },
+          activeRevision: null,
+        };
+      case "stopping":
+        return {
+          resource: { status: "idle" },
+          components: { ...current, runtime: "stopping" },
+          activeRevision: null,
+        };
+    }
+  } catch (error) {
+    const clientError = toClientError(error);
+    return {
+      resource: { status: clientError.kind, error: clientError },
+      components: { ...current, runtime: "error" },
+      activeRevision: null,
+    };
+  }
+}
+
 export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const client = useMemo(() => createHarnessControlClient(), []);
   const [resources, setResources] = useState<ResourceState>(initial);
@@ -149,16 +223,16 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       activity: { status: "loading" },
     });
     void Promise.all([
-      load(() => client.runtimeStatus(), () => false),
+      rehydrateRuntime(client),
       load(() => client.toolsList(), (data) => data.items.length === 0),
       load(() => client.policiesList(), (data) => data.items.length === 0),
       load(() => client.activityList(), (data) => data.items.length === 0),
     ]).then(([runtime, tools, policies, activity]) => {
       if (!mounted) return;
-      setResources({ runtime, tools, policies, activity });
-      if (runtime.status === "success" || runtime.status === "empty") {
-        setActiveRevision(runtime.data.readiness === "not_ready" ? null : runtime.data.configRevision);
-      }
+      client.setComponentStates(runtime.components);
+      setComponents(runtime.components);
+      setResources({ runtime: runtime.resource, tools, policies, activity });
+      setActiveRevision(runtime.activeRevision);
       if (activity.status === "success" || activity.status === "empty") {
         activityCursorRef.current = activity.data.latestSequence;
       }

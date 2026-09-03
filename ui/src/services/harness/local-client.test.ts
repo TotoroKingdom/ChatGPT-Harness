@@ -48,6 +48,17 @@ describe("TauriHarnessControlClient", () => {
     });
   });
 
+  it("reads runtime process status from the Tauri-local command", async () => {
+    tauri.invoke.mockResolvedValue({ phase: "running", last_error: null });
+    const client = new TauriHarnessControlClient();
+
+    await expect(client.runtimeProcessStatus()).resolves.toEqual({
+      phase: "running",
+      last_error: null,
+    });
+    expect(tauri.invoke).toHaveBeenCalledWith("runtime_process_status", undefined);
+  });
+
   it.each([
     ["starting", "starting"],
     ["running", "ready"],

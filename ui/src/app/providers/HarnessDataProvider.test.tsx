@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActivityEvent } from "@protocol/v1";
+import type { ActivityEvent, RuntimeState } from "@protocol/v1";
 import type { ActivityEventListener } from "@/services/harness/client";
 import { MockHarnessControlClient } from "@/services/harness/mock-client";
 
@@ -26,6 +26,23 @@ function activityEvent(): ActivityEvent {
   };
 }
 
+function runtimeState(overrides: Partial<RuntimeState> = {}): RuntimeState {
+  return {
+    runtimeId: "runtime-1",
+    startedAt: "2026-09-02T00:00:00Z",
+    lifecycle: "ready",
+    readiness: "ready",
+    configRevision: "7",
+    activeWorkspace: "D:\\workspace",
+    securityMode: "normal",
+    exposedToolCatalog: [],
+    activeRequests: 0,
+    pendingApprovals: 0,
+    runningExecutions: 0,
+    ...overrides,
+  };
+}
+
 function Probe() {
   const { activity } = useHarnessData();
   const subscriptionState = useActivitySubscription();
@@ -36,6 +53,21 @@ function Probe() {
     <>
       <output data-testid="activity-count">{itemCount}</output>
       <output data-testid="subscription-state">{subscriptionState}</output>
+    </>
+  );
+}
+
+function RuntimeProbe() {
+  const { components, restartRequired, runtime } = useHarnessData();
+  const runtimeId =
+    runtime.status === "success" || runtime.status === "empty" ? runtime.data.runtimeId : "";
+
+  return (
+    <>
+      <output data-testid="runtime-component">{components.runtime}</output>
+      <output data-testid="runtime-resource">{runtime.status}</output>
+      <output data-testid="runtime-id">{runtimeId}</output>
+      <output data-testid="restart-required">{String(restartRequired)}</output>
     </>
   );
 }
@@ -89,5 +121,70 @@ describe("HarnessDataProvider activity subscription", () => {
 
     await waitFor(() => expect(screen.getByTestId("activity-count")).toHaveTextContent("1"));
     expect(client.activitySubscribe).toHaveBeenCalledOnce();
+  });
+});
+
+describe("HarnessDataProvider runtime rehydration", () => {
+  beforeEach(() => {
+    client = new MockHarnessControlClient("empty");
+    vi.spyOn(client, "activityList").mockResolvedValue({ items: [], latestSequence: "0" });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("restores a ready RuntimeState when the process is already running", async () => {
+    const status = vi.spyOn(client, "runtimeStatus").mockResolvedValue(runtimeState());
+    vi.spyOn(client, "runtimeProcessStatus").mockResolvedValue({
+      phase: "running",
+      last_error: null,
+    });
+    const config = await client.configGet();
+    vi.spyOn(client, "configGet").mockResolvedValue(
+      config ? { ...config, configRevision: "8" } : config,
+    );
+
+    render(
+      <HarnessDataProvider>
+        <RuntimeProbe />
+      </HarnessDataProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("runtime-component")).toHaveTextContent("ready");
+      expect(screen.getByTestId("runtime-resource")).toHaveTextContent("success");
+      expect(screen.getByTestId("runtime-id")).toHaveTextContent("runtime-1");
+    });
+    expect(status).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("runtime-component")).not.toHaveTextContent("stopped");
+    expect(screen.getByTestId("restart-required")).toHaveTextContent("true");
+  });
+
+  it("keeps RuntimeState empty when the process is stopped", async () => {
+    const status = vi.spyOn(client, "runtimeStatus");
+    vi.spyOn(client, "runtimeProcessStatus").mockResolvedValue({
+      phase: "stopped",
+      last_error: null,
+    });
+    const config = await client.configGet();
+    vi.spyOn(client, "configGet").mockResolvedValue(
+      config ? { ...config, configRevision: "8" } : config,
+    );
+
+    render(
+      <HarnessDataProvider>
+        <RuntimeProbe />
+      </HarnessDataProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("runtime-component")).toHaveTextContent("stopped");
+      expect(screen.getByTestId("runtime-resource")).toHaveTextContent("idle");
+      expect(screen.getByTestId("runtime-id")).toHaveTextContent("");
+      expect(screen.getByTestId("restart-required")).toHaveTextContent("false");
+    });
+    expect(status).not.toHaveBeenCalled();
   });
 });

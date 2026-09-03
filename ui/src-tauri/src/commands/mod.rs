@@ -1,6 +1,6 @@
 use crate::{
     config::{ConfigError, ConfigMetadata, ConfigStore, CURRENT_SCHEMA_VERSION},
-    runtime::{RuntimeSupervisor, SupervisorError},
+    runtime::{RuntimeProcessStatus, RuntimeSupervisor, SupervisorError},
     secrets::{api_key_ref, SecretStore},
 };
 use chrono::{SecondsFormat, Utc};
@@ -231,6 +231,11 @@ pub fn runtime_start(
 #[tauri::command]
 pub fn runtime_status(runtime: State<'_, RuntimeSupervisor>) -> Result<RuntimeState, ControlError> {
     runtime.status().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_process_status(runtime: State<'_, RuntimeSupervisor>) -> RuntimeProcessStatus {
+    runtime.process_status()
 }
 
 #[tauri::command]

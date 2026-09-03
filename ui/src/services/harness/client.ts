@@ -26,6 +26,10 @@ export type RuntimeProcessEvent = {
   phase: RuntimeProcessPhase;
   error?: { code: string; message: string };
 };
+export type RuntimeProcessStatus = {
+  phase: RuntimeProcessPhase;
+  last_error?: { code: string; message: string } | null;
+};
 
 export function overallStatus(components: ComponentStates): OverallStatus {
   const values = Object.values(components);
@@ -51,6 +55,7 @@ export interface HarnessControlClient {
   localDiagnosticsRun(): Promise<DiagnosticRun>;
   runtimeStart(): Promise<RuntimeState>;
   runtimeStatus(): Promise<RuntimeState>;
+  runtimeProcessStatus(): Promise<RuntimeProcessStatus>;
   runtimeStop(): Promise<RuntimeStopResult>;
   getComponentStates(): ComponentStates;
   setComponentStates(states: ComponentStates): void;
