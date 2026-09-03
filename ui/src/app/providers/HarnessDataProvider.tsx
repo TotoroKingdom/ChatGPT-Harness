@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   ActivityEvent,
   ActivityListResult,
@@ -69,6 +69,12 @@ const Context = createContext<ContextValue | null>(null);
 function loaded<T>(data: T, empty: boolean): AsyncState<T> {
   return empty ? { status: "empty", data } : { status: "success", data };
 }
+function isNewerSequence(current: string | undefined, candidate: string): boolean {
+  if (current === undefined || candidate.length !== current.length) {
+    return current === undefined || candidate.length > current.length;
+  }
+  return candidate > current;
+}
 async function load<T>(fn: () => Promise<T>, empty: (data: T) => boolean): Promise<AsyncState<T>> {
   try {
     const data = await fn();
@@ -90,6 +96,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const [components, setComponents] = useState<ComponentStates>(client.getComponentStates());
   const [activeRevision, setActiveRevision] = useState<string | null>(null);
   const [lastDiagnostics, setLastDiagnostics] = useState<DiagnosticRun | null>(null);
+  const activityCursorRef = useRef<string | undefined>(undefined);
 
   const refreshConfig = useCallback(async () => {
     try {
@@ -119,6 +126,8 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       if (runtime) {
         setActiveRevision(runtime.runtimeId ? runtime.configRevision : null);
         setResources((current) => ({ ...current, runtime: { status: "success", data: runtime } }));
+      } else if (nextComponents.runtime === "stopped" || nextComponents.runtime === "error") {
+        setActiveRevision(null);
       }
     }).then((cleanup) => {
       if (mounted) unsubscribe = cleanup;
@@ -149,6 +158,9 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       setResources({ runtime, tools, policies, activity });
       if (runtime.status === "success" || runtime.status === "empty") {
         setActiveRevision(runtime.data.readiness === "not_ready" ? null : runtime.data.configRevision);
+      }
+      if (activity.status === "success" || activity.status === "empty") {
+        activityCursorRef.current = activity.data.latestSequence;
       }
     });
     return () => {
@@ -191,12 +203,13 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const refreshLifecycleActivity = useCallback(() => {
     void client
       .activityList()
-      .then((activity) =>
+      .then((activity) => {
+        activityCursorRef.current = activity.latestSequence;
         setResources((current) => ({
           ...current,
           activity: loaded(activity, activity.items.length === 0),
-        })),
-      )
+        }));
+      })
       .catch(() => undefined);
   }, [client]);
 
@@ -207,7 +220,8 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
         error: new HarnessClientError("error", "Setup is incomplete.", undefined, "SETUP_INCOMPLETE"),
       };
     }
-    if (overallStatus(client.getComponentStates()) !== "stopped") {
+    const overall = overallStatus(client.getComponentStates());
+    if (overall !== "stopped" && overall !== "error") {
       return {
         ok: false,
         error: new HarnessClientError("error", "Harness is already running or changing state.", undefined, "LIFECYCLE_CONFLICT"),
@@ -248,8 +262,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       await stop;
       setComponents(client.getComponentStates());
       setActiveRevision(null);
-      const state = await client.runtimeStatus();
-      setResources((current) => ({ ...current, runtime: { status: "success", data: state } }));
+      setResources((current) => ({ ...current, runtime: { status: "idle" } }));
       refreshLifecycleActivity();
       return { ok: true };
     } catch (error) {
@@ -267,6 +280,36 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     setLastDiagnostics(result);
     return result;
   }, [client]);
+
+  const appendActivity = useCallback((event: ActivityEvent) => {
+    if (isNewerSequence(activityCursorRef.current, event.sequence)) {
+      activityCursorRef.current = event.sequence;
+    }
+    setResources((current) => {
+      if (current.activity.status !== "success" && current.activity.status !== "empty") {
+        return current;
+      }
+      if (current.activity.data.items.some((item) => item.eventId === event.eventId)) {
+        return current;
+      }
+      return {
+        ...current,
+        activity: loaded(
+          {
+            items: [...current.activity.data.items, event],
+            latestSequence: activityCursorRef.current ?? event.sequence,
+          },
+          false,
+        ),
+      };
+    });
+  }, []);
+
+  const subscribeToActivity = useCallback(
+    (listener: ActivityEventListener) =>
+      client.activitySubscribe(listener, activityCursorRef.current),
+    [client],
+  );
 
   const value = useMemo<ContextValue>(
     () => ({
@@ -298,23 +341,13 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       startHarness,
       stopHarness,
       restartHarness,
-      appendActivity: (event: ActivityEvent) =>
-        setResources((current) =>
-          current.activity.status === "success" || current.activity.status === "empty"
-            ? {
-                ...current,
-                activity: loaded(
-                  { items: [...current.activity.data.items, event], latestSequence: event.sequence },
-                  false,
-                ),
-              }
-            : current,
-        ),
-      subscribeToActivity: (listener: ActivityEventListener) => client.activitySubscribe(listener),
+      appendActivity,
+      subscribeToActivity,
     }),
     [
       activeRevision,
       apiKeyConfigured,
+      appendActivity,
       client,
       components,
       config,
@@ -330,6 +363,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       saveConfig,
       startHarness,
       stopHarness,
+      subscribeToActivity,
     ],
   );
 

@@ -8,8 +8,7 @@ use harness_control_protocol::{
     ActivityListParams, ActivityListResult, ActivitySubscribeParams, ActivitySubscribeResult,
     AppConfig, ApprovalsListParams, ApprovalsListResult, ApprovalsResolveParams,
     ApprovalsResolveResult, DiagnosticCheck, DiagnosticRun, DiagnosticStatus, PoliciesListResult,
-    RuntimeLifecycle, RuntimeReadiness, RuntimeState, RuntimeStopResult, SecurityMode,
-    ToolsListResult,
+    RuntimeState, RuntimeStopResult, SecurityMode, ToolsListResult,
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -230,25 +229,16 @@ pub fn runtime_start(
 }
 
 #[tauri::command]
-pub fn runtime_status(
-    app: AppHandle,
-    runtime: State<'_, RuntimeSupervisor>,
-) -> Result<RuntimeState, ControlError> {
-    match runtime.status() {
-        Ok(state) => Ok(state),
-        Err(error) if error.code == "RUNTIME_DISCONNECTED" => {
-            let config = store(&app)?.load()?;
-            Ok(stopped_runtime_state(config.as_ref()))
-        }
-        Err(error) => Err(error.into()),
-    }
+pub fn runtime_status(runtime: State<'_, RuntimeSupervisor>) -> Result<RuntimeState, ControlError> {
+    runtime.status().map_err(Into::into)
 }
 
 #[tauri::command]
 pub fn runtime_stop(
+    app: AppHandle,
     runtime: State<'_, RuntimeSupervisor>,
 ) -> Result<RuntimeStopResult, ControlError> {
-    runtime.stop().map_err(Into::into)
+    runtime.stop(&app).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -310,35 +300,6 @@ pub fn runtime_diagnostics_run(
     runtime.diagnostics().map_err(Into::into)
 }
 
-fn stopped_runtime_state(config: Option<&AppConfig>) -> RuntimeState {
-    let (config_revision, active_workspace, security_mode) = config
-        .map(|value| {
-            (
-                value.config_revision,
-                value.workspace.root_path.clone(),
-                value.security.mode.clone(),
-            )
-        })
-        .unwrap_or((
-            harness_control_protocol::DecimalU64::ZERO,
-            String::new(),
-            SecurityMode::Normal,
-        ));
-    RuntimeState {
-        runtime_id: String::new(),
-        started_at: current_timestamp(),
-        lifecycle: RuntimeLifecycle::Initializing,
-        readiness: RuntimeReadiness::NotReady,
-        config_revision,
-        active_workspace,
-        security_mode,
-        exposed_tool_catalog: Vec::new(),
-        active_requests: 0,
-        pending_approvals: 0,
-        running_executions: 0,
-        last_error: None,
-    }
-}
 #[tauri::command]
 pub fn local_diagnostics_run(
     app: AppHandle,

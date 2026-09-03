@@ -21,6 +21,7 @@ import type {
   ComponentStatesListener,
   ConfigMetadata,
   HarnessControlClient,
+  RuntimeProcessEvent,
   Unsubscribe,
 } from "./client";
 import { MockHarnessControlClient } from "./mock-client";
@@ -38,6 +39,21 @@ function componentStatesFromRuntime(state: RuntimeState): ComponentStates {
   else if (state.readiness === "degraded") runtime = "degraded";
   else runtime = "starting";
   return { runtime, tunnel: "stopped", mcp: "stopped" };
+}
+
+function componentStatusFromProcess(event: RuntimeProcessEvent): ComponentStates["runtime"] {
+  switch (event.phase) {
+    case "starting":
+      return "starting";
+    case "running":
+      return "ready";
+    case "stopping":
+      return "stopping";
+    case "crashed":
+      return "error";
+    case "stopped":
+      return "stopped";
+  }
 }
 
 export class TauriHarnessControlClient implements HarnessControlClient {
@@ -112,7 +128,9 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   async runtimeStop() {
     this.components = { runtime: "stopping", tunnel: "stopped", mcp: "stopped" };
     const result = await this.call<RuntimeStopResult>("runtime_stop");
-    if (result.accepted) this.components = { runtime: "stopped", tunnel: "stopped", mcp: "stopped" };
+    if (result.accepted) {
+      this.components = { runtime: "stopped", tunnel: "stopped", mcp: "stopped" };
+    }
     return result;
   }
 
@@ -125,26 +143,30 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   async componentStatesSubscribe(listener: ComponentStatesListener): Promise<Unsubscribe> {
-    const unlistenState = await listen<RuntimeState>("runtime:state", (event) => {
-      this.applyRuntimeState(event.payload, listener);
+    return listen<RuntimeProcessEvent>("runtime:process", (event) => {
+      this.components = {
+        ...this.components,
+        runtime: componentStatusFromProcess(event.payload),
+      };
+      listener(this.components);
     });
-    const unlistenCrash = await listen<RuntimeState>("runtime:crashed", (event) => {
-      this.applyRuntimeState(event.payload, listener);
-    });
-    return () => {
-      unlistenState();
-      unlistenCrash();
-    };
   }
 
   activityList(params: ActivityListParams = {}) {
     return this.call<ActivityListResult>("runtime_activity_list", { params });
   }
 
-  async activitySubscribe(listener: ActivityEventListener): Promise<Unsubscribe> {
-    const unlisten = await listen<ActivityEvent>("runtime:activity", (event) => listener(event.payload));
+  async activitySubscribe(
+    listener: ActivityEventListener,
+    afterSequence?: string,
+  ): Promise<Unsubscribe> {
+    const unlisten = await listen<ActivityEvent>("runtime:activity", (event) =>
+      listener(event.payload),
+    );
     try {
-      await this.call("runtime_activity_subscribe", { params: {} });
+      await this.call("runtime_activity_subscribe", {
+        params: afterSequence === undefined ? {} : { afterSequence },
+      });
       return unlisten;
     } catch (error) {
       unlisten();

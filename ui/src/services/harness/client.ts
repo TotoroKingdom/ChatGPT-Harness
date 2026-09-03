@@ -21,6 +21,11 @@ export type ConfigMetadata = { configDirectory: string; configFile: string };
 export type Unsubscribe = () => void;
 export type ActivityEventListener = (event: ActivityEvent) => void;
 export type ComponentStatesListener = (states: ComponentStates, runtime?: RuntimeState) => void;
+export type RuntimeProcessPhase = "stopped" | "starting" | "running" | "stopping" | "crashed";
+export type RuntimeProcessEvent = {
+  phase: RuntimeProcessPhase;
+  error?: { code: string; message: string };
+};
 
 export function overallStatus(components: ComponentStates): OverallStatus {
   const values = Object.values(components);
@@ -51,7 +56,7 @@ export interface HarnessControlClient {
   setComponentStates(states: ComponentStates): void;
   componentStatesSubscribe(listener: ComponentStatesListener): Promise<Unsubscribe>;
   activityList(params?: ActivityListParams): Promise<ActivityListResult>;
-  activitySubscribe(listener: ActivityEventListener): Promise<Unsubscribe>;
+  activitySubscribe(listener: ActivityEventListener, afterSequence?: string): Promise<Unsubscribe>;
   toolsList(): Promise<ToolsListResult>;
   policiesList(): Promise<PoliciesListResult>;
   approvalsList(params?: ApprovalsListParams): Promise<ApprovalsListResult>;
