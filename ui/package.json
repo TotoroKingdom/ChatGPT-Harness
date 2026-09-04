@@ -8,7 +8,8 @@
     "build": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
-    "tauri": "cargo build --manifest-path ../Cargo.toml -p chatgpt-harness-runtime && tauri"
+    "tauri": "npm run dev:preflight && cargo build --manifest-path ../Cargo.toml -p chatgpt-harness-runtime && tauri",
+    "dev:preflight": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/free-dev-port.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
