@@ -1,4 +1,5 @@
 use crate::events::EventBus;
+use crate::tools::ToolRegistry;
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
     ActivityEvent, ActivityEventType, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeLifecycle,
@@ -20,6 +21,7 @@ pub struct RuntimeCore {
     pub config: Option<RuntimeConfigSnapshot>,
     pub events: Option<EventBus>,
     workspace_guard: Option<WorkspaceGuard>,
+    tool_registry: ToolRegistry,
     pub last_error: Option<RuntimeErrorSummary>,
 }
 
@@ -32,6 +34,7 @@ impl RuntimeCore {
             config: None,
             events: None,
             workspace_guard: None,
+            tool_registry: ToolRegistry::normal_mode(),
             last_error: None,
         }
     }
@@ -47,6 +50,10 @@ impl RuntimeCore {
         self.phase = Phase::InitializedPendingAck;
         self.last_error = None;
         Ok(())
+    }
+
+    pub fn tool_registry(&self) -> &ToolRegistry {
+        &self.tool_registry
     }
 
     pub fn workspace_guard(&self) -> Option<&WorkspaceGuard> {
@@ -113,7 +120,7 @@ impl RuntimeCore {
             config_revision: config.config_revision,
             active_workspace: config.workspace.root_path.clone(),
             security_mode: config.security.mode.clone(),
-            exposed_tool_catalog: Vec::new(),
+            exposed_tool_catalog: self.tool_registry.exposed_catalog(),
             active_requests: 0,
             pending_approvals: 0,
             running_executions: 0,
@@ -187,6 +194,10 @@ mod tests {
         assert!(core.events.is_some());
         assert!(core.workspace_guard().is_some());
         assert_eq!(core.phase, Phase::InitializedPendingAck);
+        assert_eq!(
+            core.status().unwrap().exposed_tool_catalog,
+            core.tool_registry().exposed_catalog()
+        );
     }
 
     #[test]
@@ -202,6 +213,7 @@ mod tests {
         assert!(core.events.is_none());
         assert!(core.workspace_guard().is_none());
         assert_eq!(core.phase, Phase::WaitingInitialize);
+        assert!(core.status().is_none());
     }
 
     #[test]

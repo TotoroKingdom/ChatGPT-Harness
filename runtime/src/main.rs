@@ -1,6 +1,7 @@
 mod events;
 mod server;
 mod state;
+mod tools;
 mod workspace;
 
 fn main() {

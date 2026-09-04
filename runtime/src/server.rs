@@ -210,7 +210,13 @@ fn handle_request<W: Write>(
                 Ok(value) => value,
                 Err(error) => return write_invalid_params(output, id, error),
             };
-            write_result(output, id, ToolsListResult { items: Vec::new() })?;
+            write_result(
+                output,
+                id,
+                ToolsListResult {
+                    items: core.tool_registry().list(),
+                },
+            )?;
             Ok(false)
         }
         "policies.list" => {
@@ -581,6 +587,26 @@ mod tests {
             panic!("expected stop response");
         };
         assert_eq!(stop.result, json!({ "accepted": true }));
+    }
+
+    #[test]
+    fn tools_list_returns_the_runtime_registry_catalog() {
+        let workspace = TestWorkspace::new();
+        let output = run_lines(&[
+            request(
+                "initialize",
+                "initialize",
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
+            ),
+            notification("initialized"),
+            request("tools", "tools.list", json!({})),
+        ]);
+
+        let RpcMessage::Response(response) = &output[1] else {
+            panic!("expected tools.list response");
+        };
+        let result: ToolsListResult = serde_json::from_value(response.result.clone()).unwrap();
+        assert_eq!(result.items, RuntimeCore::new().tool_registry().list());
     }
 
     #[test]
