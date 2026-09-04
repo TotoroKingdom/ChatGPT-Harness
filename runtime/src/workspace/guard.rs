@@ -1,4 +1,5 @@
-use super::{PathResolver, Workspace, WorkspaceError};
+use super::path_resolver::PathResolver;
+use super::{Workspace, WorkspaceError};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -270,6 +271,21 @@ mod tests {
             PathBuf::from(r"\\?\C:\foo"),
             PathBuf::from(r"\\.\PhysicalDrive0"),
         ] {
+            assert!(matches!(
+                guard.approve(path),
+                Err(WorkspaceError::UnsupportedPathForm { .. })
+            ));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_root_relative_paths_are_rejected_before_resolution() {
+        let test_workspace = TestWorkspace::new();
+        let workspace = workspace_for(&test_workspace);
+        let guard = WorkspaceGuard::new(&workspace);
+
+        for path in [PathBuf::from(r"\foo"), PathBuf::from(r"\project\file")] {
             assert!(matches!(
                 guard.approve(path),
                 Err(WorkspaceError::UnsupportedPathForm { .. })

@@ -114,6 +114,7 @@ impl Workspace {
                 }
             }
         })?;
+        validate_canonical_workspace_root(&canonical_root)?;
 
         Ok(Self {
             configured_root,
@@ -125,7 +126,7 @@ impl Workspace {
         &self.configured_root
     }
 
-    pub fn canonical_root(&self) -> &Path {
+    pub(super) fn canonical_root(&self) -> &Path {
         &self.canonical_root
     }
 }
@@ -134,6 +135,12 @@ pub(crate) fn validate_requested_path_form(path: &Path) -> Result<(), WorkspaceE
     #[cfg(windows)]
     {
         use std::path::{Component, Prefix};
+
+        if path.has_root() && !path.is_absolute() {
+            return Err(WorkspaceError::UnsupportedPathForm {
+                path: path.to_path_buf(),
+            });
+        }
 
         for component in path.components() {
             let Component::Prefix(prefix) = component else {
@@ -162,6 +169,40 @@ pub(crate) fn validate_requested_path_form(path: &Path) -> Result<(), WorkspaceE
     Ok(())
 }
 
+fn validate_canonical_workspace_root(path: &Path) -> Result<(), WorkspaceError> {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+
+        let is_local_disk = path.components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(prefix)
+                    if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+            )
+        });
+
+        if !path.has_root() || !is_local_disk {
+            return Err(WorkspaceError::UnsupportedPathForm {
+                path: path.to_path_buf(),
+            });
+        }
+
+        for component in path.components() {
+            let Component::Prefix(prefix) = component else {
+                continue;
+            };
+            if !matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)) {
+                return Err(WorkspaceError::UnsupportedPathForm {
+                    path: path.to_path_buf(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn validate_workspace_root_form(path: &Path) -> Result<(), WorkspaceError> {
     validate_requested_path_form(path)?;
     if !path.is_absolute() {
@@ -170,4 +211,32 @@ fn validate_workspace_root_form(path: &Path) -> Result<(), WorkspaceError> {
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_workspace_root_accepts_local_disk_and_verbatim_disk() {
+        assert!(validate_canonical_workspace_root(Path::new(r"C:\project")).is_ok());
+        assert!(validate_canonical_workspace_root(Path::new(r"\\?\C:\project")).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_workspace_root_rejects_unc_and_device_namespaces() {
+        for path in [
+            Path::new(r"\\server\share\project"),
+            Path::new(r"\\?\UNC\server\share\project"),
+            Path::new(r"\\.\PhysicalDrive0"),
+            Path::new(r"\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1"),
+        ] {
+            assert!(matches!(
+                validate_canonical_workspace_root(path),
+                Err(WorkspaceError::UnsupportedPathForm { .. })
+            ));
+        }
+    }
 }

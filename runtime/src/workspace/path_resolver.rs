@@ -4,14 +4,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct PathResolver;
+pub(super) struct PathResolver;
 
 impl PathResolver {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self
     }
 
-    pub fn resolve(
+    pub(super) fn resolve(
         &self,
         workspace: &Workspace,
         requested_path: impl AsRef<Path>,
