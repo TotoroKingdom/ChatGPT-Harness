@@ -2,7 +2,7 @@
   "configRevision": "7",
   "workspace": { "rootPath": "<workspace>" },
   "security": { "mode": "normal", "developerTestMode": false },
-  "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 1000 }
+  "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 1000, "maxReadBytes": 1048576 }
 }
 
 

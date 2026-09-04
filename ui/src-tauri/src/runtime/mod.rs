@@ -51,6 +51,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_MAX_CONCURRENT_REQUESTS: u32 = 16;
 const DEFAULT_MAX_ACTIVITY_EVENTS: u32 = 1024;
+const DEFAULT_MAX_READ_BYTES: u32 = 1_048_576;
 
 type PendingResult = Result<Value, SupervisorError>;
 type PendingMap = Arc<Mutex<HashMap<String, mpsc::Sender<PendingResult>>>>;
@@ -505,6 +506,7 @@ impl RuntimeSupervisor {
             runtime_limits: RuntimeLimits {
                 max_concurrent_requests: DEFAULT_MAX_CONCURRENT_REQUESTS,
                 max_activity_events: DEFAULT_MAX_ACTIVITY_EVENTS,
+                max_read_bytes: DEFAULT_MAX_READ_BYTES,
             },
         };
         let initialize = InitializeParams {

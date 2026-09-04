@@ -178,6 +178,7 @@ mod tests {
             runtime_limits: RuntimeLimits {
                 max_concurrent_requests: 4,
                 max_activity_events: 2,
+                max_read_bytes: 1_048_576,
             },
         }
     }
@@ -190,7 +191,8 @@ mod tests {
         core.initialize(config_for(&workspace.root))
             .expect("valid workspace initializes runtime");
 
-        assert!(core.config.is_some());
+        let initialized_config = core.config.as_ref().expect("initialized config");
+        assert_eq!(initialized_config.runtime_limits.max_read_bytes, 1_048_576);
         assert!(core.events.is_some());
         assert!(core.workspace_guard().is_some());
         assert_eq!(core.phase, Phase::InitializedPendingAck);

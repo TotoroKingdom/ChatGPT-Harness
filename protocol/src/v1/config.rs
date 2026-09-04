@@ -80,4 +80,5 @@ pub struct RuntimeConfigSnapshot {
 pub struct RuntimeLimits {
     pub max_concurrent_requests: u32,
     pub max_activity_events: u32,
+    pub max_read_bytes: u32,
 }

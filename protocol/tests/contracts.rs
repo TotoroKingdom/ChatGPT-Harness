@@ -196,6 +196,66 @@ fn config_and_activity_fixtures_validate_decimal_wire_fields() {
 }
 
 #[test]
+fn runtime_limits_round_trip_with_explicit_read_size_and_reject_invalid_u32_values() {
+    let limits = RuntimeLimits {
+        max_concurrent_requests: 4,
+        max_activity_events: 1000,
+        max_read_bytes: 1_048_576,
+    };
+    let value = serde_json::to_value(&limits).unwrap();
+    assert_eq!(value["maxReadBytes"], 1_048_576);
+    assert_eq!(
+        serde_json::from_value::<RuntimeLimits>(value).unwrap(),
+        limits
+    );
+
+    for invalid in [
+        serde_json::json!({
+            "maxConcurrentRequests": 4,
+            "maxActivityEvents": 1000,
+            "maxReadBytes": -1
+        }),
+        serde_json::json!({
+            "maxConcurrentRequests": 4,
+            "maxActivityEvents": 1000,
+            "maxReadBytes": 4_294_967_296u64
+        }),
+        serde_json::json!({
+            "maxConcurrentRequests": 4,
+            "maxActivityEvents": 1000
+        }),
+    ] {
+        assert!(
+            serde_json::from_value::<RuntimeLimits>(invalid).is_err(),
+            "accepted invalid or incomplete RuntimeLimits"
+        );
+    }
+}
+
+#[test]
+fn generated_runtime_limits_contract_contains_max_read_bytes() {
+    let generated = fs::read_to_string("generated/typescript/v1.ts").unwrap();
+    assert!(generated.contains(
+        "export type RuntimeLimits = { maxConcurrentRequests: number, maxActivityEvents: number, maxReadBytes: number, };"
+    ));
+
+    let schema: Value = serde_json::from_str(
+        &fs::read_to_string("generated/json-schema/runtime-config-snapshot.schema.json").unwrap(),
+    )
+    .unwrap();
+    let read_bytes = &schema["$defs"]["RuntimeLimits"]["properties"]["maxReadBytes"];
+    assert_eq!(read_bytes["type"], "integer");
+    assert_eq!(read_bytes["format"], "uint32");
+    assert!(
+        schema["$defs"]["RuntimeLimits"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "maxReadBytes")
+    );
+}
+
+#[test]
 fn generated_typescript_uses_strings_for_revision_and_sequence_fields() {
     let generated = fs::read_to_string("generated/typescript/v1.ts").unwrap();
     for field in [

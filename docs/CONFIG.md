@@ -8,7 +8,7 @@ The Tauri backend is the only persistent configuration authority. The frontend n
 
 On the JSON wire, `configRevision` is a non-negative decimal string (for example, `"7"`), not a JSON number.
 - `apiKeyRef` is a `{ provider, key }` SecretStore reference. No model stores an API key value.
-- `RuntimeConfigSnapshot` is the non-secret configuration passed in `initialize`: `configRevision`, workspace, security, and `runtimeLimits`. It excludes API keys, raw secrets, UI preferences, and tunnel credentials.
+- `RuntimeConfigSnapshot` is the non-secret configuration passed in `initialize`: `configRevision`, workspace, security, and `runtimeLimits`. It excludes API keys, raw secrets, UI preferences, and tunnel credentials. `runtimeLimits` explicitly requires `maxConcurrentRequests`, `maxActivityEvents`, and `maxReadBytes` on the JSON wire. All three use the existing non-negative JSON `uint32` number representation; `maxReadBytes` is the server-side read-size ceiling and has the conservative V1 default `1 MiB` (`1,048,576` bytes) when the Tauri backend constructs the snapshot.
 
 On the JSON wire, `configRevision` is a non-negative decimal string (for example, `"7"`), not a JSON number.
 - `RuntimeState` is observed, ephemeral state. It includes Runtime identity, start time, lifecycle/readiness, the `configRevision` in use, workspace/security mode, exposed catalog, request/approval/execution counts, and an optional last error. The Runtime never persists or mutates `AppConfig`.

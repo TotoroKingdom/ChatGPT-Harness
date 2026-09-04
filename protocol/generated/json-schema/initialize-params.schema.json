@@ -59,11 +59,17 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "maxReadBytes": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
         "maxConcurrentRequests",
-        "maxActivityEvents"
+        "maxActivityEvents",
+        "maxReadBytes"
       ],
       "type": "object"
     },

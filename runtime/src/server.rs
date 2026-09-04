@@ -463,7 +463,7 @@ mod tests {
                 "configRevision": "7",
                 "workspace": { "rootPath": root.to_string_lossy() },
                 "security": { "mode": "normal", "developerTestMode": false },
-                "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 2 }
+                "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 2, "maxReadBytes": 1048576 }
             }
         })
     }
@@ -481,6 +481,7 @@ mod tests {
             runtime_limits: RuntimeLimits {
                 max_concurrent_requests: 4,
                 max_activity_events: 2,
+                max_read_bytes: 1_048_576,
             },
         }
     }
