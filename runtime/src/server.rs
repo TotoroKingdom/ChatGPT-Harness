@@ -161,6 +161,16 @@ fn handle_request<W: Write>(
                 )?;
                 return Ok(false);
             }
+            if let Err(error) = core.initialize(params.runtime_config) {
+                write_error(
+                    output,
+                    id,
+                    error_codes::INVALID_PARAMS,
+                    MachineErrorCode::InvalidArgument,
+                    format!("Invalid workspace: {error}"),
+                )?;
+                return Ok(false);
+            }
             let result = InitializeResult {
                 server_info: harness_control_protocol::ServerInfo {
                     name: "chatgpt-harness-runtime".into(),
@@ -171,7 +181,6 @@ fn handle_request<W: Write>(
                 runtime_id: core.runtime_id.clone(),
                 capabilities: Default::default(),
             };
-            core.initialize(params.runtime_config);
             write_result(output, id, result)?;
             Ok(false)
         }
@@ -408,20 +417,66 @@ mod tests {
         SecurityConfig, SecurityMode, WorkspaceConfig,
     };
     use serde_json::json;
+    use std::fs;
     use std::io::Cursor;
+    use std::path::{Path, PathBuf};
 
-    fn initialize_params(protocol_version: u32) -> Value {
+    struct TestWorkspace {
+        base: PathBuf,
+        root: PathBuf,
+    }
+
+    impl TestWorkspace {
+        fn new() -> Self {
+            let base = std::env::temp_dir().join(format!(
+                "chatgpt-harness-runtime-server-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let root = base.join("workspace");
+            fs::create_dir_all(&root).expect("create workspace");
+            Self { base, root }
+        }
+
+        fn missing_path(&self) -> PathBuf {
+            self.base.join("missing")
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+
+    fn initialize_params(protocol_version: u32, root: &Path) -> Value {
         json!({
             "clientInfo": { "name": "test", "title": "Test", "version": "1" },
             "protocolVersion": protocol_version,
             "capabilities": {},
             "runtimeConfig": {
                 "configRevision": "7",
-                "workspace": { "rootPath": "D:/workspace" },
+                "workspace": { "rootPath": root.to_string_lossy() },
                 "security": { "mode": "normal", "developerTestMode": false },
                 "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 2 }
             }
         })
+    }
+
+    fn runtime_config(root: &Path) -> RuntimeConfigSnapshot {
+        RuntimeConfigSnapshot {
+            config_revision: DecimalU64::new(7),
+            workspace: WorkspaceConfig {
+                root_path: root.to_string_lossy().into_owned(),
+            },
+            security: SecurityConfig {
+                mode: SecurityMode::Normal,
+                developer_test_mode: false,
+            },
+            runtime_limits: RuntimeLimits {
+                max_concurrent_requests: 4,
+                max_activity_events: 2,
+            },
+        }
     }
 
     fn request(id: &str, method: &str, params: Value) -> String {
@@ -477,11 +532,12 @@ mod tests {
 
     #[test]
     fn rejects_protocol_mismatch_without_initializing() {
+        let workspace = TestWorkspace::new();
         let output = run_lines(&[
             request(
                 "wrong",
                 "initialize",
-                initialize_params(PROTOCOL_VERSION + 1),
+                initialize_params(PROTOCOL_VERSION + 1, &workspace.root),
             ),
             request("status", "runtime.status", json!({})),
         ]);
@@ -497,11 +553,12 @@ mod tests {
 
     #[test]
     fn requires_initialized_ack_and_reports_ready_afterwards() {
+        let workspace = TestWorkspace::new();
         let output = run_lines(&[
             request(
                 "initialize",
                 "initialize",
-                initialize_params(PROTOCOL_VERSION),
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
             ),
             request("pending", "runtime.status", json!({})),
             notification("initialized"),
@@ -528,12 +585,17 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_initialize() {
+        let workspace = TestWorkspace::new();
         let output = run_lines(&[
-            request("first", "initialize", initialize_params(PROTOCOL_VERSION)),
+            request(
+                "first",
+                "initialize",
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
+            ),
             request(
                 "duplicate",
                 "initialize",
-                initialize_params(PROTOCOL_VERSION),
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
             ),
         ]);
         assert!(matches!(output[0], RpcMessage::Response(_)));
@@ -545,11 +607,16 @@ mod tests {
 
     #[test]
     fn malformed_and_invalid_params_do_not_break_following_requests() {
+        let workspace = TestWorkspace::new();
         let output = run_lines(&[
             "not json".into(),
             "{}".into(),
             request("initialize", "initialize", json!({})),
-            request("valid", "initialize", initialize_params(PROTOCOL_VERSION)),
+            request(
+                "valid",
+                "initialize",
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
+            ),
         ]);
         assert_eq!(
             response_error(&output[0]).error.code,
@@ -567,30 +634,71 @@ mod tests {
     }
 
     #[test]
+    fn missing_workspace_returns_invalid_argument_without_initializing_core() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        let mut subscribed = false;
+        let mut output = Vec::new();
+        let request = RpcRequest {
+            id: harness_control_protocol::RequestId::String("initialize".into()),
+            method: "initialize".into(),
+            params: Some(initialize_params(
+                PROTOCOL_VERSION,
+                &workspace.missing_path(),
+            )),
+        };
+
+        assert!(!handle_request(request, &mut core, &mut subscribed, &mut output).unwrap());
+
+        let message: RpcMessage = serde_json::from_slice(&output).unwrap();
+        let error = response_error(&message);
+        assert_eq!(error.error.code, error_codes::INVALID_PARAMS);
+        assert_eq!(error.error.data.code, MachineErrorCode::InvalidArgument);
+        assert!(error.error.message.starts_with("Invalid workspace:"));
+        assert!(core.config.is_none());
+        assert!(core.events.is_none());
+        assert!(core.workspace_guard().is_none());
+        assert_eq!(core.phase, Phase::WaitingInitialize);
+    }
+
+    #[test]
+    fn invalid_initialize_can_retry_with_valid_workspace() {
+        let workspace = TestWorkspace::new();
+        let output = run_lines(&[
+            request(
+                "invalid",
+                "initialize",
+                initialize_params(PROTOCOL_VERSION, &workspace.missing_path()),
+            ),
+            request(
+                "valid",
+                "initialize",
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
+            ),
+        ]);
+
+        assert_eq!(
+            response_error(&output[0]).error.data.code,
+            MachineErrorCode::InvalidArgument
+        );
+        assert!(matches!(output[1], RpcMessage::Response(_)));
+    }
+
+    #[test]
     fn two_runtime_cores_have_distinct_runtime_ids() {
         assert_ne!(RuntimeCore::new().runtime_id, RuntimeCore::new().runtime_id);
     }
 
     #[test]
     fn initialization_snapshot_is_reflected_in_status() {
+        let workspace = TestWorkspace::new();
         let mut core = RuntimeCore::new();
-        core.initialize(RuntimeConfigSnapshot {
-            config_revision: DecimalU64::new(7),
-            workspace: WorkspaceConfig {
-                root_path: "D:/workspace".into(),
-            },
-            security: SecurityConfig {
-                mode: SecurityMode::Normal,
-                developer_test_mode: false,
-            },
-            runtime_limits: RuntimeLimits {
-                max_concurrent_requests: 4,
-                max_activity_events: 2,
-            },
-        });
+        core.initialize(runtime_config(&workspace.root))
+            .expect("valid workspace initializes runtime");
+
         let state = core.status().unwrap();
         assert_eq!(state.config_revision, DecimalU64::new(7));
-        assert_eq!(state.active_workspace, "D:/workspace");
+        assert_eq!(state.active_workspace, workspace.root.to_string_lossy());
         assert_eq!(state.security_mode, SecurityMode::Normal);
     }
 }

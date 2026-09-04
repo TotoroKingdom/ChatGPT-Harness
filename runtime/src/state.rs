@@ -1,4 +1,5 @@
 use crate::events::EventBus;
+use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
     ActivityEvent, ActivityEventType, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeLifecycle,
     RuntimeReadiness, RuntimeState,
@@ -18,6 +19,7 @@ pub struct RuntimeCore {
     pub phase: Phase,
     pub config: Option<RuntimeConfigSnapshot>,
     pub events: Option<EventBus>,
+    workspace_guard: Option<WorkspaceGuard>,
     pub last_error: Option<RuntimeErrorSummary>,
 }
 
@@ -29,15 +31,26 @@ impl RuntimeCore {
             phase: Phase::WaitingInitialize,
             config: None,
             events: None,
+            workspace_guard: None,
             last_error: None,
         }
     }
 
-    pub fn initialize(&mut self, config: RuntimeConfigSnapshot) {
-        self.events = Some(EventBus::from_limits(&config.runtime_limits));
+    pub fn initialize(&mut self, config: RuntimeConfigSnapshot) -> Result<(), WorkspaceError> {
+        let workspace = Workspace::new(&config.workspace.root_path)?;
+        let workspace_guard = WorkspaceGuard::new(&workspace);
+        let events = EventBus::from_limits(&config.runtime_limits);
+
+        self.events = Some(events);
         self.config = Some(config);
+        self.workspace_guard = Some(workspace_guard);
         self.phase = Phase::InitializedPendingAck;
         self.last_error = None;
+        Ok(())
+    }
+
+    pub fn workspace_guard(&self) -> Option<&WorkspaceGuard> {
+        self.workspace_guard.as_ref()
     }
 
     pub fn acknowledge(&mut self) -> Option<ActivityEvent> {
@@ -106,5 +119,112 @@ impl RuntimeCore {
             running_executions: 0,
             last_error: self.last_error.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harness_control_protocol::{
+        DecimalU64, RuntimeLimits, SecurityConfig, SecurityMode, WorkspaceConfig,
+    };
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    struct TestWorkspace {
+        base: PathBuf,
+        root: PathBuf,
+    }
+
+    impl TestWorkspace {
+        fn new() -> Self {
+            let base = std::env::temp_dir().join(format!(
+                "chatgpt-harness-runtime-state-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let root = base.join("workspace");
+            fs::create_dir_all(&root).expect("create workspace");
+            Self { base, root }
+        }
+
+        fn missing_path(&self) -> PathBuf {
+            self.base.join("missing")
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+
+    fn config_for(root: &Path) -> RuntimeConfigSnapshot {
+        RuntimeConfigSnapshot {
+            config_revision: DecimalU64::new(7),
+            workspace: WorkspaceConfig {
+                root_path: root.to_string_lossy().into_owned(),
+            },
+            security: SecurityConfig {
+                mode: SecurityMode::Normal,
+                developer_test_mode: false,
+            },
+            runtime_limits: RuntimeLimits {
+                max_concurrent_requests: 4,
+                max_activity_events: 2,
+            },
+        }
+    }
+
+    #[test]
+    fn initialize_with_valid_workspace_sets_all_initialized_state() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+
+        core.initialize(config_for(&workspace.root))
+            .expect("valid workspace initializes runtime");
+
+        assert!(core.config.is_some());
+        assert!(core.events.is_some());
+        assert!(core.workspace_guard().is_some());
+        assert_eq!(core.phase, Phase::InitializedPendingAck);
+    }
+
+    #[test]
+    fn failed_workspace_initialization_leaves_core_uninitialized() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+
+        assert!(core
+            .initialize(config_for(&workspace.missing_path()))
+            .is_err());
+
+        assert!(core.config.is_none());
+        assert!(core.events.is_none());
+        assert!(core.workspace_guard().is_none());
+        assert_eq!(core.phase, Phase::WaitingInitialize);
+    }
+
+    #[test]
+    fn workspace_file_is_rejected_during_initialization() {
+        let workspace = TestWorkspace::new();
+        let file = workspace.base.join("workspace-file");
+        fs::write(&file, "not a directory").expect("create workspace file");
+        let mut core = RuntimeCore::new();
+
+        assert!(matches!(
+            core.initialize(config_for(&file)),
+            Err(WorkspaceError::WorkspaceNotDirectory { .. })
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unsupported_unc_workspace_is_rejected_without_accessing_it() {
+        let mut core = RuntimeCore::new();
+
+        assert!(matches!(
+            core.initialize(config_for(Path::new(r"\\server\share\project"))),
+            Err(WorkspaceError::UnsupportedPathForm { .. })
+        ));
     }
 }
