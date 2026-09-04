@@ -12,13 +12,13 @@ npm install
 npm run dev
 ```
 
-For the desktop shell, build the sibling Runtime executable first, then start Tauri:
+For the desktop shell, use the explicit development script. It builds the debug sibling Runtime before starting Tauri:
 
 ```bash
-npm run tauri -- dev
+npm run tauri:dev
 ```
 
-`npm run tauri` runs `cargo build -p chatgpt-harness-runtime` before Tauri. The Tauri backend discovers `chatgpt-harness-runtime.exe` next to its own executable. For development or diagnostics, override discovery with `CHATGPT_HARNESS_RUNTIME_PATH` set to the full Runtime executable path.
+`npm run tauri:dev` builds the debug Runtime and runs `tauri dev`; `npm run tauri:build` builds the release Runtime and runs `tauri build`. `npm run tauri` is reserved for direct Tauri CLI passthrough and has no build or preflight side effects. The Tauri backend discovers `chatgpt-harness-runtime.exe` next to its own executable. For development or diagnostics, override discovery with `CHATGPT_HARNESS_RUNTIME_PATH` set to the full Runtime executable path.
 
 ## M2 First Run development flow
 
