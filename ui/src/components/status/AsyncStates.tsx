@@ -8,8 +8,8 @@ export function LoadingState({ label = "Loading data" }: { label?: string }) {
 export function EmptyState({ title = "Nothing here yet", description = "No records were returned by the Runtime." }: { title?: string; description?: string }) {
   return <Card className="state-card"><div className="state-icon">—</div><strong>{title}</strong><span className="muted">{description}</span></Card>;
 }
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
-  return <Card className="state-card state-danger"><div className="state-icon">!</div><strong>Couldn’t load this view</strong><span className="muted">{message}</span>{onRetry && <button className="button button-secondary" onClick={onRetry}>Try again</button>}</Card>;
+export function ErrorState({ message, code, onRetry }: { message: string; code?: string; onRetry?: () => void }) {
+  return <Card className="state-card state-danger"><div className="state-icon">!</div><strong>Couldn’t load this view</strong><span className="muted">{message}</span>{code && <span className="muted mono">{code}</span>}{onRetry && <button className="button button-secondary" onClick={onRetry}>Try again</button>}</Card>;
 }
 export function DisconnectedState() {
   return <Card className="state-card state-disconnected"><div className="state-icon">○</div><strong>Runtime not connected</strong><span className="muted">The local Runtime is not running. Runtime controls will be available in the next milestone.</span></Card>;
@@ -22,7 +22,7 @@ export function AsyncStateView<T>({ state, children, empty }: { state: AsyncStat
     case "disconnected":
       return <DisconnectedState />;
     case "error":
-      return <ErrorState message={state.error.message} />;
+      return <ErrorState message={state.error.message} code={state.error.code} />;
     case "empty":
       return empty ? empty(state.data) : <EmptyState />;
     case "success":
