@@ -287,6 +287,20 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       .catch(() => undefined);
   }, [client]);
 
+  const refreshRuntimeResources = useCallback(async () => {
+    const [runtime, tools, policies, activity] = await Promise.all([
+      load(() => client.runtimeStatus(), () => false),
+      load(() => client.toolsList(), (data) => data.items.length === 0),
+      load(() => client.policiesList(), (data) => data.items.length === 0),
+      load(() => client.activityList(), (data) => data.items.length === 0),
+    ]);
+
+    if (activity.status === "success" || activity.status === "empty") {
+      activityCursorRef.current = activity.data.latestSequence;
+    }
+    setResources({ runtime, tools, policies, activity });
+  }, [client]);
+
   const startHarness = useCallback(async (): Promise<SaveResult> => {
     if (!config || !apiKeyConfigured) {
       return {
@@ -315,13 +329,12 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       const state = await start;
       setComponents(client.getComponentStates());
       setActiveRevision(state.configRevision);
-      setResources((current) => ({ ...current, runtime: { status: "success", data: state } }));
-      refreshLifecycleActivity();
+      await refreshRuntimeResources();
       return { ok: true };
     } catch (error) {
       return { ok: false, error: toClientError(error) };
     }
-  }, [apiKeyConfigured, client, config, refreshLifecycleActivity]);
+  }, [apiKeyConfigured, client, config, refreshRuntimeResources]);
 
   const stopHarness = useCallback(async (): Promise<SaveResult> => {
     if (overallStatus(client.getComponentStates()) === "stopped") {

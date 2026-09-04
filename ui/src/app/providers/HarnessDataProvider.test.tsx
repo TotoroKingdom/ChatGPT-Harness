@@ -1,12 +1,15 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActivityEvent, RuntimeState } from "@protocol/v1";
 import type { ActivityEventListener } from "@/services/harness/client";
+import { HarnessClientError } from "@/services/harness/errors";
 import { MockHarnessControlClient } from "@/services/harness/mock-client";
 
 let client: MockHarnessControlClient;
 let activityListener: ActivityEventListener | undefined;
 let unsubscribe: ReturnType<typeof vi.fn>;
+let observedActivityCursor: string | undefined;
 
 vi.mock("@/services/harness/factory", () => ({
   createHarnessControlClient: () => client,
@@ -124,6 +127,34 @@ describe("HarnessDataProvider activity subscription", () => {
   });
 });
 
+function StartProbe() {
+  const { activity, policies, startHarness, subscribeToActivity, tools } = useHarnessData();
+  const [startResult, setStartResult] = useState("");
+
+  return (
+    <>
+      <output data-testid="tools-status">{tools.status}</output>
+      <output data-testid="policies-status">{policies.status}</output>
+      <output data-testid="activity-status">{activity.status}</output>
+      <output data-testid="activity-sequence">
+        {activity.status === "success" || activity.status === "empty" ? activity.data.latestSequence : ""}
+      </output>
+      <output data-testid="start-result">{startResult}</output>
+      <button
+        type="button"
+        onClick={() => {
+          void startHarness().then((result) => setStartResult(String(result.ok)));
+        }}
+      >
+        Start
+      </button>
+      <button type="button" onClick={() => void subscribeToActivity(() => {})}>
+        Subscribe
+      </button>
+    </>
+  );
+}
+
 describe("HarnessDataProvider runtime rehydration", () => {
   beforeEach(() => {
     client = new MockHarnessControlClient("empty");
@@ -133,6 +164,49 @@ describe("HarnessDataProvider runtime rehydration", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("refreshes Runtime-owned resources after Start succeeds", async () => {
+    observedActivityCursor = undefined;
+    client.setComponentStates({ runtime: "stopped", tunnel: "stopped", mcp: "stopped" });
+    vi.spyOn(client, "toolsList")
+      .mockRejectedValueOnce(new HarnessClientError("disconnected", "Runtime disconnected"))
+      .mockResolvedValue({ items: [] });
+    vi.spyOn(client, "policiesList")
+      .mockRejectedValueOnce(new HarnessClientError("disconnected", "Runtime disconnected"))
+      .mockResolvedValue({ items: [] });
+    vi.spyOn(client, "activityList")
+      .mockResolvedValueOnce({ items: [], latestSequence: "0" })
+      .mockResolvedValue({ items: [activityEvent()], latestSequence: "42" });
+    vi.spyOn(client, "runtimeStatus").mockResolvedValue(runtimeState());
+    vi.spyOn(client, "activitySubscribe").mockImplementation(async (_listener, afterSequence) => {
+      observedActivityCursor = afterSequence;
+      return () => {};
+    });
+
+    render(
+      <HarnessDataProvider>
+        <StartProbe />
+      </HarnessDataProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("tools-status")).toHaveTextContent("disconnected");
+      expect(screen.getByTestId("policies-status")).toHaveTextContent("disconnected");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("start-result")).toHaveTextContent("true");
+      expect(screen.getByTestId("tools-status")).toHaveTextContent("empty");
+      expect(screen.getByTestId("policies-status")).toHaveTextContent("empty");
+      expect(screen.getByTestId("activity-status")).toHaveTextContent("success");
+      expect(screen.getByTestId("activity-sequence")).toHaveTextContent("42");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Subscribe" }));
+    await waitFor(() => expect(observedActivityCursor).toBe("42"));
   });
 
   it("restores a ready RuntimeState when the process is already running", async () => {
