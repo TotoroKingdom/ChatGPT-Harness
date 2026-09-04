@@ -1,6 +1,7 @@
 use crate::events::EventBus;
 use crate::tools::{
-    execute_read_file, ReadFileError, ReadFileOutput, ReadFileRequest, ToolRegistry,
+    execute_glob, execute_read_file, GlobError, GlobOutput, GlobRequest, ReadFileError,
+    ReadFileOutput, ReadFileRequest, ToolRegistry,
 };
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
@@ -54,6 +55,17 @@ impl RuntimeCore {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    /// Executes the runtime-internal `glob` capability using the one guard
+    /// created by the successful initialize snapshot.
+    pub fn glob(&self, request: &GlobRequest) -> Result<GlobOutput, GlobError> {
+        let workspace_guard = self
+            .workspace_guard
+            .as_ref()
+            .ok_or(GlobError::RuntimeNotInitialized)?;
+
+        execute_glob(workspace_guard, request)
+    }
     pub fn tool_registry(&self) -> &ToolRegistry {
         &self.tool_registry
     }
@@ -225,6 +237,23 @@ mod tests {
     }
 
     #[test]
+    fn glob_requires_initialization_and_uses_the_initialized_workspace_guard() {
+        let workspace = TestWorkspace::new();
+        fs::write(workspace.root.join("main.rs"), "fn main() {}\n").expect("fixture");
+        let mut core = RuntimeCore::new();
+
+        assert!(matches!(
+            core.glob(&GlobRequest::new("*.rs")),
+            Err(GlobError::RuntimeNotInitialized)
+        ));
+
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        let output = core
+            .glob(&GlobRequest::new("*.rs"))
+            .expect("glob workspace");
+        assert_eq!(output.matches[0].path, "main.rs");
+    }
     fn read_file_uses_the_initialized_snapshot_limit_and_is_unavailable_after_failed_init() {
         let workspace = TestWorkspace::new();
         fs::write(workspace.root.join("lines.txt"), "a\nb\n").expect("write fixture");

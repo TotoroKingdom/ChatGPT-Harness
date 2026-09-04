@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 harness-control-protocol = { path = "../protocol" }
 chrono = { version = "0.4", features = ["clock"] }
+globset = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

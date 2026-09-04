@@ -27,12 +27,12 @@ impl ToolRegistry {
                 ToolDescriptor {
                     name: "glob".into(),
                     description: "Find workspace paths.".into(),
-                    implemented: false,
+                    implemented: true,
                     enabled: true,
                     exposed: true,
                     effective_policy: PolicyDecision::Allow,
                     scope: WORKSPACE_SCOPE.into(),
-                    readiness: ToolReadiness::Unavailable,
+                    readiness: ToolReadiness::Ready,
                     risk_level: RiskLevel::Low,
                 },
             ],
@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_descriptors_report_read_file_as_ready_and_glob_as_unavailable() {
+    fn normal_mode_descriptors_report_read_file_and_glob_as_ready() {
         let descriptors = ToolRegistry::normal_mode().list();
         let read_file = &descriptors[0];
         let glob = &descriptors[1];
@@ -105,12 +105,12 @@ mod tests {
         assert_eq!(read_file.readiness, ToolReadiness::Ready);
         assert_eq!(read_file.risk_level, RiskLevel::Low);
 
-        assert!(!glob.implemented);
+        assert!(glob.implemented);
         assert!(glob.enabled);
         assert!(glob.exposed);
         assert_eq!(glob.effective_policy, PolicyDecision::Allow);
         assert_eq!(glob.scope, WORKSPACE_SCOPE);
-        assert_eq!(glob.readiness, ToolReadiness::Unavailable);
+        assert_eq!(glob.readiness, ToolReadiness::Ready);
         assert_eq!(glob.risk_level, RiskLevel::Low);
     }
 }

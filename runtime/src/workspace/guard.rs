@@ -1,6 +1,6 @@
 use super::path_resolver::PathResolver;
 use super::{Workspace, WorkspaceError};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApprovedPath {
@@ -47,6 +47,45 @@ impl WorkspaceGuard {
     ) -> Result<ApprovedPath, WorkspaceError> {
         self.approve(requested_path)
     }
+    /// Returns a normalized workspace-relative logical path without exposing
+    /// the workspace's canonical root. Callers must first obtain `approved`
+    /// through this guard; this helper is representation only, not a second
+    /// boundary check.
+    pub fn logical_relative_path(
+        &self,
+        requested_path: impl AsRef<Path>,
+        approved: &ApprovedPath,
+    ) -> PathBuf {
+        let requested_path = requested_path.as_ref();
+        if !requested_path.is_absolute() {
+            return normalize_relative(requested_path);
+        }
+
+        if let Ok(relative) = requested_path.strip_prefix(self.workspace.configured_root()) {
+            return normalize_relative(relative);
+        }
+
+        approved
+            .as_path()
+            .strip_prefix(self.workspace.canonical_root())
+            .map(normalize_relative)
+            .unwrap_or_default()
+    }
+}
+
+fn normalize_relative(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    normalized
 }
 
 fn is_within_workspace(workspace_root: &Path, resolved_path: &Path) -> bool {
@@ -58,7 +97,7 @@ mod tests {
     use super::*;
     use std::fs::{self, File};
     use std::io::Write;
-    use std::path::{Path, PathBuf};
+    use std::path::{Component, Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
