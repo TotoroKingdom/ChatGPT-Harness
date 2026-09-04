@@ -16,12 +16,12 @@ impl ToolRegistry {
                 ToolDescriptor {
                     name: "read_file".into(),
                     description: "Read a workspace file.".into(),
-                    implemented: false,
+                    implemented: true,
                     enabled: true,
                     exposed: true,
                     effective_policy: PolicyDecision::Allow,
                     scope: WORKSPACE_SCOPE.into(),
-                    readiness: ToolReadiness::Unavailable,
+                    readiness: ToolReadiness::Ready,
                     risk_level: RiskLevel::Low,
                 },
                 ToolDescriptor {
@@ -92,17 +92,25 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_descriptors_report_real_unavailable_readiness() {
-        let registry = ToolRegistry::normal_mode();
+    fn normal_mode_descriptors_report_read_file_as_ready_and_glob_as_unavailable() {
+        let descriptors = ToolRegistry::normal_mode().list();
+        let read_file = &descriptors[0];
+        let glob = &descriptors[1];
 
-        for descriptor in registry.list() {
-            assert!(!descriptor.implemented);
-            assert!(descriptor.enabled);
-            assert!(descriptor.exposed);
-            assert_eq!(descriptor.effective_policy, PolicyDecision::Allow);
-            assert_eq!(descriptor.scope, WORKSPACE_SCOPE);
-            assert_eq!(descriptor.readiness, ToolReadiness::Unavailable);
-            assert_eq!(descriptor.risk_level, RiskLevel::Low);
-        }
+        assert!(read_file.implemented);
+        assert!(read_file.enabled);
+        assert!(read_file.exposed);
+        assert_eq!(read_file.effective_policy, PolicyDecision::Allow);
+        assert_eq!(read_file.scope, WORKSPACE_SCOPE);
+        assert_eq!(read_file.readiness, ToolReadiness::Ready);
+        assert_eq!(read_file.risk_level, RiskLevel::Low);
+
+        assert!(!glob.implemented);
+        assert!(glob.enabled);
+        assert!(glob.exposed);
+        assert_eq!(glob.effective_policy, PolicyDecision::Allow);
+        assert_eq!(glob.scope, WORKSPACE_SCOPE);
+        assert_eq!(glob.readiness, ToolReadiness::Unavailable);
+        assert_eq!(glob.risk_level, RiskLevel::Low);
     }
 }

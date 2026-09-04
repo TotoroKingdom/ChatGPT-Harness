@@ -1,5 +1,7 @@
 use crate::events::EventBus;
-use crate::tools::ToolRegistry;
+use crate::tools::{
+    execute_read_file, ReadFileError, ReadFileOutput, ReadFileRequest, ToolRegistry,
+};
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
     ActivityEvent, ActivityEventType, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeLifecycle,
@@ -58,6 +60,26 @@ impl RuntimeCore {
 
     pub fn workspace_guard(&self) -> Option<&WorkspaceGuard> {
         self.workspace_guard.as_ref()
+    }
+
+    #[allow(dead_code)]
+    /// Executes the runtime-internal `read_file` capability using the guard and
+    /// read limit established by the successful initialize snapshot.
+    pub fn read_file(&self, request: &ReadFileRequest) -> Result<ReadFileOutput, ReadFileError> {
+        let workspace_guard = self
+            .workspace_guard
+            .as_ref()
+            .ok_or(ReadFileError::RuntimeNotInitialized)?;
+        let config = self
+            .config
+            .as_ref()
+            .ok_or(ReadFileError::RuntimeNotInitialized)?;
+
+        execute_read_file(
+            workspace_guard,
+            config.runtime_limits.max_read_bytes,
+            request,
+        )
     }
 
     pub fn acknowledge(&mut self) -> Option<ActivityEvent> {
@@ -202,6 +224,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn read_file_uses_the_initialized_snapshot_limit_and_is_unavailable_after_failed_init() {
+        let workspace = TestWorkspace::new();
+        fs::write(workspace.root.join("lines.txt"), "a\nb\n").expect("write fixture");
+        let mut core = RuntimeCore::new();
+
+        assert!(matches!(
+            core.read_file(&ReadFileRequest::new("lines.txt")),
+            Err(ReadFileError::RuntimeNotInitialized)
+        ));
+
+        let mut config = config_for(&workspace.root);
+        config.runtime_limits.max_read_bytes = 2;
+        core.initialize(config).expect("initialize runtime");
+
+        let output = core
+            .read_file(&ReadFileRequest::new("lines.txt"))
+            .expect("read within configured limit");
+        assert_eq!(output.content, "a\n");
+        assert_eq!(output.bytes_read, 2);
+        assert!(output.truncated);
+        assert_eq!(output.next_offset, Some(1));
+
+        let mut failed_core = RuntimeCore::new();
+        assert!(failed_core
+            .initialize(config_for(&workspace.missing_path()))
+            .is_err());
+        assert!(matches!(
+            failed_core.read_file(&ReadFileRequest::new("lines.txt")),
+            Err(ReadFileError::RuntimeNotInitialized)
+        ));
+    }
     #[test]
     fn failed_workspace_initialization_leaves_core_uninitialized() {
         let workspace = TestWorkspace::new();
