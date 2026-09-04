@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActivityEvent, RuntimeState } from "@protocol/v1";
-import type { ActivityEventListener } from "@/services/harness/client";
+import type { ActivityEventListener, ComponentStatesListener } from "@/services/harness/client";
 import { HarnessClientError } from "@/services/harness/errors";
 import { MockHarnessControlClient } from "@/services/harness/mock-client";
 
@@ -10,6 +10,7 @@ let client: MockHarnessControlClient;
 let activityListener: ActivityEventListener | undefined;
 let unsubscribe: ReturnType<typeof vi.fn>;
 let observedActivityCursor: string | undefined;
+let componentStatesListener: ComponentStatesListener | undefined;
 
 vi.mock("@/services/harness/factory", () => ({
   createHarnessControlClient: () => client,
@@ -64,12 +65,16 @@ function RuntimeProbe() {
   const { components, restartRequired, runtime } = useHarnessData();
   const runtimeId =
     runtime.status === "success" || runtime.status === "empty" ? runtime.data.runtimeId : "";
+  const runtimeErrorCode = runtime.status === "error" ? runtime.error.code ?? "" : "";
+  const runtimeErrorMessage = runtime.status === "error" ? runtime.error.message : "";
 
   return (
     <>
       <output data-testid="runtime-component">{components.runtime}</output>
       <output data-testid="runtime-resource">{runtime.status}</output>
       <output data-testid="runtime-id">{runtimeId}</output>
+      <output data-testid="runtime-error-code">{runtimeErrorCode}</output>
+      <output data-testid="runtime-error-message">{runtimeErrorMessage}</output>
       <output data-testid="restart-required">{String(restartRequired)}</output>
     </>
   );
@@ -157,8 +162,13 @@ function StartProbe() {
 
 describe("HarnessDataProvider runtime rehydration", () => {
   beforeEach(() => {
+    componentStatesListener = undefined;
     client = new MockHarnessControlClient("empty");
     vi.spyOn(client, "activityList").mockResolvedValue({ items: [], latestSequence: "0" });
+    vi.spyOn(client, "componentStatesSubscribe").mockImplementation(async (listener) => {
+      componentStatesListener = listener;
+      return () => {};
+    });
   });
 
   afterEach(() => {
@@ -234,6 +244,53 @@ describe("HarnessDataProvider runtime rehydration", () => {
     expect(status).toHaveBeenCalledOnce();
     expect(screen.getByTestId("runtime-component")).not.toHaveTextContent("stopped");
     expect(screen.getByTestId("restart-required")).toHaveTextContent("true");
+  });
+
+  it("clears the active RuntimeState and preserves the crash error", async () => {
+    vi.spyOn(client, "runtimeStatus").mockResolvedValue(
+      runtimeState({ runtimeId: "runtime-A", configRevision: "7" }),
+    );
+    vi.spyOn(client, "runtimeProcessStatus").mockResolvedValue({
+      phase: "running",
+      last_error: null,
+    });
+
+    render(
+      <HarnessDataProvider>
+        <RuntimeProbe />
+      </HarnessDataProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("runtime-component")).toHaveTextContent("ready");
+      expect(screen.getByTestId("runtime-resource")).toHaveTextContent("success");
+      expect(screen.getByTestId("runtime-id")).toHaveTextContent("runtime-A");
+    });
+
+    act(() =>
+      componentStatesListener?.(
+        { runtime: "error", tunnel: "stopped", mcp: "stopped" },
+        undefined,
+        {
+          phase: "crashed",
+          error: {
+            code: "RUNTIME_CRASHED",
+            message: "Runtime process exited unexpectedly.",
+          },
+        },
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("runtime-component")).toHaveTextContent("error");
+      expect(screen.getByTestId("runtime-resource")).toHaveTextContent("error");
+      expect(screen.getByTestId("runtime-id")).toHaveTextContent("");
+      expect(screen.getByTestId("runtime-error-code")).toHaveTextContent("RUNTIME_CRASHED");
+      expect(screen.getByTestId("runtime-error-message")).toHaveTextContent(
+        "Runtime process exited unexpectedly.",
+      );
+      expect(screen.getByTestId("restart-required")).toHaveTextContent("false");
+    });
   });
 
   it("keeps RuntimeState empty when the process is stopped", async () => {

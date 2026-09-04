@@ -194,10 +194,27 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
     let unsubscribe: Unsubscribe | undefined;
-    void client.componentStatesSubscribe((nextComponents, runtime) => {
+    void client.componentStatesSubscribe((nextComponents, runtime, process) => {
       if (!mounted) return;
       setComponents(nextComponents);
-      if (runtime) {
+      if (process?.phase === "crashed") {
+        setActiveRevision(null);
+        setResources((current) => ({
+          ...current,
+          runtime: {
+            status: "error",
+            error: new HarnessClientError(
+              "error",
+              process.error?.message ?? "Runtime crashed.",
+              undefined,
+              process.error?.code,
+            ),
+          },
+        }));
+      } else if (process?.phase === "stopped") {
+        setActiveRevision(null);
+        setResources((current) => ({ ...current, runtime: { status: "idle" } }));
+      } else if (runtime) {
         setActiveRevision(runtime.runtimeId ? runtime.configRevision : null);
         setResources((current) => ({ ...current, runtime: { status: "success", data: runtime } }));
       } else if (nextComponents.runtime === "stopped" || nextComponents.runtime === "error") {

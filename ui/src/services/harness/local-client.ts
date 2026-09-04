@@ -153,7 +153,7 @@ export class TauriHarnessControlClient implements HarnessControlClient {
         ...this.components,
         runtime: componentStatusFromProcess(event.payload),
       };
-      listener(this.components);
+      listener(this.components, undefined, event.payload);
     });
   }
 

@@ -76,19 +76,18 @@ describe("TauriHarnessControlClient", () => {
     const listener = vi.fn();
 
     await client.componentStatesSubscribe(listener);
-    handler?.({
-      payload: {
-        phase,
-        error:
-          phase === "crashed"
-            ? { code: "RUNTIME_CRASHED", message: "Runtime process exited unexpectedly." }
-            : undefined,
-      },
-    });
+    const process = {
+      phase,
+      error:
+        phase === "crashed"
+          ? { code: "RUNTIME_CRASHED", message: "Runtime process exited unexpectedly." }
+          : undefined,
+    } as RuntimeProcessEvent;
+    handler?.({ payload: process });
 
     const states = { runtime: expected, tunnel: "stopped", mcp: "stopped" };
     expect(client.getComponentStates()).toEqual(states);
-    expect(listener).toHaveBeenLastCalledWith(states);
+    expect(listener).toHaveBeenLastCalledWith(states, undefined, process);
   });
 
   it("registers the activity listener before subscribing from the supplied cursor", async () => {

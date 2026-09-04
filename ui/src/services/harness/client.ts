@@ -20,7 +20,11 @@ export type ComponentStates = { runtime: ComponentStatus; tunnel: ComponentStatu
 export type ConfigMetadata = { configDirectory: string; configFile: string };
 export type Unsubscribe = () => void;
 export type ActivityEventListener = (event: ActivityEvent) => void;
-export type ComponentStatesListener = (states: ComponentStates, runtime?: RuntimeState) => void;
+export type ComponentStatesListener = (
+  states: ComponentStates,
+  runtime?: RuntimeState,
+  process?: RuntimeProcessEvent,
+) => void;
 export type RuntimeProcessPhase = "stopped" | "starting" | "running" | "stopping" | "crashed";
 export type RuntimeProcessEvent = {
   phase: RuntimeProcessPhase;
