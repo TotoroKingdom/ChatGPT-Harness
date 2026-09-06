@@ -616,7 +616,7 @@ mod tests {
     fn rejects_invalid_utf8_and_nul_content() {
         let workspace = TestWorkspace::new();
         workspace.write("invalid.txt", [0xff, b'\n']);
-        workspace.write("nul.txt", b"ok\0\n");
+        workspace.write("contains-nul.txt", b"ok\0\n");
         let guard = workspace.guard();
 
         assert!(matches!(
@@ -627,7 +627,7 @@ mod tests {
             })
         ));
         assert!(matches!(
-            execute_read_file(&guard, 64, &request("nul.txt")),
+            execute_read_file(&guard, 64, &request("contains-nul.txt")),
             Err(ReadFileError::UnsupportedContent {
                 reason: UnsupportedContent::ContainsNul,
                 ..

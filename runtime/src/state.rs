@@ -1,4 +1,5 @@
 use crate::events::EventBus;
+use crate::mcp::{McpContextError, McpExecutionContext, McpService};
 use crate::tools::{
     execute_glob, execute_read_file, GlobError, GlobOutput, GlobRequest, ReadFileError,
     ReadFileOutput, ReadFileRequest, ToolRegistry,
@@ -8,6 +9,7 @@ use harness_control_protocol::{
     ActivityEvent, ActivityEventType, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeLifecycle,
     RuntimeReadiness, RuntimeState,
 };
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -23,7 +25,7 @@ pub struct RuntimeCore {
     pub phase: Phase,
     pub config: Option<RuntimeConfigSnapshot>,
     pub events: Option<EventBus>,
-    workspace_guard: Option<WorkspaceGuard>,
+    workspace_guard: Option<Arc<WorkspaceGuard>>,
     tool_registry: ToolRegistry,
     pub last_error: Option<RuntimeErrorSummary>,
 }
@@ -44,7 +46,7 @@ impl RuntimeCore {
 
     pub fn initialize(&mut self, config: RuntimeConfigSnapshot) -> Result<(), WorkspaceError> {
         let workspace = Workspace::new(&config.workspace.root_path)?;
-        let workspace_guard = WorkspaceGuard::new(&workspace);
+        let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
         let events = EventBus::from_limits(&config.runtime_limits);
 
         self.events = Some(events);
@@ -70,8 +72,35 @@ impl RuntimeCore {
         &self.tool_registry
     }
 
+    #[allow(dead_code)]
     pub fn workspace_guard(&self) -> Option<&WorkspaceGuard> {
-        self.workspace_guard.as_ref()
+        self.workspace_guard.as_deref()
+    }
+
+    /// Builds the MCP execution context from the successfully initialized
+    /// runtime snapshot. The context shares the single WorkspaceGuard rather
+    /// than reconstructing workspace security state for an MCP request.
+    #[allow(dead_code)]
+    pub fn mcp_context(&self) -> Result<McpExecutionContext, McpContextError> {
+        let workspace_guard = self
+            .workspace_guard
+            .as_ref()
+            .cloned()
+            .ok_or(McpContextError::RuntimeNotInitialized)?;
+        let config = self
+            .config
+            .as_ref()
+            .ok_or(McpContextError::RuntimeNotInitialized)?;
+
+        Ok(McpExecutionContext::new(
+            workspace_guard,
+            config.runtime_limits.max_read_bytes,
+        ))
+    }
+
+    #[allow(dead_code)]
+    pub fn mcp_service(&self) -> Result<McpService, McpContextError> {
+        self.mcp_context().map(McpService::new)
     }
 
     #[allow(dead_code)]
@@ -254,6 +283,7 @@ mod tests {
             .expect("glob workspace");
         assert_eq!(output.matches[0].path, "main.rs");
     }
+    #[test]
     fn read_file_uses_the_initialized_snapshot_limit_and_is_unavailable_after_failed_init() {
         let workspace = TestWorkspace::new();
         fs::write(workspace.root.join("lines.txt"), "a\nb\n").expect("write fixture");
