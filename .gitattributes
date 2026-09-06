@@ -1,0 +1,2 @@
+# Protocol exports are generated deterministically with LF line endings.
+protocol/generated/** text eol=lf
