@@ -9,7 +9,10 @@ use harness_control_protocol::{
     ActivityEvent, ActivityEventType, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeLifecycle,
     RuntimeReadiness, RuntimeState,
 };
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -26,6 +29,7 @@ pub struct RuntimeCore {
     pub config: Option<RuntimeConfigSnapshot>,
     pub events: Option<EventBus>,
     workspace_guard: Option<Arc<WorkspaceGuard>>,
+    mcp_readiness: Arc<AtomicBool>,
     tool_registry: ToolRegistry,
     pub last_error: Option<RuntimeErrorSummary>,
 }
@@ -39,6 +43,7 @@ impl RuntimeCore {
             config: None,
             events: None,
             workspace_guard: None,
+            mcp_readiness: Arc::new(AtomicBool::new(false)),
             tool_registry: ToolRegistry::normal_mode(),
             last_error: None,
         }
@@ -53,8 +58,20 @@ impl RuntimeCore {
         self.config = Some(config);
         self.workspace_guard = Some(workspace_guard);
         self.phase = Phase::InitializedPendingAck;
+        self.mcp_readiness.store(false, Ordering::Release);
         self.last_error = None;
         Ok(())
+    }
+
+    /// Reverts a successful initialization when a process-owned service cannot
+    /// start. Process identity is intentionally retained.
+    pub(crate) fn rollback_initialize(&mut self) {
+        self.mcp_readiness.store(false, Ordering::Release);
+        self.phase = Phase::WaitingInitialize;
+        self.config = None;
+        self.events = None;
+        self.workspace_guard = None;
+        self.last_error = None;
     }
 
     #[allow(dead_code)]
@@ -95,6 +112,7 @@ impl RuntimeCore {
         Ok(McpExecutionContext::new(
             workspace_guard,
             config.runtime_limits.max_read_bytes,
+            Arc::clone(&self.mcp_readiness),
         ))
     }
 
@@ -128,6 +146,7 @@ impl RuntimeCore {
             return None;
         }
         self.phase = Phase::Ready;
+        self.mcp_readiness.store(true, Ordering::Release);
         Some(self.publish(
             ActivityEventType::RuntimeStarted,
             "Runtime started.",
@@ -137,6 +156,7 @@ impl RuntimeCore {
     }
 
     pub fn stop(&mut self) -> Option<ActivityEvent> {
+        self.mcp_readiness.store(false, Ordering::Release);
         if self.phase == Phase::Stopping {
             return None;
         }
@@ -147,6 +167,11 @@ impl RuntimeCore {
             [("source".into(), "runtime".into())],
             None,
         ))
+    }
+
+    #[cfg(test)]
+    fn mcp_is_ready(&self) -> bool {
+        self.mcp_readiness.load(Ordering::Acquire)
     }
 
     pub fn publish(
@@ -259,6 +284,7 @@ mod tests {
         assert!(core.events.is_some());
         assert!(core.workspace_guard().is_some());
         assert_eq!(core.phase, Phase::InitializedPendingAck);
+        assert!(!core.mcp_is_ready());
         assert_eq!(
             core.status().unwrap().exposed_tool_catalog,
             core.tool_registry().exposed_catalog()
@@ -329,6 +355,43 @@ mod tests {
         assert!(core.workspace_guard().is_none());
         assert_eq!(core.phase, Phase::WaitingInitialize);
         assert!(core.status().is_none());
+    }
+
+    #[test]
+    fn lifecycle_is_the_only_writer_of_mcp_readiness() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        assert!(!core.mcp_is_ready());
+
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        assert_eq!(core.phase, Phase::InitializedPendingAck);
+        assert!(!core.mcp_is_ready());
+
+        core.acknowledge().expect("acknowledge runtime");
+        assert_eq!(core.phase, Phase::Ready);
+        assert!(core.mcp_is_ready());
+
+        core.stop().expect("stop runtime");
+        assert_eq!(core.phase, Phase::Stopping);
+        assert!(!core.mcp_is_ready());
+    }
+
+    #[test]
+    fn rollback_initialize_restores_the_uninitialized_business_state() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        core.rollback_initialize();
+
+        assert_eq!(core.phase, Phase::WaitingInitialize);
+        assert!(core.config.is_none());
+        assert!(core.events.is_none());
+        assert!(core.workspace_guard().is_none());
+        assert!(!core.mcp_is_ready());
+        core.initialize(config_for(&workspace.root))
+            .expect("retry initialize runtime");
     }
 
     #[test]

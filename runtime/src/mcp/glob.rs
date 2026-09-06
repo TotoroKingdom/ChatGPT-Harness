@@ -1,5 +1,5 @@
 use crate::mcp::context::McpExecutionContext;
-use crate::mcp::errors::{glob_error, invalid_arguments};
+use crate::mcp::errors::{glob_error, invalid_arguments, runtime_not_ready};
 use crate::tools::{execute_glob, GlobMatchKind, GlobRequest};
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::schemars;
@@ -19,6 +19,9 @@ pub(crate) struct GlobArguments {
 }
 
 pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallToolResult {
+    if !context.is_runtime_ready() {
+        return runtime_not_ready();
+    }
     let arguments = match serde_json::from_value::<GlobArguments>(arguments) {
         Ok(arguments) => arguments,
         Err(_) => return invalid_arguments(),

@@ -1,5 +1,8 @@
 use crate::workspace::WorkspaceGuard;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 /// The minimum initialized Runtime state needed by the MCP tool adapters.
 ///
@@ -9,13 +12,19 @@ use std::sync::Arc;
 pub struct McpExecutionContext {
     workspace_guard: Arc<WorkspaceGuard>,
     max_read_bytes: u32,
+    readiness: Arc<AtomicBool>,
 }
 
 impl McpExecutionContext {
-    pub(crate) fn new(workspace_guard: Arc<WorkspaceGuard>, max_read_bytes: u32) -> Self {
+    pub(crate) fn new(
+        workspace_guard: Arc<WorkspaceGuard>,
+        max_read_bytes: u32,
+        readiness: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             workspace_guard,
             max_read_bytes,
+            readiness,
         }
     }
 
@@ -25,6 +34,12 @@ impl McpExecutionContext {
 
     pub(crate) fn max_read_bytes(&self) -> u32 {
         self.max_read_bytes
+    }
+
+    /// A read-only cross-thread projection of the Runtime lifecycle. The
+    /// RuntimeCore phase remains authoritative and is its only writer.
+    pub(crate) fn is_runtime_ready(&self) -> bool {
+        self.readiness.load(Ordering::Acquire)
     }
 }
 

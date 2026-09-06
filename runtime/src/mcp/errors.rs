@@ -16,6 +16,7 @@ pub(crate) enum McpErrorCategory {
     InvalidBasePath,
     IoFailure,
     RuntimeNotInitialized,
+    RuntimeNotReady,
 }
 
 impl McpErrorCategory {
@@ -32,6 +33,7 @@ impl McpErrorCategory {
             Self::InvalidBasePath => "INVALID_BASE_PATH",
             Self::IoFailure => "IO_FAILURE",
             Self::RuntimeNotInitialized => "RUNTIME_NOT_INITIALIZED",
+            Self::RuntimeNotReady => "RUNTIME_NOT_READY",
         }
     }
 
@@ -48,12 +50,17 @@ impl McpErrorCategory {
             Self::InvalidBasePath => "Glob base path is invalid.",
             Self::IoFailure => "The runtime could not read the requested workspace target.",
             Self::RuntimeNotInitialized => "Runtime is not initialized.",
+            Self::RuntimeNotReady => "Runtime is waiting for the initialized acknowledgement.",
         }
     }
 }
 
 pub(crate) fn invalid_arguments() -> CallToolResult {
     error_result(McpErrorCategory::InvalidArguments)
+}
+
+pub(crate) fn runtime_not_ready() -> CallToolResult {
+    error_result(McpErrorCategory::RuntimeNotReady)
 }
 
 pub(crate) fn read_file_error(error: &ReadFileError) -> CallToolResult {

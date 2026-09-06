@@ -190,6 +190,7 @@ mod tests {
             let mut core = RuntimeCore::new();
             core.initialize(config_for(&self.root))
                 .expect("initialize runtime");
+            core.acknowledge().expect("acknowledge runtime");
             core.mcp_context().expect("MCP context")
         }
     }
@@ -407,7 +408,10 @@ mod tests {
         workspace.write("src/main.rs", "fn main() {}\n");
         workspace.write("src/nested/lib.rs", "");
         fs::write(workspace.outside.join("outside.txt"), "secret").expect("write outside file");
-        let mut endpoint = start_mcp_http_endpoint(workspace.context())
+        let mut core = RuntimeCore::new();
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        let mut endpoint = start_mcp_http_endpoint(core.mcp_context().expect("MCP context"))
             .await
             .expect("start endpoint");
         let address = endpoint.local_addr();
@@ -417,9 +421,26 @@ mod tests {
         );
         let session_id = initialize(address, None).await;
 
+        let pre_ack = mcp_post(
+            address,
+            json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": { "name": "read_file", "arguments": { "path": "README.md" } }
+            }),
+            Some(&session_id),
+            None,
+        )
+        .await
+        .json_rpc();
+        assert_eq!(
+            pre_ack["result"]["structuredContent"]["code"],
+            "RUNTIME_NOT_READY"
+        );
+        core.acknowledge().expect("acknowledge runtime");
+
         let list = mcp_post(
             address,
-            json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }),
+            json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {} }),
             Some(&session_id),
             None,
         )
@@ -436,7 +457,7 @@ mod tests {
         let read = mcp_post(
             address,
             json!({
-                "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "jsonrpc": "2.0", "id": 4, "method": "tools/call",
                 "params": { "name": "read_file", "arguments": { "path": "README.md", "offset": 1, "limit": 1 } }
             }),
             Some(&session_id),
@@ -458,7 +479,7 @@ mod tests {
         let glob = mcp_post(
             address,
             json!({
-                "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                "jsonrpc": "2.0", "id": 5, "method": "tools/call",
                 "params": { "name": "glob", "arguments": { "pattern": "**/*.rs" } }
             }),
             Some(&session_id),
@@ -474,7 +495,7 @@ mod tests {
         let glob_escape = mcp_post(
             address,
             json!({
-                "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                "jsonrpc": "2.0", "id": 6, "method": "tools/call",
                 "params": { "name": "glob", "arguments": { "pattern": "*", "basePath": "../outside" } }
             }),
             Some(&session_id),
@@ -491,7 +512,7 @@ mod tests {
         let escape = mcp_post(
             address,
             json!({
-                "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+                "jsonrpc": "2.0", "id": 7, "method": "tools/call",
                 "params": { "name": "read_file", "arguments": { "path": "../outside/outside.txt" } }
             }),
             Some(&session_id),

@@ -162,6 +162,7 @@ mod tests {
             let mut core = RuntimeCore::new();
             core.initialize(config_for(&self.root))
                 .expect("initialize runtime");
+            core.acknowledge().expect("acknowledge runtime");
             core.mcp_service().expect("initialized MCP service")
         }
     }
@@ -210,6 +211,19 @@ mod tests {
             core.mcp_context(),
             Err(crate::mcp::McpContextError::RuntimeNotInitialized)
         ));
+    }
+
+    #[test]
+    fn tools_are_not_executable_before_runtime_acknowledgement() {
+        let workspace = TestWorkspace::new();
+        workspace.write("lines.txt", "one\n");
+        let mut core = RuntimeCore::new();
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        let service = core.mcp_service().expect("MCP service");
+
+        let result = call(&service, READ_FILE, json!({ "path": "lines.txt" }));
+        assert_eq!(error_code(&result), "RUNTIME_NOT_READY");
     }
 
     #[test]

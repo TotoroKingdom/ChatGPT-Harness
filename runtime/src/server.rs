@@ -1,4 +1,7 @@
-use crate::state::{Phase, RuntimeCore};
+use crate::{
+    mcp::{McpExecutionContext, McpRuntimeService, McpRuntimeServiceError},
+    state::{Phase, RuntimeCore},
+};
 use harness_control_protocol::{
     error_codes, ActivityEvent, ActivityListParams, ActivityListResult, ActivitySubscribeParams,
     ActivitySubscribeResult, ApprovalsListResult, ApprovalsResolveParams, DiagnosticCheck,
@@ -25,48 +28,72 @@ pub fn run() -> io::Result<()> {
 
 fn run_io<R: BufRead, W: Write>(mut input: R, mut output: W) -> io::Result<()> {
     let mut core = RuntimeCore::new();
+    let mut mcp_service = McpRuntimeService::new();
     let mut subscribed = false;
     let mut line = String::new();
 
-    loop {
-        line.clear();
-        if input.read_line(&mut line)? == 0 {
-            return Ok(());
-        }
-        if line.trim().is_empty() {
-            continue;
-        }
+    let run_result = (|| -> io::Result<()> {
+        loop {
+            line.clear();
+            if input.read_line(&mut line)? == 0 {
+                return Ok(());
+            }
+            if line.trim().is_empty() {
+                continue;
+            }
 
-        let exit = match serde_json::from_str::<Value>(line.trim_end()) {
-            Ok(value) => match serde_json::from_value::<RpcMessage>(value) {
-                Ok(message) => dispatch(message, &mut core, &mut subscribed, &mut output)?,
+            let exit = match serde_json::from_str::<Value>(line.trim_end()) {
+                Ok(value) => match serde_json::from_value::<RpcMessage>(value) {
+                    Ok(message) => dispatch(
+                        message,
+                        &mut core,
+                        &mut mcp_service,
+                        &mut subscribed,
+                        &mut output,
+                    )?,
+                    Err(error) => {
+                        write_error(
+                            &mut output,
+                            empty_request_id(),
+                            error_codes::INVALID_REQUEST,
+                            MachineErrorCode::InvalidArgument,
+                            format!("Invalid request: {error}"),
+                        )?;
+                        false
+                    }
+                },
                 Err(error) => {
                     write_error(
                         &mut output,
                         empty_request_id(),
-                        error_codes::INVALID_REQUEST,
-                        MachineErrorCode::InvalidArgument,
-                        format!("Invalid request: {error}"),
+                        error_codes::PARSE_ERROR,
+                        MachineErrorCode::InternalError,
+                        format!("Parse error: {error}"),
                     )?;
                     false
                 }
-            },
-            Err(error) => {
-                write_error(
-                    &mut output,
-                    empty_request_id(),
-                    error_codes::PARSE_ERROR,
-                    MachineErrorCode::InternalError,
-                    format!("Parse error: {error}"),
-                )?;
-                false
+            };
+            output.flush()?;
+            if exit {
+                return Ok(());
             }
-        };
-        output.flush()?;
-        if exit {
-            return Ok(());
         }
+    })();
+    let shutdown_result = shutdown_runtime_services(&mut core, &mut mcp_service);
+    run_result.and(shutdown_result)
+}
+
+/// Common control-loop exit cleanup for `runtime.stop`, stdin EOF, and I/O
+/// errors. `runtime.stop` performs its own joined shutdown before replying;
+/// this call is then an idempotent final guard.
+fn shutdown_runtime_services(
+    core: &mut RuntimeCore,
+    mcp_service: &mut McpRuntimeService,
+) -> io::Result<()> {
+    if core.config.is_some() {
+        let _ = core.stop();
     }
+    mcp_service.shutdown().map_err(io::Error::other)
 }
 
 fn empty_request_id() -> harness_control_protocol::RequestId {
@@ -76,11 +103,14 @@ fn empty_request_id() -> harness_control_protocol::RequestId {
 fn dispatch<W: Write>(
     message: RpcMessage,
     core: &mut RuntimeCore,
+    mcp_service: &mut McpRuntimeService,
     subscribed: &mut bool,
     output: &mut W,
 ) -> io::Result<bool> {
     match message {
-        RpcMessage::Request(request) => handle_request(request, core, subscribed, output),
+        RpcMessage::Request(request) => {
+            handle_request(request, core, mcp_service, subscribed, output)
+        }
         RpcMessage::Notification(notification) => {
             handle_notification(notification, core, subscribed, output)?;
             Ok(false)
@@ -109,6 +139,7 @@ fn handle_notification<W: Write>(
 fn handle_request<W: Write>(
     request: RpcRequest,
     core: &mut RuntimeCore,
+    mcp_service: &mut McpRuntimeService,
     subscribed: &mut bool,
     output: &mut W,
 ) -> io::Result<bool> {
@@ -171,6 +202,20 @@ fn handle_request<W: Write>(
                 )?;
                 return Ok(false);
             }
+            if start_mcp_after_initialize(core, mcp_service, |service, context| {
+                service.start(context)
+            })
+            .is_err()
+            {
+                write_error(
+                    output,
+                    id,
+                    error_codes::INTERNAL_ERROR,
+                    MachineErrorCode::InternalError,
+                    "Failed to start Runtime MCP endpoint.",
+                )?;
+                return Ok(false);
+            }
             let result = InitializeResult {
                 server_info: harness_control_protocol::ServerInfo {
                     name: "chatgpt-harness-runtime".into(),
@@ -201,6 +246,16 @@ fn handle_request<W: Write>(
                 if *subscribed {
                     write_event(output, &event)?;
                 }
+            }
+            if mcp_service.shutdown().is_err() {
+                write_error(
+                    output,
+                    id,
+                    error_codes::INTERNAL_ERROR,
+                    MachineErrorCode::InternalError,
+                    "Failed to stop Runtime MCP endpoint.",
+                )?;
+                return Ok(true);
             }
             write_result(output, id, RuntimeStopResult { accepted: true })?;
             Ok(true)
@@ -318,6 +373,26 @@ fn handle_request<W: Write>(
     }
 }
 
+/// Starts the process-owned MCP service only after RuntimeCore initialization.
+/// A failed startup restores the core to its pre-initialize business state.
+fn start_mcp_after_initialize<F>(
+    core: &mut RuntimeCore,
+    mcp_service: &mut McpRuntimeService,
+    start: F,
+) -> Result<(), McpRuntimeServiceError>
+where
+    F: FnOnce(&mut McpRuntimeService, McpExecutionContext) -> Result<(), McpRuntimeServiceError>,
+{
+    let context = core
+        .mcp_context()
+        .expect("initialized RuntimeCore always supplies an MCP context");
+    if let Err(error) = start(mcp_service, context) {
+        core.rollback_initialize();
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn params<T: DeserializeOwned>(value: &Option<Value>) -> Result<T, String> {
     value
         .clone()
@@ -425,6 +500,7 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::io::Cursor;
+    use std::net::{SocketAddr, TcpListener};
     use std::path::{Path, PathBuf};
 
     struct TestWorkspace {
@@ -664,6 +740,7 @@ mod tests {
     fn missing_workspace_returns_invalid_argument_without_initializing_core() {
         let workspace = TestWorkspace::new();
         let mut core = RuntimeCore::new();
+        let mut mcp_service = McpRuntimeService::new();
         let mut subscribed = false;
         let mut output = Vec::new();
         let request = RpcRequest {
@@ -675,7 +752,14 @@ mod tests {
             )),
         };
 
-        assert!(!handle_request(request, &mut core, &mut subscribed, &mut output).unwrap());
+        assert!(!handle_request(
+            request,
+            &mut core,
+            &mut mcp_service,
+            &mut subscribed,
+            &mut output,
+        )
+        .unwrap());
 
         let message: RpcMessage = serde_json::from_slice(&output).unwrap();
         let error = response_error(&message);
@@ -727,5 +811,133 @@ mod tests {
         assert_eq!(state.config_revision, DecimalU64::new(7));
         assert_eq!(state.active_workspace, workspace.root.to_string_lossy());
         assert_eq!(state.security_mode, SecurityMode::Normal);
+    }
+
+    #[test]
+    fn failed_mcp_startup_rolls_back_and_allows_retry() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        let mut mcp_service = McpRuntimeService::new();
+        core.initialize(runtime_config(&workspace.root))
+            .expect("initialize core");
+
+        let result = start_mcp_after_initialize(&mut core, &mut mcp_service, |_, _| {
+            Err(McpRuntimeServiceError::StartupChannelClosed)
+        });
+        assert!(matches!(
+            result,
+            Err(McpRuntimeServiceError::StartupChannelClosed)
+        ));
+        assert_eq!(core.phase, Phase::WaitingInitialize);
+        assert!(core.config.is_none());
+        assert!(core.events.is_none());
+        assert!(core.workspace_guard().is_none());
+        assert!(core.status().is_none());
+        core.initialize(runtime_config(&workspace.root))
+            .expect("retry initialize");
+    }
+
+    #[test]
+    fn control_lifecycle_starts_one_endpoint_and_stops_it_before_replying() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        let mut mcp_service = McpRuntimeService::new();
+        let mut subscribed = false;
+        let mut output = Vec::new();
+
+        let initialize = RpcRequest {
+            id: harness_control_protocol::RequestId::String("initialize".into()),
+            method: "initialize".into(),
+            params: Some(initialize_params(PROTOCOL_VERSION, &workspace.root)),
+        };
+        assert!(!handle_request(
+            initialize,
+            &mut core,
+            &mut mcp_service,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("initialize request"));
+        let endpoint_url = mcp_service.endpoint_url().expect("endpoint URL").to_owned();
+
+        handle_notification(
+            RpcNotification {
+                method: "initialized".into(),
+                params: Some(json!({})),
+            },
+            &mut core,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("first acknowledgement");
+        handle_notification(
+            RpcNotification {
+                method: "initialized".into(),
+                params: Some(json!({})),
+            },
+            &mut core,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("duplicate acknowledgement");
+        assert_eq!(mcp_service.endpoint_url(), Some(endpoint_url.as_str()));
+
+        let stop = RpcRequest {
+            id: harness_control_protocol::RequestId::String("stop".into()),
+            method: "runtime.stop".into(),
+            params: Some(json!({})),
+        };
+        assert!(handle_request(
+            stop,
+            &mut core,
+            &mut mcp_service,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("stop request"));
+        assert!(mcp_service.endpoint_url().is_none());
+        let address: SocketAddr = endpoint_url
+            .strip_prefix("http://")
+            .and_then(|value| value.strip_suffix("/mcp"))
+            .expect("endpoint authority")
+            .parse()
+            .expect("socket address");
+        TcpListener::bind(address).expect("endpoint port released before stop response");
+
+        let messages = String::from_utf8(output)
+            .expect("UTF-8 output")
+            .lines()
+            .map(|line| serde_json::from_str::<RpcMessage>(line).expect("control response"))
+            .collect::<Vec<_>>();
+        assert!(matches!(messages[0], RpcMessage::Response(_)));
+        let RpcMessage::Response(stop_response) = &messages[1] else {
+            panic!("expected stop response");
+        };
+        assert_eq!(stop_response.result, json!({ "accepted": true }));
+    }
+
+    #[test]
+    fn eof_cleanup_stops_and_joins_the_mcp_endpoint() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        let mut mcp_service = McpRuntimeService::new();
+        core.initialize(runtime_config(&workspace.root))
+            .expect("initialize core");
+        start_mcp_after_initialize(&mut core, &mut mcp_service, |service, context| {
+            service.start(context)
+        })
+        .expect("start MCP service");
+        let endpoint_url = mcp_service.endpoint_url().expect("endpoint URL").to_owned();
+
+        shutdown_runtime_services(&mut core, &mut mcp_service).expect("EOF cleanup");
+        assert_eq!(core.phase, Phase::Stopping);
+        assert!(mcp_service.endpoint_url().is_none());
+        let address: SocketAddr = endpoint_url
+            .strip_prefix("http://")
+            .and_then(|value| value.strip_suffix("/mcp"))
+            .expect("endpoint authority")
+            .parse()
+            .expect("socket address");
+        TcpListener::bind(address).expect("endpoint port released during EOF cleanup");
     }
 }

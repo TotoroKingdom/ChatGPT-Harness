@@ -1,5 +1,5 @@
 use crate::mcp::context::McpExecutionContext;
-use crate::mcp::errors::{invalid_arguments, read_file_error};
+use crate::mcp::errors::{invalid_arguments, read_file_error, runtime_not_ready};
 use crate::tools::{execute_read_file, ReadFileRequest};
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::schemars;
@@ -20,6 +20,9 @@ pub(crate) struct ReadFileArguments {
 }
 
 pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallToolResult {
+    if !context.is_runtime_ready() {
+        return runtime_not_ready();
+    }
     let arguments = match serde_json::from_value::<ReadFileArguments>(arguments) {
         Ok(arguments) => arguments,
         Err(_) => return invalid_arguments(),
