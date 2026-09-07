@@ -85,13 +85,28 @@ async function load<T>(fn: () => Promise<T>, empty: (data: T) => boolean): Promi
   }
 }
 
-function runtimeComponentState(state: RuntimeState): ComponentStates["runtime"] {
-  if (state.lifecycle === "error") return "error";
-  if (!state.runtimeId) return "stopped";
-  if (state.lifecycle === "stopping") return "stopping";
-  if (state.lifecycle === "ready" && state.readiness === "ready") return "ready";
-  if (state.readiness === "degraded") return "degraded";
-  return "starting";
+function componentStatesFromRuntime(
+  state: RuntimeState,
+  current: ComponentStates,
+): ComponentStates {
+  let runtime: ComponentStates["runtime"];
+  if (state.lifecycle === "error") runtime = "error";
+  else if (!state.runtimeId) runtime = "stopped";
+  else if (state.lifecycle === "stopping") runtime = "stopping";
+  else if (state.lifecycle === "ready" && state.readiness === "ready") runtime = "ready";
+  else if (state.readiness === "degraded") runtime = "degraded";
+  else runtime = "starting";
+
+  // M5 MCP is an endpoint inside Runtime; RuntimeState is authoritative for it.
+  // Keep Mock-only Tunnel lifecycle behavior intact.
+  return { ...current, runtime, mcp: runtime };
+}
+
+function componentStatesWithRuntimeStatus(
+  current: ComponentStates,
+  runtime: ComponentStates["runtime"],
+): ComponentStates {
+  return { ...current, runtime, mcp: runtime };
 }
 
 type RuntimeRehydration = {
@@ -110,16 +125,16 @@ async function rehydrateRuntime(client: HarnessControlClient): Promise<RuntimeRe
         if (resource.status === "success" || resource.status === "empty") {
           return {
             resource,
-            components: { ...client.getComponentStates(), runtime: runtimeComponentState(resource.data) },
+            components: componentStatesFromRuntime(resource.data, client.getComponentStates()),
             activeRevision: resource.data.configRevision,
           };
         }
-        return { resource, components: { ...current, runtime: "error" }, activeRevision: null };
+        return { resource, components: componentStatesWithRuntimeStatus(current, "error"), activeRevision: null };
       }
       case "stopped":
         return {
           resource: { status: "idle" },
-          components: { ...current, runtime: "stopped" },
+          components: componentStatesWithRuntimeStatus(current, "stopped"),
           activeRevision: null,
         };
       case "crashed":
@@ -133,19 +148,19 @@ async function rehydrateRuntime(client: HarnessControlClient): Promise<RuntimeRe
               process.last_error?.code,
             ),
           },
-          components: { ...current, runtime: "error" },
+          components: componentStatesWithRuntimeStatus(current, "error"),
           activeRevision: null,
         };
       case "starting":
         return {
           resource: { status: "idle" },
-          components: { ...current, runtime: "starting" },
+          components: componentStatesWithRuntimeStatus(current, "starting"),
           activeRevision: null,
         };
       case "stopping":
         return {
           resource: { status: "idle" },
-          components: { ...current, runtime: "stopping" },
+          components: componentStatesWithRuntimeStatus(current, "stopping"),
           activeRevision: null,
         };
     }
@@ -153,7 +168,7 @@ async function rehydrateRuntime(client: HarnessControlClient): Promise<RuntimeRe
     const clientError = toClientError(error);
     return {
       resource: { status: clientError.kind, error: clientError },
-      components: { ...current, runtime: "error" },
+      components: componentStatesWithRuntimeStatus(current, "error"),
       activeRevision: null,
     };
   }

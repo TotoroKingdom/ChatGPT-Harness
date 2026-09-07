@@ -71,6 +71,7 @@ function RuntimeProbe() {
   return (
     <>
       <output data-testid="runtime-component">{components.runtime}</output>
+      <output data-testid="mcp-component">{components.mcp}</output>
       <output data-testid="runtime-resource">{runtime.status}</output>
       <output data-testid="runtime-id">{runtimeId}</output>
       <output data-testid="runtime-error-code">{runtimeErrorCode}</output>
@@ -238,6 +239,7 @@ describe("HarnessDataProvider runtime rehydration", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("runtime-component")).toHaveTextContent("ready");
+      expect(screen.getByTestId("mcp-component")).toHaveTextContent("ready");
       expect(screen.getByTestId("runtime-resource")).toHaveTextContent("success");
       expect(screen.getByTestId("runtime-id")).toHaveTextContent("runtime-1");
     });
@@ -263,6 +265,7 @@ describe("HarnessDataProvider runtime rehydration", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("runtime-component")).toHaveTextContent("ready");
+      expect(screen.getByTestId("mcp-component")).toHaveTextContent("ready");
       expect(screen.getByTestId("runtime-resource")).toHaveTextContent("success");
       expect(screen.getByTestId("runtime-id")).toHaveTextContent("runtime-A");
     });
@@ -312,6 +315,7 @@ describe("HarnessDataProvider runtime rehydration", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("runtime-component")).toHaveTextContent("stopped");
+      expect(screen.getByTestId("mcp-component")).toHaveTextContent("stopped");
       expect(screen.getByTestId("runtime-resource")).toHaveTextContent("idle");
       expect(screen.getByTestId("runtime-id")).toHaveTextContent("");
       expect(screen.getByTestId("restart-required")).toHaveTextContent("false");

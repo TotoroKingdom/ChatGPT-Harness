@@ -31,32 +31,45 @@ const tauriAvailable = () =>
   typeof window !== "undefined" &&
   Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
-function componentStatesFromRuntime(state: RuntimeState): ComponentStates {
-  let runtime: ComponentStates["runtime"];
-  if (state.lifecycle === "error") runtime = "error";
-  else if (!state.runtimeId) runtime = "stopped";
-  else if (state.lifecycle === "stopping") runtime = "stopping";
-  else if (state.lifecycle === "ready" && state.readiness === "ready") runtime = "ready";
-  else if (state.readiness === "degraded") runtime = "degraded";
-  else runtime = "starting";
-  return { runtime, tunnel: "stopped", mcp: "stopped" };
+function componentStatusFromRuntime(state: RuntimeState): ComponentStates["runtime"] {
+  if (state.lifecycle === "error") return "error";
+  if (!state.runtimeId) return "stopped";
+  if (state.lifecycle === "stopping") return "stopping";
+  if (state.lifecycle === "ready" && state.readiness === "ready") return "ready";
+  if (state.readiness === "degraded") return "degraded";
+  return "starting";
 }
 
-function componentStatusFromProcess(event: RuntimeProcessEvent): ComponentStates["runtime"] {
+function componentStatesFromRuntime(state: RuntimeState): ComponentStates {
+  const runtime = componentStatusFromRuntime(state);
+  // In M5 the MCP endpoint is hosted by the Runtime process, so RuntimeState is
+  // the authority for both components. Tunnel remains unimplemented until M7.
+  return { runtime, tunnel: "stopped", mcp: runtime };
+}
+
+function componentStatesFromProcess(
+  event: RuntimeProcessEvent,
+  current: ComponentStates,
+): ComponentStates {
   switch (event.phase) {
     case "starting":
-      return "starting";
+      return { runtime: "starting", tunnel: "stopped", mcp: "starting" };
     case "running":
-      return "ready";
+      // A process event has no readiness field. Preserve a previously confirmed
+      // RuntimeState; otherwise wait for runtime_status before declaring MCP ready.
+      return {
+        runtime: current.runtime === "ready" || current.runtime === "degraded" ? current.runtime : "starting",
+        tunnel: "stopped",
+        mcp: current.mcp === "ready" || current.mcp === "degraded" ? current.mcp : "starting",
+      };
     case "stopping":
-      return "stopping";
+      return { runtime: "stopping", tunnel: "stopped", mcp: "stopping" };
     case "crashed":
-      return "error";
+      return { runtime: "error", tunnel: "stopped", mcp: "error" };
     case "stopped":
-      return "stopped";
+      return { runtime: "stopped", tunnel: "stopped", mcp: "stopped" };
   }
 }
-
 export class TauriHarnessControlClient implements HarnessControlClient {
   private components: ComponentStates = { runtime: "stopped", tunnel: "stopped", mcp: "stopped" };
 
@@ -114,7 +127,7 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   async runtimeStart() {
-    this.components = { runtime: "starting", tunnel: "stopped", mcp: "stopped" };
+    this.components = { runtime: "starting", tunnel: "stopped", mcp: "starting" };
     const state = await this.call<RuntimeState>("runtime_start");
     this.applyRuntimeState(state);
     return state;
@@ -131,7 +144,7 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   async runtimeStop() {
-    this.components = { runtime: "stopping", tunnel: "stopped", mcp: "stopped" };
+    this.components = { runtime: "stopping", tunnel: "stopped", mcp: "stopping" };
     const result = await this.call<RuntimeStopResult>("runtime_stop");
     if (result.accepted) {
       this.components = { runtime: "stopped", tunnel: "stopped", mcp: "stopped" };
@@ -149,11 +162,14 @@ export class TauriHarnessControlClient implements HarnessControlClient {
 
   async componentStatesSubscribe(listener: ComponentStatesListener): Promise<Unsubscribe> {
     return listen<RuntimeProcessEvent>("runtime:process", (event) => {
-      this.components = {
-        ...this.components,
-        runtime: componentStatusFromProcess(event.payload),
-      };
+      this.components = componentStatesFromProcess(event.payload, this.components);
       listener(this.components, undefined, event.payload);
+
+      if (event.payload.phase === "running") {
+        void this.runtimeStatus()
+          .then((state) => listener(this.components, state))
+          .catch(() => undefined);
+      }
     });
   }
 

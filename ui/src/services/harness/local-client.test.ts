@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeState } from "@protocol/v1";
-import type { RuntimeProcessEvent } from "@/services/harness/client";
+import type { ComponentStates, RuntimeProcessEvent } from "@/services/harness/client";
 
 const tauri = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -29,23 +29,58 @@ function runtimeState(overrides: Partial<RuntimeState> = {}): RuntimeState {
   };
 }
 
+const states = (runtime: ComponentStates["runtime"]): ComponentStates => ({
+  runtime,
+  tunnel: "stopped",
+  mcp: runtime,
+});
+
 describe("TauriHarnessControlClient", () => {
   beforeEach(() => {
     tauri.invoke.mockReset();
     tauri.listen.mockReset();
   });
 
-  it("maps the real Runtime status returned by Tauri", async () => {
-    tauri.invoke.mockResolvedValue(runtimeState());
+  it.each([
+    ["ready RuntimeState", runtimeState(), states("ready")],
+    ["initializing RuntimeState", runtimeState({ lifecycle: "initializing", readiness: "not_ready" }), states("starting")],
+    ["degraded RuntimeState", runtimeState({ lifecycle: "ready", readiness: "degraded" }), states("degraded")],
+    ["stopped RuntimeState", runtimeState({ runtimeId: "", lifecycle: "initializing", readiness: "not_ready" }), states("stopped")],
+    ["error RuntimeState", runtimeState({ lifecycle: "error", readiness: "not_ready" }), states("error")],
+  ] as const)("maps %s to M5 component states", async (_label, status, expected) => {
+    tauri.invoke.mockResolvedValue(status);
     const client = new TauriHarnessControlClient();
 
-    await expect(client.runtimeStatus()).resolves.toMatchObject({ runtimeId: "runtime-1" });
+    await expect(client.runtimeStatus()).resolves.toEqual(status);
     expect(tauri.invoke).toHaveBeenCalledWith("runtime_status", undefined);
-    expect(client.getComponentStates()).toEqual({
-      runtime: "ready",
-      tunnel: "stopped",
-      mcp: "stopped",
-    });
+    expect(client.getComponentStates()).toEqual(expected);
+    expect(client.getComponentStates().mcp).not.toBe(
+      status.lifecycle === "ready" && status.readiness === "ready" ? "stopped" : "ready",
+    );
+  });
+
+  it("keeps MCP starting and stopping with the Runtime command lifecycle", async () => {
+    let resolveStart: (state: RuntimeState) => void;
+    let resolveStop: (result: { accepted: boolean }) => void;
+    tauri.invoke
+      .mockImplementationOnce(
+        () => new Promise<RuntimeState>((resolve) => { resolveStart = resolve; }),
+      )
+      .mockImplementationOnce(
+        () => new Promise<{ accepted: boolean }>((resolve) => { resolveStop = resolve; }),
+      );
+    const client = new TauriHarnessControlClient();
+
+    const start = client.runtimeStart();
+    expect(client.getComponentStates()).toEqual(states("starting"));
+    resolveStart!(runtimeState());
+    await start;
+
+    const stop = client.runtimeStop();
+    expect(client.getComponentStates()).toEqual(states("stopping"));
+    resolveStop!({ accepted: true });
+    await stop;
+    expect(client.getComponentStates()).toEqual(states("stopped"));
   });
 
   it("reads runtime process status from the Tauri-local command", async () => {
@@ -60,12 +95,11 @@ describe("TauriHarnessControlClient", () => {
   });
 
   it.each([
-    ["starting", "starting"],
-    ["running", "ready"],
-    ["stopping", "stopping"],
-    ["stopped", "stopped"],
-    ["crashed", "error"],
-  ] as const)("maps process phase %s without fabricating RuntimeState", async (phase, expected) => {
+    ["starting", states("starting")],
+    ["stopping", states("stopping")],
+    ["stopped", states("stopped")],
+    ["crashed", states("error")],
+  ] as const)("maps process phase %s without reporting MCP ready", async (phase, expected) => {
     let handler: ((event: { payload: RuntimeProcessEvent }) => void) | undefined;
     tauri.listen.mockImplementation(async (name, listener) => {
       expect(name).toBe("runtime:process");
@@ -85,9 +119,32 @@ describe("TauriHarnessControlClient", () => {
     } as RuntimeProcessEvent;
     handler?.({ payload: process });
 
-    const states = { runtime: expected, tunnel: "stopped", mcp: "stopped" };
-    expect(client.getComponentStates()).toEqual(states);
-    expect(listener).toHaveBeenLastCalledWith(states, undefined, process);
+    expect(client.getComponentStates()).toEqual(expected);
+    expect(listener).toHaveBeenLastCalledWith(expected, undefined, process);
+  });
+
+  it("refreshes RuntimeState after a running process event before reporting MCP ready", async () => {
+    let handler: ((event: { payload: RuntimeProcessEvent }) => void) | undefined;
+    tauri.listen.mockImplementation(async (_name, listener) => {
+      handler = listener;
+      return vi.fn();
+    });
+    tauri.invoke.mockResolvedValue(runtimeState());
+    const client = new TauriHarnessControlClient();
+    const listener = vi.fn();
+    const process = { phase: "running" } as RuntimeProcessEvent;
+
+    await client.componentStatesSubscribe(listener);
+    handler?.({ payload: process });
+
+    expect(listener).toHaveBeenLastCalledWith(states("starting"), undefined, process);
+    expect(client.getComponentStates()).toEqual(states("starting"));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(tauri.invoke).toHaveBeenCalledWith("runtime_status", undefined);
+    expect(client.getComponentStates()).toEqual(states("ready"));
+    expect(listener).toHaveBeenLastCalledWith(states("ready"), runtimeState());
   });
 
   it("registers the activity listener before subscribing from the supplied cursor", async () => {
