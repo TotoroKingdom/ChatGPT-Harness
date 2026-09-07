@@ -5,47 +5,82 @@ const WORKSPACE_SCOPE: &str = "workspace";
 /// The Runtime's single source of truth for tool implementation and exposure state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolRegistry {
-    descriptors: Vec<ToolDescriptor>,
+    entries: Vec<RegisteredTool>,
+}
+
+/// Capability semantics live alongside the one authoritative tool registration.
+/// Future capability additions must extend this type and the policy match explicitly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolCapability {
+    WorkspaceRead,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RegisteredTool {
+    descriptor: ToolDescriptor,
+    capability: ToolCapability,
 }
 
 impl ToolRegistry {
+    /// Resolve only a currently executable registration, without deriving policy.
+    pub fn capability(&self, name: &str) -> Option<ToolCapability> {
+        self.entries.iter().find_map(|entry| {
+            let tool = &entry.descriptor;
+            (tool.name == name
+                && tool.implemented
+                && tool.enabled
+                && tool.exposed
+                && tool.readiness == ToolReadiness::Ready)
+                .then_some(entry.capability)
+        })
+    }
     /// Build the Normal Mode catalog in its stable, protocol-visible order.
     pub fn normal_mode() -> Self {
         Self {
-            descriptors: vec![
-                ToolDescriptor {
-                    name: "read_file".into(),
-                    description: "Read a workspace file.".into(),
-                    implemented: true,
-                    enabled: true,
-                    exposed: true,
-                    effective_policy: PolicyDecision::Allow,
-                    scope: WORKSPACE_SCOPE.into(),
-                    readiness: ToolReadiness::Ready,
-                    risk_level: RiskLevel::Low,
+            entries: vec![
+                RegisteredTool {
+                    capability: ToolCapability::WorkspaceRead,
+                    descriptor: ToolDescriptor {
+                        name: "read_file".into(),
+                        description: "Read a workspace file.".into(),
+                        implemented: true,
+                        enabled: true,
+                        exposed: true,
+                        effective_policy: PolicyDecision::Allow,
+                        scope: WORKSPACE_SCOPE.into(),
+                        readiness: ToolReadiness::Ready,
+                        risk_level: RiskLevel::Low,
+                    },
                 },
-                ToolDescriptor {
-                    name: "glob".into(),
-                    description: "Find workspace paths.".into(),
-                    implemented: true,
-                    enabled: true,
-                    exposed: true,
-                    effective_policy: PolicyDecision::Allow,
-                    scope: WORKSPACE_SCOPE.into(),
-                    readiness: ToolReadiness::Ready,
-                    risk_level: RiskLevel::Low,
+                RegisteredTool {
+                    capability: ToolCapability::WorkspaceRead,
+                    descriptor: ToolDescriptor {
+                        name: "glob".into(),
+                        description: "Find workspace paths.".into(),
+                        implemented: true,
+                        enabled: true,
+                        exposed: true,
+                        effective_policy: PolicyDecision::Allow,
+                        scope: WORKSPACE_SCOPE.into(),
+                        readiness: ToolReadiness::Ready,
+                        risk_level: RiskLevel::Low,
+                    },
                 },
             ],
         }
     }
 
     pub fn list(&self) -> Vec<ToolDescriptor> {
-        self.descriptors.clone()
+        self.entries
+            .iter()
+            .map(|entry| entry.descriptor.clone())
+            .collect()
     }
 
     pub fn exposed_catalog(&self) -> Vec<ToolDescriptor> {
-        self.descriptors
+        self.entries
             .iter()
+            .map(|entry| &entry.descriptor)
             .filter(|descriptor| descriptor.exposed)
             .cloned()
             .collect()
@@ -112,5 +147,43 @@ mod tests {
         assert_eq!(glob.scope, WORKSPACE_SCOPE);
         assert_eq!(glob.readiness, ToolReadiness::Ready);
         assert_eq!(glob.risk_level, RiskLevel::Low);
+    }
+    #[test]
+    fn capability_comes_from_the_same_registered_entry() {
+        let registry = ToolRegistry::normal_mode();
+        for descriptor in registry.list() {
+            assert_eq!(
+                registry.capability(&descriptor.name),
+                Some(ToolCapability::WorkspaceRead)
+            );
+        }
+        assert_eq!(registry.capability("unknown"), None);
+        assert_eq!(registry.capability("bash"), None);
+    }
+
+    #[test]
+    fn capability_lookup_rejects_each_unavailable_registration_state() {
+        for state in 0..4 {
+            let mut registry = ToolRegistry::normal_mode();
+            let descriptor = &mut registry.entries[0].descriptor;
+            match state {
+                0 => descriptor.implemented = false,
+                1 => descriptor.enabled = false,
+                2 => descriptor.exposed = false,
+                3 => descriptor.readiness = ToolReadiness::Unavailable,
+                _ => unreachable!(),
+            }
+            assert_eq!(registry.capability("read_file"), None);
+        }
+    }
+
+    #[test]
+    fn capability_metadata_does_not_use_the_placeholder_effective_policy() {
+        let mut registry = ToolRegistry::normal_mode();
+        registry.entries[0].descriptor.effective_policy = PolicyDecision::Deny;
+        assert_eq!(
+            registry.capability("read_file"),
+            Some(ToolCapability::WorkspaceRead)
+        );
     }
 }
