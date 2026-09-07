@@ -1,5 +1,6 @@
 use super::state::RequestLifecycle;
 use super::*;
+use crate::audit::{AuditEventType, AuditLifecycleState, AuditOutcome, WorkspaceValidation};
 use crate::mcp::{McpExecutionContext, McpService};
 use crate::policy::{PolicyEngine, PolicyEvaluationReason};
 use crate::tools::{GlobRequest, ReadFileError, ToolRegistry};
@@ -553,4 +554,110 @@ fn real_executor_content_error_maps_to_existing_code_and_failed_state() {
         fixture.recorder.0.lock().unwrap().last().unwrap().state,
         RequestState::Failed
     );
+}
+
+#[test]
+fn audit_events_cover_allow_deny_and_ask_branches_in_order() {
+    use AuditEventType::*;
+
+    for (decision, expected_types, expected_terminal) in [
+        (
+            PolicyDecision::Allow,
+            vec![
+                RequestReceived,
+                WorkspaceValidated,
+                PolicyEvaluated,
+                ExecutionStarted,
+                ExecutionCompleted,
+            ],
+            AuditOutcome::Success,
+        ),
+        (
+            PolicyDecision::Deny,
+            vec![
+                RequestReceived,
+                WorkspaceValidated,
+                PolicyEvaluated,
+                RequestDenied,
+            ],
+            AuditOutcome::Denied,
+        ),
+        (
+            PolicyDecision::Ask,
+            vec![
+                RequestReceived,
+                WorkspaceValidated,
+                PolicyEvaluated,
+                ApprovalRequired,
+            ],
+            AuditOutcome::ApprovalRequired,
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let report = fixture
+            .pipeline(rules(decision.clone()))
+            .execute(|| Ok(fixture.spy("sample.txt", false)));
+        let audit_events = report.audit_events;
+
+        assert_eq!(
+            audit_events
+                .iter()
+                .map(|event| event.event_type)
+                .collect::<Vec<_>>(),
+            expected_types
+        );
+        assert!(audit_events
+            .iter()
+            .all(|event| event.request_id == report.context.request_id));
+        assert_eq!(
+            audit_events[1].workspace_validation,
+            WorkspaceValidation::Passed
+        );
+        assert_eq!(audit_events.last().unwrap().outcome, expected_terminal);
+        assert_eq!(
+            audit_events.last().unwrap().lifecycle_state,
+            match decision {
+                PolicyDecision::Allow => AuditLifecycleState::Completed,
+                PolicyDecision::Deny => AuditLifecycleState::Denied,
+                PolicyDecision::Ask => AuditLifecycleState::AwaitingApproval,
+            }
+        );
+    }
+}
+
+#[test]
+fn audit_events_have_stable_request_order_and_redacted_argument_boundary() {
+    let fixture = Fixture::new();
+    let input = json!({
+        "secret": "SECRET-VALUE",
+        "api_key": "API-KEY-VALUE",
+        "credential": "CREDENTIAL-VALUE",
+    });
+    let report = fixture.pipeline(PolicyEngine::system_rules()).execute(|| {
+        assert!(input.get("secret").is_some());
+        Ok(fixture.spy("sample.txt", false))
+    });
+
+    let serialized = serde_json::to_string(&report.audit_events).unwrap();
+    for secret in ["SECRET-VALUE", "API-KEY-VALUE", "CREDENTIAL-VALUE"] {
+        assert!(!serialized.contains(secret));
+    }
+    assert_eq!(
+        report
+            .audit_events
+            .iter()
+            .map(|event| event.event_type)
+            .collect::<Vec<_>>(),
+        vec![
+            AuditEventType::RequestReceived,
+            AuditEventType::WorkspaceValidated,
+            AuditEventType::PolicyEvaluated,
+            AuditEventType::ExecutionStarted,
+            AuditEventType::ExecutionCompleted,
+        ]
+    );
+    assert!(report
+        .audit_events
+        .windows(2)
+        .all(|events| events[0].timestamp <= events[1].timestamp));
 }

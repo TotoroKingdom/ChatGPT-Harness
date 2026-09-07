@@ -1,3 +1,4 @@
+mod audit;
 mod events;
 mod execution;
 #[allow(dead_code)] // The M5-D1 adapter is constructed by the future MCP transport.

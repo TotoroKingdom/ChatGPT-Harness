@@ -1,4 +1,5 @@
 use super::{RequestContext, RequestState, SecurityContext, ToolExecutor, TransitionError};
+use crate::audit::AuditEvent;
 use crate::policy::PolicyEngine;
 use crate::tools::{GlobError, ReadFileError, ToolRegistry};
 use crate::workspace::WorkspaceGuard;
@@ -9,7 +10,7 @@ use std::sync::{
 };
 
 #[derive(Debug, PartialEq, Eq)]
-#[allow(dead_code)] // variants are retained for typed adapter error preservation
+#[allow(dead_code)]
 pub(crate) enum ExecutionError {
     RuntimeNotInitialized,
     RuntimeNotReady,
@@ -27,15 +28,13 @@ pub(crate) struct ExecutionPermit {
 }
 
 impl ExecutionPermit {
-    // Low-level M5 tests deliberately isolate executor behavior from enforcement.
     #[cfg(test)]
     pub(crate) fn for_executor_test() -> Self {
         Self { _private: () }
     }
 }
 
-/// Hooks observe only non-secret metadata, state and policy evidence, never raw
-/// errors/arguments/results. They do not decide authorization or resume requests.
+/// Hooks observe only non-secret metadata, state and policy evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PipelineEvent {
     RequestReceived,
@@ -43,8 +42,15 @@ pub(crate) enum PipelineEvent {
         from: RequestState,
         to: RequestState,
     },
+    WorkspaceValidated {
+        passed: bool,
+    },
     PolicyDecision,
     ExecutionStarted,
+    ExecutionCompleted,
+    ExecutionFailed,
+    RequestDenied,
+    ApprovalRequired,
     RequestFinished,
 }
 
@@ -57,10 +63,12 @@ impl ExecutionHook for NoopHook {
     fn on_event(&self, _context: &RequestContext, _event: PipelineEvent) {}
 }
 
-#[allow(dead_code)] // context is retained for the M6-C observation seam
+#[allow(dead_code)]
 pub(crate) struct ExecutionReport<T> {
     pub(crate) context: RequestContext,
     pub(crate) result: Result<T, ExecutionError>,
+    /// Per-invocation emission; this is not audit storage.
+    pub(crate) audit_events: Vec<AuditEvent>,
 }
 
 /// One immutable initialized Runtime snapshot shared by every execution entry.
@@ -94,7 +102,7 @@ impl ExecutionPipeline {
         }
     }
 
-    /// Internal M6-C observation seam, not user-defined executable hooks.
+    /// Internal observation seam, not user-defined executable hooks.
     #[allow(dead_code)]
     pub(crate) fn with_hook(mut self, hook: Arc<dyn ExecutionHook>) -> Self {
         self.hook = hook;
@@ -108,12 +116,13 @@ impl ExecutionPipeline {
         prepare: impl FnOnce() -> Result<E, ExecutionError>,
     ) -> ExecutionReport<E::Output> {
         let mut context = RequestContext::new(E::TOOL_NAME, self.security.clone());
-        self.hook.on_event(&context, PipelineEvent::RequestReceived);
-        let mut result = self.run(&mut context, prepare);
+        let mut audit_events = Vec::new();
+        self.emit(&context, PipelineEvent::RequestReceived, &mut audit_events);
+        let mut result = self.run(&mut context, prepare, &mut audit_events);
         if result.is_err()
             && !matches!(
                 context.state(),
-                RequestState::Denied | RequestState::AwaitingApproval
+                RequestState::Denied | RequestState::AwaitingApproval | RequestState::Failed
             )
         {
             if let Err(error) = self.transition(&mut context, RequestState::Failed) {
@@ -121,48 +130,89 @@ impl ExecutionPipeline {
             }
         }
         // Finished means this invocation returned, NOT approval/completion.
-        self.hook.on_event(&context, PipelineEvent::RequestFinished);
-        ExecutionReport { context, result }
+        self.emit(&context, PipelineEvent::RequestFinished, &mut audit_events);
+        ExecutionReport {
+            context,
+            result,
+            audit_events,
+        }
     }
 
     fn run<E: ToolExecutor>(
         &self,
         context: &mut RequestContext,
         prepare: impl FnOnce() -> Result<E, ExecutionError>,
+        audit_events: &mut Vec<AuditEvent>,
     ) -> Result<E::Output, ExecutionError> {
         self.transition(context, RequestState::Validating)?;
         self.require_ready()?;
         let executor = prepare()?;
         executor.validate()?;
         self.transition(context, RequestState::WorkspaceValidating)?;
-        self.guard
-            .approve(executor.workspace_target())
-            .map_err(E::workspace_error)?;
-        context.workspace_validated();
+        match self.guard.approve(executor.workspace_target()) {
+            Ok(_) => {
+                context.workspace_validated();
+                self.emit(
+                    context,
+                    PipelineEvent::WorkspaceValidated { passed: true },
+                    audit_events,
+                );
+            }
+            Err(error) => {
+                self.emit(
+                    context,
+                    PipelineEvent::WorkspaceValidated { passed: false },
+                    audit_events,
+                );
+                return Err(E::workspace_error(error));
+            }
+        }
         self.transition(context, RequestState::PolicyEvaluating)?;
         let evaluation = self.policy.evaluate(&context.policy, &self.registry);
         let decision = evaluation.decision.clone();
         context.policy_evaluation = Some(evaluation);
-        self.hook.on_event(context, PipelineEvent::PolicyDecision);
+        self.emit(context, PipelineEvent::PolicyDecision, audit_events);
         match decision {
             PolicyDecision::Deny => {
                 self.transition(context, RequestState::Denied)?;
+                self.emit(context, PipelineEvent::RequestDenied, audit_events);
                 Err(ExecutionError::PolicyDenied)
             }
             PolicyDecision::Ask => {
                 self.transition(context, RequestState::AwaitingApproval)?;
+                self.emit(context, PipelineEvent::ApprovalRequired, audit_events);
                 Err(ExecutionError::ApprovalRequired)
             }
             PolicyDecision::Allow => {
-                // A stop/rollback while validating must not open a new execution.
                 self.require_ready()?;
                 self.transition(context, RequestState::Executing)?;
-                self.hook.on_event(context, PipelineEvent::ExecutionStarted);
+                self.emit(context, PipelineEvent::ExecutionStarted, audit_events);
                 let permit = ExecutionPermit { _private: () };
-                let output = executor.execute(&permit, &self.guard, self.max_read_bytes)?;
-                self.transition(context, RequestState::Completed)?;
-                Ok(output)
+                match executor.execute(&permit, &self.guard, self.max_read_bytes) {
+                    Ok(output) => {
+                        self.transition(context, RequestState::Completed)?;
+                        self.emit(context, PipelineEvent::ExecutionCompleted, audit_events);
+                        Ok(output)
+                    }
+                    Err(error) => {
+                        self.transition(context, RequestState::Failed)?;
+                        self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                        Err(error)
+                    }
+                }
             }
+        }
+    }
+
+    fn emit(
+        &self,
+        context: &RequestContext,
+        event: PipelineEvent,
+        audit_events: &mut Vec<AuditEvent>,
+    ) {
+        self.hook.on_event(context, event);
+        if let Some(audit_event) = AuditEvent::from_pipeline_event(context, event) {
+            audit_events.push(audit_event);
         }
     }
 
