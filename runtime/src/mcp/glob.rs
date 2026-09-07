@@ -1,6 +1,7 @@
+use crate::execution::ExecutionError;
 use crate::mcp::context::McpExecutionContext;
-use crate::mcp::errors::{glob_error, invalid_arguments, runtime_not_ready};
-use crate::tools::{execute_glob, GlobMatchKind, GlobRequest};
+use crate::mcp::errors::execution_error;
+use crate::tools::{GlobMatchKind, GlobRequest};
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
@@ -19,19 +20,16 @@ pub(crate) struct GlobArguments {
 }
 
 pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallToolResult {
-    if !context.is_runtime_ready() {
-        return runtime_not_ready();
-    }
-    let arguments = match serde_json::from_value::<GlobArguments>(arguments) {
-        Ok(arguments) => arguments,
-        Err(_) => return invalid_arguments(),
-    };
-    let mut request = GlobRequest::new(arguments.pattern);
-    if let Some(base_path) = arguments.base_path {
-        request = request.with_base_path(PathBuf::from(base_path));
-    }
-
-    match execute_glob(context.workspace_guard(), &request) {
+    let report = context.execute(|| {
+        let arguments = serde_json::from_value::<GlobArguments>(arguments)
+            .map_err(|_| ExecutionError::InvalidArguments)?;
+        let mut request = GlobRequest::new(arguments.pattern);
+        if let Some(base_path) = arguments.base_path {
+            request = request.with_base_path(PathBuf::from(base_path));
+        }
+        Ok(request)
+    });
+    match report.result {
         Ok(output) => {
             let matches = output
                 .matches
@@ -68,6 +66,6 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
                 .push(ContentBlock::text("Listed workspace paths."));
             result
         }
-        Err(error) => glob_error(&error),
+        Err(error) => execution_error(&error),
     }
 }

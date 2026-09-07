@@ -111,7 +111,8 @@ impl std::error::Error for ReadFileError {
 ///
 /// Path approval is intentionally delegated entirely to the caller-provided
 /// `WorkspaceGuard`; this executor adds no independent workspace-boundary logic.
-pub fn execute_read_file(
+pub(crate) fn execute_read_file(
+    _permit: &crate::execution::ExecutionPermit,
     workspace_guard: &WorkspaceGuard,
     max_read_bytes: u32,
     request: &ReadFileRequest,
@@ -419,6 +420,19 @@ fn invalid_utf8(path: &PathBuf) -> ReadFileError {
 
 #[cfg(test)]
 mod tests {
+    // These M5 unit tests target the low-level algorithm, not production entrypoints.
+    fn execute_read_file(
+        guard: &crate::workspace::WorkspaceGuard,
+        limit: u32,
+        request: &super::ReadFileRequest,
+    ) -> Result<super::ReadFileOutput, super::ReadFileError> {
+        super::execute_read_file(
+            &crate::execution::ExecutionPermit::for_executor_test(),
+            guard,
+            limit,
+            request,
+        )
+    }
     use super::*;
     use crate::workspace::Workspace;
     use std::fs;

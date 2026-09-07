@@ -112,7 +112,8 @@ impl std::error::Error for GlobError {
 /// The `WorkspaceGuard` remains the only filesystem boundary authority. Every
 /// candidate is approved before metadata inspection or directory traversal;
 /// logical paths are retained separately for pattern matching and output.
-pub fn execute_glob(
+pub(crate) fn execute_glob(
+    _permit: &crate::execution::ExecutionPermit,
     workspace_guard: &WorkspaceGuard,
     request: &GlobRequest,
 ) -> Result<GlobOutput, GlobError> {
@@ -224,6 +225,11 @@ fn approve_base_path(
         .map_err(GlobError::Workspace)?;
     let logical = workspace_guard.logical_relative_path(requested, &approved);
     Ok((logical, approved))
+}
+
+/// Reuses the executor's pure pattern validator before filesystem enforcement.
+pub(crate) fn validate_glob_pattern(pattern: &str) -> Result<(), GlobError> {
+    compile_matcher(pattern).map(|_| ())
 }
 
 fn compile_matcher(pattern: &str) -> Result<GlobMatcher, GlobError> {
@@ -381,6 +387,17 @@ impl Diagnostics {
 
 #[cfg(test)]
 mod tests {
+    // These M5 unit tests target the low-level algorithm, not production entrypoints.
+    fn execute_glob(
+        guard: &crate::workspace::WorkspaceGuard,
+        request: &super::GlobRequest,
+    ) -> Result<super::GlobOutput, super::GlobError> {
+        super::execute_glob(
+            &crate::execution::ExecutionPermit::for_executor_test(),
+            guard,
+            request,
+        )
+    }
     use super::*;
     use crate::workspace::Workspace;
     use std::fs;

@@ -1,6 +1,7 @@
+use crate::execution::ExecutionError;
 use crate::mcp::context::McpExecutionContext;
-use crate::mcp::errors::{invalid_arguments, read_file_error, runtime_not_ready};
-use crate::tools::{execute_read_file, ReadFileRequest};
+use crate::mcp::errors::execution_error;
+use crate::tools::ReadFileRequest;
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
@@ -20,24 +21,16 @@ pub(crate) struct ReadFileArguments {
 }
 
 pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallToolResult {
-    if !context.is_runtime_ready() {
-        return runtime_not_ready();
-    }
-    let arguments = match serde_json::from_value::<ReadFileArguments>(arguments) {
-        Ok(arguments) => arguments,
-        Err(_) => return invalid_arguments(),
-    };
-    let request = ReadFileRequest {
-        path: PathBuf::from(arguments.path),
-        offset: arguments.offset.unwrap_or(0),
-        limit: arguments.limit,
-    };
-
-    match execute_read_file(
-        context.workspace_guard(),
-        context.max_read_bytes(),
-        &request,
-    ) {
+    let report = context.execute(|| {
+        let arguments = serde_json::from_value::<ReadFileArguments>(arguments)
+            .map_err(|_| ExecutionError::InvalidArguments)?;
+        Ok(ReadFileRequest {
+            path: PathBuf::from(arguments.path),
+            offset: arguments.offset.unwrap_or(0),
+            limit: arguments.limit,
+        })
+    });
+    match report.result {
         Ok(output) => {
             let structured = json!({
                 "normalizedPath": output.normalized_path.to_string_lossy(),
@@ -54,6 +47,6 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
                 .push(ContentBlock::text("Read workspace file."));
             result
         }
-        Err(error) => read_file_error(&error),
+        Err(error) => execution_error(&error),
     }
 }

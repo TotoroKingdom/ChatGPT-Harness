@@ -1,3 +1,4 @@
+use crate::execution::ExecutionError;
 use crate::tools::{GlobError, ReadFileError};
 use crate::workspace::WorkspaceError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -17,6 +18,9 @@ pub(crate) enum McpErrorCategory {
     IoFailure,
     RuntimeNotInitialized,
     RuntimeNotReady,
+    PolicyDenied,
+    ApprovalRequired,
+    ExecutionFailed,
 }
 
 impl McpErrorCategory {
@@ -34,6 +38,9 @@ impl McpErrorCategory {
             Self::IoFailure => "IO_FAILURE",
             Self::RuntimeNotInitialized => "RUNTIME_NOT_INITIALIZED",
             Self::RuntimeNotReady => "RUNTIME_NOT_READY",
+            Self::PolicyDenied => "POLICY_DENIED",
+            Self::ApprovalRequired => "APPROVAL_REQUIRED",
+            Self::ExecutionFailed => "EXECUTION_FAILED",
         }
     }
 
@@ -51,18 +58,29 @@ impl McpErrorCategory {
             Self::IoFailure => "The runtime could not read the requested workspace target.",
             Self::RuntimeNotInitialized => "Runtime is not initialized.",
             Self::RuntimeNotReady => "Runtime is waiting for the initialized acknowledgement.",
+            Self::PolicyDenied => "Tool request was blocked by policy.",
+            Self::ApprovalRequired => {
+                "Tool request requires approval; approval is not implemented."
+            }
+            Self::ExecutionFailed => "Tool execution failed.",
         }
     }
 }
 
-pub(crate) fn invalid_arguments() -> CallToolResult {
-    error_result(McpErrorCategory::InvalidArguments)
+pub(crate) fn execution_error(error: &ExecutionError) -> CallToolResult {
+    match error {
+        ExecutionError::ReadFile(error) => read_file_error(error),
+        ExecutionError::Glob(error) => glob_error(error),
+        ExecutionError::RuntimeNotInitialized => {
+            error_result(McpErrorCategory::RuntimeNotInitialized)
+        }
+        ExecutionError::RuntimeNotReady => error_result(McpErrorCategory::RuntimeNotReady),
+        ExecutionError::InvalidArguments => error_result(McpErrorCategory::InvalidArguments),
+        ExecutionError::PolicyDenied => error_result(McpErrorCategory::PolicyDenied),
+        ExecutionError::ApprovalRequired => error_result(McpErrorCategory::ApprovalRequired),
+        ExecutionError::InvalidTransition(_) => error_result(McpErrorCategory::ExecutionFailed),
+    }
 }
-
-pub(crate) fn runtime_not_ready() -> CallToolResult {
-    error_result(McpErrorCategory::RuntimeNotReady)
-}
-
 pub(crate) fn read_file_error(error: &ReadFileError) -> CallToolResult {
     let category = match error {
         ReadFileError::RuntimeNotInitialized => McpErrorCategory::RuntimeNotInitialized,

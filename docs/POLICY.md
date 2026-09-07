@@ -1,66 +1,76 @@
-# M6-A Policy Engine
+# M6-B Request State Machine + Enforcement Pipeline
 
 ## 实现与边界
 
-`runtime/src/policy` 是 Runtime 内部的确定性策略引擎，直接复用协议中的
-`PolicyRule`、`PolicyDecision`、`PolicySource` 和 `SecurityMode`，不改变 wire contract（线协议）。
+M6-B 将 Runtime 的已验证请求统一接入内部 enforcement（强制执行）管线，顺序固定为：
 
-本阶段没有实例化或接入生产请求执行链：MCP HTTP → McpService → read_file/glob
-adapter → 现有 executor；RuntimeCore 内部入口也继续调用现有 executor。
-两条入口均保持既有 WorkspaceGuard 检查。`policies.list`、`tools.list` 和描述符中的
-`effective_policy` 不因引擎的存在而成为实时策略计算结果。
+`Validation → Workspace Boundary Validation → Policy Evaluation → Executor`
 
-M6-B 才负责统一执行管线的 enforcement（强制执行）和 Request State Machine（请求状态机）接线。
-M6-A 不实现 approval（批准）、audit（审计）、有效工具目录推导或新工具，也不代表 M6 完成。
+MCP 入口和 `RuntimeCore` typed（类型化）入口共享同一个 `ExecutionPipeline`、同一个
+`WorkspaceGuard` 和同一个 `ToolRegistry`。本阶段不改变协议、MCP 方法、参数 schema（模式）、
+工具目录或 UI。
 
-## 输入与能力来源
+`WorkspaceGuard` 仍是独立的 filesystem boundary（文件系统边界）安全组件；它不并入
+`PolicyEngine`。两者都是 enforcement layer，但职责不同：
 
-`PolicyContext` 只包含工具名、安全模式和解析后的逻辑 scope（范围），不包含路径、秘密或任意 arguments。
-未来受验证的请求管线负责提供真实上下文；`active_workspace` 声明不等价于路径已通过安全检查。
-WorkspaceGuard 始终是独立的硬安全边界，策略允许不能绕过它。
+- `WorkspaceGuard` 只验证目标是否位于已初始化工作区边界内，并拒绝不安全路径形式。
+- `PolicyEngine` 只产生 authorization decision（授权决策）：`DENY`、`ASK` 或 `ALLOW`。
+- `Executor` 只在前两层成功后运行；既有 executor 的 guard 检查仍保留，因此前置验证不是
+  TOCTOU（检查与使用之间竞态）修复的声明。
 
-能力类型与现有 ToolRegistry 的工具描述符存放在同一 registration（注册项）中，
-引擎不维护第二份工具名清单，也不读取描述符中的占位 `effective_policy`。
-只有 implemented、enabled、exposed 均为 true 且 readiness 为 Ready 的注册项才能解析出能力。
-当前只有 WorkspaceRead，对应既有 read_file/glob；未知、缺失或不可用工具拒绝。
+M6-B 不实现 approval manager（批准管理器）、自动批准、Allow Once、可恢复等待、audit storage
+（审计存储）、新工具或有效工具目录推导。`ASK` 在本次调用中立即结束为
+`AwaitingApproval`，返回 `APPROVAL_REQUIRED`，没有可继续执行的 token 或后台等待请求。
 
-## Scope 匹配
+## Request State Machine（请求状态机）
 
-| 输入字符串 | 内部语义 |
-| --- | --- |
-| `active_workspace`、`workspace` | 当前工作区；后者是 M5 registry 的显式兼容别名 |
-| `outside_active_workspace` | 当前工作区之外 |
-| `developer_test_capabilities` | 已知 M0 范围，但当前没有实现对应能力 |
+生命周期是 Runtime 内部类型，不是 wire（线协议）字段：
 
-除此之外不接受其他字符串，不裁剪空格、不忽略大小写、不支持通配符或模糊匹配。
-未知上下文范围产生 DENY / InvalidContext。
-Normal 和 DeveloperTest 下的 WorkspaceRead 都仅匹配工作区内/外逻辑范围；
-切换模式不会把读取工具变为 developer/test 能力，也不会自动放宽规则。
+`Received → Validating → WorkspaceValidating → PolicyEvaluating`
 
-## 决策与证据
+之后只能进入：
 
-- `DENY > ASK > ALLOW`；规则 source 和 editable 不增加优先级。
-- disabled 规则完全忽略，包括其无效 scope 和重复 ID。
-- 先校验所有 enabled 规则，再匹配：任一未知 scope、空白 ID 或重复 enabled ID
-  都使整个快照产生 DENY / InvalidRuleSet，即使该规则本来不匹配当前上下文。
-- 合法范围精确匹配；没有规则、只有 disabled 规则或没有适用规则均产生 DENY / NoApplicableRules。
-- 未实现能力或能力与范围不兼容产生 DENY / UnsupportedCapability。
-- 匹配成功返回最严格的 canonical PolicyDecision、全部命中规则的 ID（字典序排序）和 MatchedRules。
-  无效输入或无匹配返回空命中列表及对应原因，不返回敏感参数。
-- 同一上下文和规则集合不受输入排列影响；评估不修改规则或注册表。
-- ASK 仅是决策结果，不创建待批准请求或批准流程。
+- `Denied →` 终止
+- `AwaitingApproval →` 终止（M6-B 不提供恢复）
+- `Executing → Completed` 或 `Failed`
+- 任一验证/执行失败直接进入 `Failed`
 
-## System baseline（系统基线）
+所有非法迁移都会被拒绝且不改变当前状态；终态不能恢复。每次请求拥有新的内部
+`request_id`，hook 事件使用同一关联 ID。
 
-`PolicyEngine::system_rules()` 返回固定、enabled、不可编辑的两条规则：
+## Enforcement Pipeline（强制执行管线）
 
-- `system-read-workspace`：`active_workspace` → ALLOW。
-- `system-deny-outside`：`outside_active_workspace` → DENY。
+1. `Received`：创建只含安全元数据的请求上下文。
+2. `Validating`：解析并校验 typed request；无效参数或 glob pattern 在文件系统和策略前失败。
+3. `WorkspaceValidating`：调用共享 `WorkspaceGuard`；成功后才把 `active_workspace` 写入策略上下文。
+4. `PolicyEvaluating`：对固定的不可变 `PolicyEngine` 快照求值；DENY/ASK 不调用 executor。
+5. `Executing`：重新检查 Runtime readiness（就绪状态），创建内部执行许可并调用既有 executor。
+6. `Completed` / `Failed`：返回现有结果 envelope（结果封装）或集中映射的错误。
 
-在现有能力约束下，基线允许工作区内 read_file/glob，拒绝工作区外请求。
-用户 ALLOW 或 ASK 不能覆盖同范围的系统 DENY；用户 ASK 可以收紧工作区内 ALLOW。
+Runtime 未初始化、未收到成功 ACK、停止或回滚后的请求会在执行管线入口被拒绝。`ASK` 和
+`DENY` 都不会触发执行。
 
-`PolicyEngine::new(rules)` 使用精确传入的不可变快照，不隐式追加默认 ALLOW。
-后续加载/合并用户策略的调用方必须保留固定系统基线，不能把任意用户规则集当成完整系统配置。
-系统基线缺失与规则快照为空不是同一个概念：空快照拒绝；任意合法快照按其适用规则评估。
-工作区外的硬拒绝仍由 WorkspaceGuard 独立保证，而非依赖调用方是否携带策略基线。
+## PolicyEngine（策略引擎）
+
+策略引擎只消费 `PolicyContext`（工具名、安全模式和已验证逻辑 scope），不读取路径、原始
+arguments、秘密或输出。决策优先级为 `DENY > ASK > ALLOW`；无效/空快照 fail closed（默认拒绝）。
+当前生产管线使用固定 system baseline（系统基线）：工作区内 WorkspaceRead 为 ALLOW，工作区
+外为 DENY；M6-B 不增加公开的运行时策略修改接口。
+
+策略引擎复用 ToolRegistry 的注册项，不维护第二份工具清单。`policies.list`、`tools.list` 和
+工具描述符中的 `effective_policy` 仍不是实时策略求值结果。
+
+## Error / Hook 边界
+
+`DENY` 映射为 `POLICY_DENIED`，`ASK` 映射为 `APPROVAL_REQUIRED`，执行阶段未分类错误映射为
+`EXECUTION_FAILED`；既有 read/glob 错误码和 `{code,message}` 结构保持不变。
+
+M6-B 提供内部 hook seam（钩子接缝）用于后续 M6-C/测试。hook 只收到 request ID、工具名、安全
+模式、生命周期状态和决策等安全元数据，不收到路径、原始参数、秘密、文件内容或完整输出；本阶段
+不持久化审计记录。
+
+## 非目标
+
+不修改 `docs-ai/ARCHITECTURE.md`、协议定义、schema、客户端/UI、PolicyEngine 的职责、
+WorkspaceGuard 的独立性或现有 M5 工具算法。外部集成、HTTP E2E、tunnel（隧道）和动态
+Windows symlink/junction（符号链接/联接）能力不在本阶段的完成声明内。

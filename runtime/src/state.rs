@@ -1,9 +1,8 @@
 use crate::events::EventBus;
+use crate::execution::{ExecutionError, ExecutionPipeline, SecurityContext};
 use crate::mcp::{McpContextError, McpExecutionContext, McpService};
-use crate::tools::{
-    execute_glob, execute_read_file, GlobError, GlobOutput, GlobRequest, ReadFileError,
-    ReadFileOutput, ReadFileRequest, ToolRegistry,
-};
+use crate::policy::PolicyEngine;
+use crate::tools::{GlobOutput, GlobRequest, ReadFileOutput, ReadFileRequest, ToolRegistry};
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
     ActivityEvent, ActivityEventType, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeLifecycle,
@@ -30,7 +29,8 @@ pub struct RuntimeCore {
     pub events: Option<EventBus>,
     workspace_guard: Option<Arc<WorkspaceGuard>>,
     mcp_readiness: Arc<AtomicBool>,
-    tool_registry: ToolRegistry,
+    tool_registry: Arc<ToolRegistry>,
+    execution_pipeline: Option<Arc<ExecutionPipeline>>,
     pub last_error: Option<RuntimeErrorSummary>,
 }
 
@@ -44,7 +44,8 @@ impl RuntimeCore {
             events: None,
             workspace_guard: None,
             mcp_readiness: Arc::new(AtomicBool::new(false)),
-            tool_registry: ToolRegistry::normal_mode(),
+            tool_registry: Arc::new(ToolRegistry::normal_mode()),
+            execution_pipeline: None,
             last_error: None,
         }
     }
@@ -54,6 +55,18 @@ impl RuntimeCore {
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
         let events = EventBus::from_limits(&config.runtime_limits);
 
+        let pipeline = ExecutionPipeline::new(
+            Arc::clone(&workspace_guard),
+            Arc::clone(&self.tool_registry),
+            PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityContext {
+                workspace_id: uuid::Uuid::new_v4(),
+                mode: config.security.mode.clone(),
+            },
+            config.runtime_limits.max_read_bytes,
+            Arc::clone(&self.mcp_readiness),
+        );
+        self.execution_pipeline = Some(Arc::new(pipeline));
         self.events = Some(events);
         self.config = Some(config);
         self.workspace_guard = Some(workspace_guard);
@@ -71,19 +84,18 @@ impl RuntimeCore {
         self.config = None;
         self.events = None;
         self.workspace_guard = None;
+        self.execution_pipeline = None;
         self.last_error = None;
     }
 
     #[allow(dead_code)]
-    /// Executes the runtime-internal `glob` capability using the one guard
-    /// created by the successful initialize snapshot.
-    pub fn glob(&self, request: &GlobRequest) -> Result<GlobOutput, GlobError> {
-        let workspace_guard = self
-            .workspace_guard
+    /// Typed internal calls use the same readiness, boundary and policy gates as MCP.
+    pub(crate) fn glob(&self, request: &GlobRequest) -> Result<GlobOutput, ExecutionError> {
+        self.execution_pipeline
             .as_ref()
-            .ok_or(GlobError::RuntimeNotInitialized)?;
-
-        execute_glob(workspace_guard, request)
+            .ok_or(ExecutionError::RuntimeNotInitialized)?
+            .execute(|| Ok(request.clone()))
+            .result
     }
     pub fn tool_registry(&self) -> &ToolRegistry {
         &self.tool_registry
@@ -99,48 +111,29 @@ impl RuntimeCore {
     /// than reconstructing workspace security state for an MCP request.
     #[allow(dead_code)]
     pub fn mcp_context(&self) -> Result<McpExecutionContext, McpContextError> {
-        let workspace_guard = self
-            .workspace_guard
+        self.execution_pipeline
             .as_ref()
             .cloned()
-            .ok_or(McpContextError::RuntimeNotInitialized)?;
-        let config = self
-            .config
-            .as_ref()
-            .ok_or(McpContextError::RuntimeNotInitialized)?;
-
-        Ok(McpExecutionContext::new(
-            workspace_guard,
-            config.runtime_limits.max_read_bytes,
-            Arc::clone(&self.mcp_readiness),
-        ))
+            .map(McpExecutionContext::new)
+            .ok_or(McpContextError::RuntimeNotInitialized)
     }
-
     #[allow(dead_code)]
     pub fn mcp_service(&self) -> Result<McpService, McpContextError> {
         self.mcp_context().map(McpService::new)
     }
 
     #[allow(dead_code)]
-    /// Executes the runtime-internal `read_file` capability using the guard and
-    /// read limit established by the successful initialize snapshot.
-    pub fn read_file(&self, request: &ReadFileRequest) -> Result<ReadFileOutput, ReadFileError> {
-        let workspace_guard = self
-            .workspace_guard
+    /// Typed internal calls use the same initialized enforcement snapshot as MCP.
+    pub(crate) fn read_file(
+        &self,
+        request: &ReadFileRequest,
+    ) -> Result<ReadFileOutput, ExecutionError> {
+        self.execution_pipeline
             .as_ref()
-            .ok_or(ReadFileError::RuntimeNotInitialized)?;
-        let config = self
-            .config
-            .as_ref()
-            .ok_or(ReadFileError::RuntimeNotInitialized)?;
-
-        execute_read_file(
-            workspace_guard,
-            config.runtime_limits.max_read_bytes,
-            request,
-        )
+            .ok_or(ExecutionError::RuntimeNotInitialized)?
+            .execute(|| Ok(request.clone()))
+            .result
     }
-
     pub fn acknowledge(&mut self) -> Option<ActivityEvent> {
         if self.phase != Phase::InitializedPendingAck {
             return None;
@@ -299,11 +292,12 @@ mod tests {
 
         assert!(matches!(
             core.glob(&GlobRequest::new("*.rs")),
-            Err(GlobError::RuntimeNotInitialized)
+            Err(ExecutionError::RuntimeNotInitialized)
         ));
 
         core.initialize(config_for(&workspace.root))
             .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
         let output = core
             .glob(&GlobRequest::new("*.rs"))
             .expect("glob workspace");
@@ -317,12 +311,13 @@ mod tests {
 
         assert!(matches!(
             core.read_file(&ReadFileRequest::new("lines.txt")),
-            Err(ReadFileError::RuntimeNotInitialized)
+            Err(ExecutionError::RuntimeNotInitialized)
         ));
 
         let mut config = config_for(&workspace.root);
         config.runtime_limits.max_read_bytes = 2;
         core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
 
         let output = core
             .read_file(&ReadFileRequest::new("lines.txt"))
@@ -338,7 +333,7 @@ mod tests {
             .is_err());
         assert!(matches!(
             failed_core.read_file(&ReadFileRequest::new("lines.txt")),
-            Err(ReadFileError::RuntimeNotInitialized)
+            Err(ExecutionError::RuntimeNotInitialized)
         ));
     }
     #[test]

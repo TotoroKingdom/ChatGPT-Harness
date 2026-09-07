@@ -1,12 +1,13 @@
-//! Deterministic Runtime authorization, not yet execution enforcement (M6-A).
+//! Deterministic Runtime authorization, enforced by the M6-B execution pipeline.
 //!
-//! M6-B must call this from the unified request pipeline after WorkspaceGuard.
+//! The unified request pipeline calls this after WorkspaceGuard validation.
 //! Nothing here resolves paths, executes tools, talks to MCP, or creates approvals.
-#![allow(dead_code, unused_imports)] // The production caller arrives in M6-B.
 
 mod engine;
 
-pub(crate) use engine::{PolicyContext, PolicyEngine, PolicyEvaluation, PolicyEvaluationReason};
+#[cfg(test)]
+pub(crate) use engine::PolicyEvaluationReason;
+pub(crate) use engine::{PolicyContext, PolicyEngine, PolicyEvaluation};
 
 #[cfg(test)]
 mod tests;
