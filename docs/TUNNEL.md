@@ -447,3 +447,29 @@ V1 可以记录以下非敏感 operational metadata：
 7. **连接事件的落点**：需要确定 Runtime/Tunnel/MCP 生命周期事件是否进入现有结构化 Activity event bus，或由 Launcher 保持独立的 bounded diagnostics stream；无论选择哪一种，都不得把 secret 或原始 tunnel 日志带入 AuditEvent。
 8. **跨机器/多账户部署**：V1 只冻结单安装、单 active Runtime、单 managed tunnel-client；多账户 Windows service、系统级常驻 tunnel 和跨机器共享 tunnel identity 留待后续版本。
 9. **第三方/手工启动 tunnel-client**：V1 不承诺支持 unmanaged client。若未来开放，必须先增加 endpoint ownership、连接身份和冲突检测设计，不能仅通过 PID 或端口判断归属。
+## M7-B — Tunnel Process Lifecycle (Lifecycle Only)
+
+M7-B 在 Tauri Launcher / Control Plane 内新增 `TunnelProcessManager`，只管理受管 `tunnel-client` 子进程的生命周期；不建立或验证任何外部连接。
+
+### State Model
+
+进程状态仅保存在内存中：
+
+- `Stopped`：没有受管子进程。
+- `Starting`：已接受启动请求，尚未完成子进程登记。
+- `Running`：受管子进程已 spawn，持有 `Child` handle；这只表示进程存活，不表示已连接。
+- `Stopping`：已请求受管子进程退出，等待 graceful termination 或超时后的强制终止。
+- `Failed`：受管子进程意外退出；记录非敏感 exit code 和时间戳，不自动重启。
+
+每次启动创建新的 `TunnelInstance`，其中包含 `instance_id`、PID、可选 `tunnel_id`、Runtime endpoint reference、启动时间和 canonical executable path。停止操作必须同时匹配当前受管 `instance_id` 并使用 manager 持有的 `Child` handle；不会按进程名或 PID 搜索、终止外部进程，因此旧 instance ID 不能终止 PID 复用后的新进程。
+
+### Lifecycle Semantics
+
+- **Start**：先验证可执行文件存在并 canonicalize，再创建内存中的 instance identity、spawn 子进程并保存 PID/启动时间。spawn 成功后状态为 `Running`；它不是 `Connected`，不会合成产品级 `Ready`。
+- **Stop**：仅对当前 owned instance 发出 Windows graceful termination 请求，等待固定超时；未退出时才使用 `Child::kill()` 强制终止。exit watcher 将该 managed stop 收敛为 `Stopped`。
+- **Restart**：必须先成功停止当前 owned instance；停止失败或状态仍在转换时 fail closed，绝不启动第二个 tunnel-client。
+- **Crash detection**：exit watcher 观察到 `Running` 实例退出时转为 `Failed`，保存 exit code/时间及非敏感错误分类 `TUNNEL_PROCESS_EXITED`；没有自动或无限重启。
+
+### Boundary
+
+本阶段不读取或传递 API Key/plaintext secret，不创建 provider authentication、network connection、health check、MCP verification 或 `Ready` synthesis；不修改 Runtime、MCP schema、PolicyEngine、ExecutionPipeline、UI 或 M0 Control Protocol。动态 PID、启动时间与退出码不写入 `config.json` 或任何持久配置。

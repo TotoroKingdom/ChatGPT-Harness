@@ -18,6 +18,7 @@ pub fn run() {
             secrets,
         }))
         .manage(crate::runtime::RuntimeSupervisor::new())
+        .manage(crate::tunnel::TunnelProcessManager::new())
         .invoke_handler(tauri::generate_handler![
             crate::commands::config_get,
             crate::commands::config_metadata,
@@ -51,3 +52,6 @@ mod config;
 mod platform;
 mod runtime;
 mod secrets;
+// M7-B is intentionally internal until a later connection orchestration slice.
+#[allow(dead_code)]
+mod tunnel;
