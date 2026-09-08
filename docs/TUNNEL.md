@@ -473,3 +473,235 @@ M7-B 在 Tauri Launcher / Control Plane 内新增 `TunnelProcessManager`，只�
 ### Boundary
 
 本阶段不读取或传递 API Key/plaintext secret，不创建 provider authentication、network connection、health check、MCP verification 或 `Ready` synthesis；不修改 Runtime、MCP schema、PolicyEngine、ExecutionPipeline、UI 或 M0 Control Protocol。动态 PID、启动时间与退出码不写入 `config.json` 或任何持久配置。
+
+## M7-C0 Credential Capability Audit
+
+**审计日期：2026-09-08**
+
+本节只记录 tunnel-client 的能力审计和 V1 设计决策；不实现 CredentialInjector，不修改 TunnelProcessManager、Runtime、UI、config schema 或 SecretStore integration。
+
+### 1. Tunnel client information
+
+| 项目 | 结果 |
+| --- | --- |
+| Executable | `tunnel-client.exe` |
+| Repository location | `tunnel-client-v0.0.13-windows-amd64/tunnel-client.exe` |
+| Version | `0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea` |
+| Build information | Git SHA `4b5267f823be0b046bb883aacb51603cfde3a0ea`; Windows amd64 package |
+| Provider / product | OpenAI tunnel client；help 输出为 “Tunnel client for the OpenAI MCP control plane.”；随包包含 Cloudflare Tunnel companion `cloudflared.exe` |
+| Repository artifacts inspected | `tunnel-client.exe`、`cloudflared.exe`、`cloudflared-manifest.json`、SPDX 清单、licenses、NOTICE |
+| Local discovery result | 仓库已包含固定版本 Windows amd64 binary；当前项目的预期方式是由 Launcher/Control Plane 启动外部 `tunnel-client.exe`，把本机 Runtime MCP endpoint 作为非敏感输入传入 |
+| Official documentation | `https://github.com/openai/tunnel-client/blob/master/docs/configuration.md`；`https://github.com/openai/tunnel-client/blob/master/docs/troubleshooting.md`；本地 binary 的 `run --help` 是当前随包能力的直接证据 |
+
+本地 binary 的 `run --help` 明确显示：配置优先级为 flags > environment > YAML > defaults；`control-plane.api-key` 支持 `env:VARNAME` 或 `file:/path/to/secret` 引用；没有显示 stdin、pipe 或 OS credential-store 参数。官方 configuration 文档同时说明直接 literal API key 虽兼容但不推荐，secret-bearing fields 应使用 `env:` 或 `file:` 引用。
+
+当前项目预期的 tunnel-client 启动输入应保持最小化：
+
+- 非敏感：executable path、Tunnel ID、loopback MCP endpoint、health endpoint/health URL file path。
+- 敏感：control-plane API Key；不得作为 literal value 进入 argv、YAML/profile、Runtime 或普通日志。
+
+### 2. Capability matrix
+
+| 方式 | 支持情况 | 安全评价 |
+| --- | --- | --- |
+| command line argument | **部分支持**：`--control-plane.api-key` 接受 `env:VARNAME` 或 `file:/path/to/secret`；也接受 literal，但不能采用 literal | **不允许 secret 直传**。`env:`/`file:` 只是引用，argv 中仍会出现引用名或路径；不得把 API key 本身放入 argv。文件引用还引入磁盘明文和 ACL/清理问题 |
+| environment variable | **支持**：`CONTROL_PLANE_API_KEY`，并可由 `--control-plane.api-key=env:VARNAME` 选择；`OPENAI_API_KEY` 是 fallback | **唯一可作为 V1 候选的注入通道，但不是无风险通道**。secret 会存在 tunnel-client 进程环境中，可能被同权限进程检查、进程诊断、crash dump 或错误的子进程继承；必须限制生命周期、继承范围和诊断/转储面 |
+| stdin / pipe | **未发现支持**：`run --help`、相关官方 configuration 文档和 package artifacts 未提供 API key stdin/pipe 输入方式 | **不能推荐**。不能把 stdin 当作隐含的 credential API；在没有 upstream contract 和实测证据前视为不支持 |
+| config file | **支持**：YAML/profile 中可配置 `control_plane.api_key`；支持 literal、`env:VARNAME`、`file:/path/to/secret` | **literal 明文不允许**。`env:` 可作为引用，但 profile/config 仍可能出现在诊断或导出范围；`file:` 需要明文 secret 文件、Windows ACL、原子创建和可靠擦除，当前 V1 没有已审计的安全文件注入设计 |
+| OS credential lookup | **未发现支持**：没有 Windows Credential Manager/keychain/DPAPI/SecretStore 参数或文档契约 | **不可直接采用**。Launcher 的 SecretStore 不能假设 tunnel-client 会读取它；需要 upstream credential-helper 或 wrapper 契约后才能评估 |
+| interactive login | **存在相关命令/帮助主题**：binary 提供 `init`、`profiles`、`admin-profiles`、`help oauth` 等交互/配置面；但未形成适合 Launcher 非交互启动的 API-key injection contract | **不适合 V1**。依赖用户交互、profile 持久化和生命周期不可控，不能作为 Start Harness 的确定性凭据路径 |
+
+### 3. Security assessment
+
+本审计对 API Key 采用以下不可违反的边界：API Key 不得进入 Git、`config.json`、`RuntimeConfigSnapshot`、`RuntimeState`、literal command line、URL、logs、stderr、stdout、`AuditEvent` 或 Activity event。
+
+审计结论：
+
+1. **literal command-line 和 literal YAML/profile 明文不合格**，即使 tunnel-client 为兼容性接受，也不进入 V1。
+2. **stdin/pipe 和 OS credential lookup 没有证据支持**，不能设计成“推测存在”的安全方案。
+3. `file:/path/to/secret` 能避免 secret 进入 argv，但会把 secret 落到磁盘；在当前任务禁止新增安全文件注入/SecretStore integration 的边界下，不能宣称其满足 V1 安全约束。
+4. environment injection 不会把 API Key 放入 argv、config 或 Runtime 状态，但会使 API Key 出现在 tunnel-client 进程环境中。Windows 上应将其视为可被同权限进程/诊断机制观察的短生命周期 secret，而不是等同于 SecretStore 隔离。
+5. tunnel-client 自身提供 redaction/diagnostic 设计的官方说明，但本项目不能把它当作 Launcher 日志安全的充分证明；Launcher 仍必须禁止记录 argv、环境值、配置内容和完整 tunnel-client 输出中的 secret-bearing data。
+
+### 4. Recommended V1 approach
+
+#### V1 decision: Option B, conditional environment-reference launch
+
+当前版本没有被证实的 stdin/pipe、OS credential lookup 或 credential-helper 接口。因此，若 M7-C1 必须在现有 `0.0.13` binary 上继续，唯一可落地候选是：
+
+- Launcher 从 SecretStore 取得 API Key，仅在启动 tunnel-client 的短生命周期内设置一个专用 child environment variable。
+- argv 只包含 `--control-plane.api-key=env:<专用变量名>`，不包含 API Key value。
+- Tunnel ID 和 loopback MCP endpoint 作为非敏感参数传入。
+- 不写 secret file，不写 YAML/profile literal secret，不设置全局/Launcher 长生命周期环境变量。
+- 子进程启动后，Launcher 不把环境值、argv 快照、stdout/stderr 原文、诊断导出或 crash artifact 送入日志、Activity 或 AuditEvent。
+- 停止/失败路径必须尽快终止 tunnel-client 并释放该 child environment；M7-C1 还必须先验证进程树、同权限进程可见性、crash dump/诊断策略和日志 redaction。
+
+这不是“无风险注入”；它是**在当前 binary 能力下的条件性 V1 方案**。若安全要求将“API Key 不得存在任何进程环境”也视为硬约束，则 Option B 也不合格，V1 必须阻塞，直到 upstream 提供 stdin/pipe、OS credential lookup 或受审计的 credential-helper/wrapper 接口。
+
+#### 不采用的方案
+
+- Option A（stdin/pipe）：当前未证实支持，不进入设计。
+- Option C（literal command line / plaintext config）：明确不采用。
+- `file:/path/to/secret`：当前不作为默认 V1 方案；除非另行批准 Windows ACL、临时文件生命周期、清理失败处理和 crash/dump 风险设计。
+- interactive login/profile：不作为 Launcher 自动 Start Harness 的 V1 依赖。
+
+### 5. Blockers / Open Questions
+
+#### Blockers
+
+1. **Credential transport 仍无零明文落盘/零 argv secret 的 upstream 专用通道**。如果环境变量的 process-inspection 风险不被接受，则 M7-C1 blocked。
+2. 当前审计没有动态验证真实 control-plane 请求；没有 API Key、组织权限、可用 Tunnel ID 和外网条件，因此不能声称认证或 tunnel readiness 已验证。
+3. `0.0.13` binary 的 Windows 进程环境、crash dump、embedded admin UI/log export 和子进程继承行为尚未做安全验收；该项必须在 M7-C1 之前明确为通过或 blocker。
+
+#### Open Questions
+
+- tunnel-client 是否由本项目长期控制，还是只消费外部发布的 binary？
+- 项目是否可以增加并维护 wrapper？wrapper 是否允许作为正式的 credential-helper 边界？
+- 是否可以升级 tunnel-client；升级后 capability contract 和 redaction 行为如何回归验证？
+- upstream 是否可以提供 stdin/pipe、Windows Credential Manager/DPAPI、或 credential-helper 回调？
+- Launcher 是否允许创建受 ACL 保护的临时 secret file；如果允许，谁负责清理失败和 crash recovery？
+- 生产环境是否启用了用户态 crash dump、endpoint inspection 或诊断导出策略？
+
+**M7-C0 结论：** 当前随仓库的 tunnel-client 明确支持 environment reference 和 file reference；没有证据支持 stdin/pipe 或 OS credential lookup。V1 可进入 M7-C1 的前提是接受并审计短生命周期 child-environment 方案；若“API Key 不得进入任何进程环境”是硬约束，则当前能力不足，V1 blocker。
+
+## M7-C Credential Transport Decision
+
+**决策日期：2026-09-08**
+
+本节是 M7-C 的架构决策，覆盖并取代 M7-C0 中“Option B 可作为条件性 V1 候选”的建议；M7-C0 的 capability audit（能力审计）仍是当前 `tunnel-client` `v0.0.13` 能力边界的证据。本决策不授权任何代码、Runtime、UI、`TunnelProcessManager` 或 `CredentialInjector` 变更。
+
+### 1. Problem
+
+现有 `tunnel-client v0.0.13` 支持 environment reference（环境变量引用）、file reference（文件引用）及 YAML/profile 配置，也兼容 literal command-line/config secret（命令行或配置明文 secret）；没有已证实的 stdin/pipe 注入、Windows Credential Manager、DPAPI lookup 或 credential-helper interface（凭据辅助程序接口）。
+
+M7-C1 曾考虑由 Launcher 从 `SecretStore` 读取 API Key，并只把它放入目标 `tunnel-client` 的 child environment（子进程环境）。这能避免 API Key 出现在 argv、持久化配置和 Runtime config，但不能证明“API Key 仅目标 `tunnel-client` 可见”：同一用户/同等权限主体的 process inspection（进程检查）、崩溃转储、诊断采集和后代进程继承都可能扩大可见范围。
+
+因此问题不是能否降低暴露概率，而是当前传输机制能否建立并证明 V1 所需的 credential visibility boundary（凭据可见性边界）。答案是否定的。
+
+### 2. Security requirements
+
+M7-C 将以下约束冻结为 V1 的硬安全要求：
+
+1. API Key 不得进入 argv、URL、plaintext config、YAML/profile literal、普通文件或任何进程环境（包括 Launcher、`tunnel-client` 及其子进程）。
+2. API Key 的长期持久化仅允许在当前用户边界内受操作系统保护的 `SecretStore` / OS credential store（操作系统凭据存储）；普通配置只能保存 opaque `apiKeyRef`。
+3. Runtime、`RuntimeConfigSnapshot`、`RuntimeState`、UI state、Activity、`AuditEvent`、diagnostics、日志、stdout/stderr、错误文本、截图和导出的 crash artifact（崩溃工件）不得包含 API Key 或可还原的 secret-bearing data（含有 secret 的数据）。
+4. 安全相关事实无法验证时 fail closed（失败关闭）：不得以“生命周期短”“仅 child scope”或“未观察到泄露”替代边界证明。
+5. 任何未来通道都必须能以文档化接口契约和针对 Windows 的实测证明：secret 不进入禁止载体，且启动失败、重试、诊断、导出、crash recovery（崩溃恢复）和停止路径不会把 secret 扩散到这些载体。
+
+这些要求明确收紧了此前“API Key 可在 tunnel-client 进程环境中短暂存在”的条件性假设；该假设不再是可接受的 V1 security boundary（安全边界）。
+
+### 3. Options considered
+
+#### Option A — Strict Security Boundary
+
+**定义：** 保持上述硬要求：API Key 不允许出现在 argv、environment、file 或 plaintext config。当前 `tunnel-client` 不具备已证实的合规输入通道，因此 M7-C 保持 blocked（阻塞）。
+
+**优点：**
+
+- 与现有 SecretStore isolation（SecretStore 隔离）、secret redaction 和 security-relevant unknowns fail-closed 原则一致。
+- 不把“目标子进程环境”误称为 secret isolation，也不把同权限进程检查、crash dump 或诊断导出风险转嫁给实现细节。
+- 不新增未经审计的凭据持有进程、临时文件、IPC 协议或 Windows ACL/清理恢复责任。
+- 保持 Launcher 负责编排、Runtime 不接触 tunnel credential 的既有 M7-A 职责边界。
+
+**缺点：**
+
+- 在当前 `v0.0.13` capability contract（能力契约）下无法完成自动 tunnel authentication，M7-C1 和依赖它的外部连接验收不能推进。
+- 需要等待 upstream capability（上游能力）或另行批准、设计并验证一个真正合规的替代方案。
+
+**适用条件：**
+
+- API Key 仅目标 `tunnel-client` 可见是不可放宽的产品安全要求。
+- 不能针对 Windows process inspection、crash dump、diagnostic export（诊断导出）和 child inheritance（子进程继承）给出可重复的边界证明。
+- V1 可以接受 tunnel authentication 延后，而不能接受降低 credential transport 安全要求。
+
+#### Option B — Scoped Environment Acceptance
+
+**定义：** Launcher 从 `SecretStore` 读取 API Key，以专用 child environment variable（子进程环境变量）启动 `tunnel-client`，argv 仅传 `env:<variable-name>` 引用。
+
+**优点：**
+
+- 是当前 binary 已证实可用的自动化候选；API Key 不会作为 literal value 进入 argv、URL 或持久化 config。
+- 改动范围表面上较小，不需要等待 client 升级。
+
+**缺点和逐项风险/缓解：**
+
+| 主题 | 风险 | 可做的缓解 | 为什么仍不合格 |
+| --- | --- | --- | --- |
+| Process inspection（进程检查） | 同用户或同等权限的工具、EDR、调试器、管理员或诊断代理可能读取目标进程 environment。 | 仅在 `Command`/spawn 时设置专用变量；不写入父进程/全局环境；最小权限运行；不记录 environment snapshot。 | 缓解只能缩短或减少观察面，不能证明 secret 仅目标进程可见。 |
+| Crash dump（崩溃转储） | `tunnel-client`、Launcher 或后代进程的内存/环境可能进入 user-mode dump、WER、调试器或支持包。 | 默认关闭或限制应用级 dump；禁止自动上传/导出原始 dump；制定本地访问控制与人工取证流程。 | 当前项目没有覆盖 OS/EDR/管理员采集面的端到端控制；关闭应用级转储不等于没有可访问的内存工件。 |
+| Child inheritance（子进程继承） | `tunnel-client` 或其 companion/diagnostic/reconnect helper 可能继承 environment，扩大 secret 可见的进程集合。 | 只允许已审计的进程树；对子进程启动接口做最小环境白名单；停止时清理所有 owned descendants。 | 当前 client 及其 companion 的完整进程树和继承行为未被证明；即使受管，也已违反“仅目标 tunnel-client 可见”。 |
+| Diagnostics/log export（诊断/日志导出） | 进程诊断、support bundle、command snapshot、stderr/stdout 或第三方日志可能收集变量值或相关内存。 | 只保存分类化结果；禁止 raw stdout/stderr、argv/config/environment、dump 和 support bundle 自动进入 Activity/Audit/export。 | Launcher 侧 redaction 无法约束外部 client、OS 或安全产品的采集和导出。 |
+| Secret lifecycle（secret 生命周期） | spawn 失败、重试、崩溃、僵尸/孤儿后代或 stop 超时会延长 secret 在内存/环境中的存在时间。 | 单次读取、单次 spawn、无自动重试；失败立即终止 owned process tree；不持久化 secret；释放本地 buffer。 | 生命周期最小化不是可见性隔离；而且 Windows 清零/进程退出/转储可见性仍不能由本方案证明。 |
+
+**结论：** 不选择。Option B 可以作为未来风险接受（risk acceptance）决策的明确对象，但在当前 V1 硬要求下不是合规 credential transport architecture（凭据传输架构），不得实现为 M7-C1。
+
+#### Option C — Credential Helper / Wrapper
+
+**定义：** 引入由 Harness 维护的 wrapper process（包装进程）或 credential helper，例如：
+
+```text
+Launcher → credential helper → tunnel-client
+```
+
+wrapper 可以从 Windows Credential Manager / DPAPI-backed SecretStore 获取 secret，也可以通过 named pipe（命名管道）等 IPC 取得一次性凭据；它可以避免 API Key 进入 argv，并将 secret lookup 责任从 `tunnel-client` 移回受控组件。
+
+**优点：**
+
+- 可把 OS credential store lookup 和凭据访问策略收敛到受控的 helper，而不是扩展 Runtime。
+- 若 client 支持已认证的 helper protocol、one-shot secure handle 或 pipe input，未来可提供比 environment 更明确的 transport boundary。
+- 允许保留 M7-A 的 Launcher ownership（Launcher 所有权）与 Runtime secret exclusion（Runtime 排除 secret）原则。
+
+**缺点：**
+
+- wrapper 不能凭空消除“helper 到 `tunnel-client`”的最后一跳：当前 binary 没有已证实的 stdin/pipe、credential-helper protocol 或 OS credential lookup。因此 helper 最终仍会退化为 environment、file 或 literal config，仍不合规。
+- 新增长期维护的 privileged credential-bearing process、IPC authentication/authorization、peer identity、replay、timeout、cleanup、crash recovery、diagnostics redaction、Windows ACL 和升级兼容性责任。
+- wrapper 自身扩大 trusted computing base（可信计算基），并增加 V1 scope；当前没有批准的协议、威胁模型或验收计划。
+
+**实现成本：** 高，且在未获得 client-side receiver（客户端接收端）契约前没有可验证的完成路径。单独引入 wrapper 不解除 blocker；本任务不创建或批准 `CredentialInjector`/wrapper 实现。
+
+#### Option D — Upgrade / Replace tunnel-client capability
+
+**定义：** 要求或替换为具有下列至少一种经验证能力的 `tunnel-client`：
+
+- API Key 的 stdin/pipe secret input（标准输入/管道凭据输入）；
+- Windows Credential Manager / DPAPI lookup；
+- documented credential-helper protocol（有文档的凭据辅助程序协议）；或
+- 等效的、可证明不把 API Key 放入 argv/environment/file/plaintext config 的 secure IPC（安全 IPC）机制。
+
+**优点：**
+
+- 是解除 Option A blocker 的直接技术路径；正确的 client-side contract 可让 SecretStore/credential helper 成为事实上的 receiver，而不是让 Launcher 通过不安全载体转运明文。
+- 可将 upstream 的 redaction、crash/diagnostics 和 child-process 行为纳入版本化 capability contract 与回归测试。
+
+**缺点：**
+
+- 依赖上游版本、协议设计、供应链审查、Windows 行为验证和发布节奏；没有完成日期保证。
+- 升级/替换本身需要重新验证参数、配置优先级、认证、process tree、redaction、日志、诊断和兼容性，不能仅因新版本声称支持而自动批准。
+
+**成本与依赖：** 中到高。依赖上游功能或一个经过单独架构审查的替换客户端；在 capability contract、Windows 实测和安全验收完成前，不是当前 V1 的实现任务。
+
+### 4. Final decision
+
+**选择：Option A — Strict Security Boundary。**
+
+原因：当前 blocker 已明确表明 scoped child environment injection（受作用域的子进程环境注入）无法证明 API Key 仅目标 `tunnel-client` 可见。Option B 的缓解措施只能降低风险，不能满足 V1 的可证明隔离要求；Option C 在当前 client 没有安全接收接口时只会把问题向后移动并扩大实现范围；Option D 是可行的 future migration path（未来迁移路径），但目前仍是外部依赖而非已具备能力。
+
+因此，M7-C1 **保持 blocked**。任何人不得以 environment reference、file reference、literal config、argv 或未审计 wrapper 绕过本决定。`TunnelProcessManager` 只能继续其 M7-B lifecycle-only（仅生命周期）职责，不得读取、传递或注入 API Key。
+
+### 5. Consequences
+
+- **M7-C1：BLOCKED。** 不实现 scoped child environment injection，也不创建 `CredentialInjector`、credential helper、wrapper、临时 secret file 或新的 SecretStore integration。
+- **M7-MCP external readiness：NOT ESTABLISHED。** 由于没有合规自动 credential transport，不得声称真实 tunnel authentication、provider connection 或 end-to-end MCP reachability 已验证。
+- **既有边界保持不变。** API Key 仍只可长期存放在 OS-protected `SecretStore`；Runtime、UI、`TunnelProcessManager`、普通 config、Activity、AuditEvent 和 diagnostics 不获得 secret value。
+- **不采用 file-reference 规避。** 受 ACL 保护的临时文件可能是未来单独评审的方案，但不满足本决策所冻结的“不得进入 file”要求；在要求被显式修订前不得实现。
+- **M7-C0 文档状态。** C0 的 capability audit 仍有效；其 Option B 只说明“当前 binary 能启动的候选”，不再构成 V1 接受结论。
+
+### 6. Future migration path
+
+解除 blocker 的最小顺序如下；每一步均需单独证据，不可跳过：
+
+1. **获取合规能力。** 上游 `tunnel-client` 或替换客户端提供上述 Option D 的正式、版本化 secret-input contract；若提出 helper/wrapper，则必须同时定义 client-side receiver 和 secure IPC，不接受仅在 helper 端读取 secret 的设计。
+2. **冻结新接口设计。** 记录 secret source、receiver、进程/IPC identity、最小权限、生命周期、failure/stop/crash cleanup、redaction 和 diagnostics/export boundary；明确 Runtime 不接触 secret。
+3. **Windows security verification（Windows 安全验证）。** 对 process inspection、child inheritance、crash dump/WER、diagnostic/support export、spawn failure、retry、orphan process 和 forced termination 执行可重复测试；验证 API Key 不出现在禁止载体。
+4. **Capability and regression verification（能力与回归验证）。** 针对精确 client version 验证启动参数、认证、process tree、日志/redaction、诊断和 MCP readiness；无真实凭据/外网证据时必须标记 `NOT RUN` 或 `NOT VERIFIED`，不得作成功声明。
+5. **新架构决策后才实施。** 只有步骤 1–4 的证据满足本节 Security requirements，才可创建后续实现任务并明确允许的最小代码变更；在此之前 M7-C1 继续 blocked。
