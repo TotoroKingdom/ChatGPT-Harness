@@ -203,6 +203,17 @@ impl RuntimeCore {
             .publish(event_type, summary, metadata, request_id)
     }
 
+    /// Safe observation only. This does not replace RuntimeState or authorize requests.
+    /// A future local control-plane adapter can serialize this contract unchanged.
+    #[allow(dead_code)] // M8-A freezes the internal contract; IPC/UI wiring is deferred.
+    pub(crate) fn diagnostics(&self) -> crate::diagnostics::RuntimeDiagnosticsSnapshot {
+        crate::diagnostics::RuntimeDiagnosticsSnapshot::capture(
+            self,
+            self.execution_pipeline.is_some(),
+            self.mcp_readiness.load(Ordering::Acquire),
+        )
+    }
+
     pub fn status(&self) -> Option<RuntimeState> {
         let config = self.config.as_ref()?;
         let (lifecycle, readiness) = match self.phase {
