@@ -1,4 +1,5 @@
-//! Frozen M0 Runtime wire method and notification names.
+//! Existing M0 methods plus additive M8-C local read methods.
+use super::control_read::{ACTIVITY_SNAPSHOT, DIAGNOSTICS_GET, EFFECTIVE_TOOLS_GET};
 
 pub const INITIALIZE: &str = "initialize";
 pub const RUNTIME_STATUS: &str = "runtime.status";
@@ -25,6 +26,9 @@ pub const REQUEST_METHODS: &[&str] = &[
     APPROVALS_LIST,
     APPROVALS_RESOLVE,
     DIAGNOSTICS_RUN,
+    DIAGNOSTICS_GET,
+    ACTIVITY_SNAPSHOT,
+    EFFECTIVE_TOOLS_GET,
 ];
 
 pub const NOTIFICATION_METHODS: &[&str] = &[INITIALIZED, ACTIVITY_EVENT];

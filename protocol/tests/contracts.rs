@@ -141,7 +141,7 @@ fn generated_files(directory: &std::path::Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn m0_method_registry_is_exact() {
+fn control_method_registry_is_exact() {
     assert_eq!(
         REQUEST_METHODS,
         [
@@ -155,6 +155,9 @@ fn m0_method_registry_is_exact() {
             "approvals.list",
             "approvals.resolve",
             "diagnostics.run",
+            "control.diagnostics.get",
+            "control.activity.snapshot",
+            "control.effective_tools.get",
         ]
     );
     assert_eq!(NOTIFICATION_METHODS, ["initialized", "activity.event"]);

@@ -166,6 +166,27 @@ fn handle_request<W: Write>(
         return Ok(false);
     }
 
+    if crate::control_read::handles(method) {
+        match crate::control_read::read(core, method, request.params.clone()) {
+            Ok(result) => write_result(output, id, result)?,
+            Err(error) => {
+                use harness_control_protocol::control_read::ReadErrorCode;
+                let (code, machine) = match error {
+                    ReadErrorCode::RuntimeNotReady => {
+                        (RUNTIME_NOT_READY_ERROR, MachineErrorCode::RuntimeNotReady)
+                    }
+                    ReadErrorCode::InvalidRequest => (
+                        error_codes::INVALID_PARAMS,
+                        MachineErrorCode::InvalidArgument,
+                    ),
+                    _ => (error_codes::INTERNAL_ERROR, MachineErrorCode::InternalError),
+                };
+                write_error(output, id, code, machine, error.message())?;
+            }
+        }
+        return Ok(false);
+    }
+
     match method {
         "initialize" => {
             if core.config.is_some() {
@@ -492,6 +513,7 @@ fn unix_millis() -> u128 {
 
 #[cfg(test)]
 mod tests {
+    mod control_read;
     use super::*;
     use harness_control_protocol::{
         DecimalU64, RuntimeConfigSnapshot, RuntimeLifecycle, RuntimeLimits, RuntimeReadiness,

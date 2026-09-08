@@ -1,5 +1,6 @@
 mod activity;
 mod audit;
+mod control_read;
 mod diagnostics;
 mod events;
 mod execution;

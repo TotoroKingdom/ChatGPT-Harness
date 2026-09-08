@@ -1,3 +1,6 @@
+mod control_read;
+pub use control_read::*;
+
 use crate::{
     config::{ConfigError, ConfigMetadata, ConfigStore, CURRENT_SCHEMA_VERSION},
     runtime::{RuntimeProcessStatus, RuntimeSupervisor, SupervisorError},

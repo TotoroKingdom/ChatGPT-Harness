@@ -41,6 +41,9 @@ pub fn run() {
             crate::commands::runtime_activity_subscribe,
             crate::commands::runtime_approvals_list,
             crate::commands::runtime_approvals_resolve,
+            crate::commands::runtime_get_diagnostics,
+            crate::commands::runtime_get_activity_snapshot,
+            crate::commands::runtime_get_effective_tools,
             crate::commands::runtime_diagnostics_run
         ])
         .run(tauri::generate_context!())

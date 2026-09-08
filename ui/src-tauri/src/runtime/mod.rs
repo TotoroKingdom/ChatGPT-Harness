@@ -1,3 +1,4 @@
+mod control_read;
 use harness_control_protocol::{
     ActivityEvent, ActivityListParams, ActivityListResult, ActivitySubscribeParams,
     ActivitySubscribeResult, AppConfig, ApprovalsListParams, ApprovalsListResult,

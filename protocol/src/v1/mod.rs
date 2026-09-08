@@ -2,6 +2,7 @@ pub mod activity;
 pub mod approvals;
 pub mod common;
 pub mod config;
+pub mod control_read;
 pub mod diagnostics;
 pub mod initialize;
 pub mod methods;
