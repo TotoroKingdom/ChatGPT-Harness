@@ -21,6 +21,7 @@ import type {
   ComponentStatesListener,
   ConfigMetadata,
   HarnessControlClient,
+  HarnessAdapterKind,
   RuntimeProcessEvent,
   RuntimeProcessStatus,
   Unsubscribe,
@@ -71,6 +72,7 @@ function componentStatesFromProcess(
   }
 }
 export class TauriHarnessControlClient implements HarnessControlClient {
+  readonly adapterKind: HarnessAdapterKind = "real";
   private components: ComponentStates = { runtime: "stopped", tunnel: "stopped", mcp: "stopped" };
 
   private call<T>(cmd: string, args?: Record<string, unknown>) {

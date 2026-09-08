@@ -3,6 +3,9 @@ import type { AppConfig } from "@protocol/v1";
 import { MockHarnessControlClient } from "@/services/harness/mock-client";
 
 describe("MockHarnessControlClient", () => {
+  it("identifies the test adapter", () => {
+    expect(new MockHarnessControlClient().adapterKind).toBe("mock");
+  });
   it("returns M0-shaped normal-mode tools", async () => {
     const client = new MockHarnessControlClient();
     const result = await client.toolsList();

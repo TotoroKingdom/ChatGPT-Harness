@@ -30,6 +30,7 @@ export type RuntimeProcessEvent = {
   phase: RuntimeProcessPhase;
   error?: { code: string; message: string };
 };
+export type HarnessAdapterKind = "real" | "mock";
 export type RuntimeProcessStatus = {
   phase: RuntimeProcessPhase;
   last_error?: { code: string; message: string } | null;
@@ -46,6 +47,7 @@ export function overallStatus(components: ComponentStates): OverallStatus {
 }
 
 export interface HarnessControlClient {
+  readonly adapterKind: HarnessAdapterKind;
   configGet(): Promise<AppConfig | null>;
   configMetadata(): Promise<ConfigMetadata>;
   configSave(config: AppConfig, apiKey?: string): Promise<AppConfig>;

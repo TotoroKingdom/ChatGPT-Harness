@@ -36,6 +36,9 @@ const states = (runtime: ComponentStates["runtime"]): ComponentStates => ({
 });
 
 describe("TauriHarnessControlClient", () => {
+  it("identifies the production adapter", () => {
+    expect(new TauriHarnessControlClient().adapterKind).toBe("real");
+  });
   beforeEach(() => {
     tauri.invoke.mockReset();
     tauri.listen.mockReset();

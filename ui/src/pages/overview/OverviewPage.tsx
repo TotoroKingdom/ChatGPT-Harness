@@ -32,7 +32,7 @@ export function OverviewPage() {
   return (
     <div className="page-stack">
       <Card className="hero-card">
-        <div><div className="eyebrow">Runtime status</div><div className="hero-status"><span className="hero-orb" /><div><h2>Harness is {data.overall}</h2><p>Local control-plane lifecycle backed by the M0 contract.</p></div></div></div>
+        <div><div className="eyebrow">Runtime status</div><div className="hero-status"><span className="hero-orb" /><div><h2>Harness is {data.overall}</h2><p>Local control-plane lifecycle backed by the Runtime.</p></div></div></div>
         <div className="hero-actions">{canStart ? <button className="button button-primary" onClick={() => void run(data.startHarness)}>Start Harness</button> : <button className="button button-secondary" disabled={data.overall === "stopping" || data.overall === "starting"} onClick={() => void run(data.stopHarness)}>Stop Harness</button>}{data.restartRequired && <button className="button button-warning" onClick={() => void run(data.restartHarness)}>Restart Harness</button>}</div>
       </Card>
       {data.restartRequired && <div className="notice notice-warning"><strong>Restart Required</strong><span>Configuration has changed since the current Harness session started.</span></div>}
