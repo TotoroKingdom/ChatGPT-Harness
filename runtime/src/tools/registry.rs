@@ -89,6 +89,11 @@ impl ToolRegistry {
         self.entries[index].descriptor.scope = scope.into();
         self
     }
+    #[cfg(test)]
+    pub(crate) fn with_test_enabled(mut self, index: usize, enabled: bool) -> Self {
+        self.entries[index].descriptor.enabled = enabled;
+        self
+    }
 
     pub fn list(&self) -> Vec<ToolDescriptor> {
         self.entries

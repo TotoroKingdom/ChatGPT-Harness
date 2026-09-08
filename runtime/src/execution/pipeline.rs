@@ -1,7 +1,7 @@
 use super::{RequestContext, RequestState, SecurityContext, ToolExecutor, TransitionError};
 use crate::audit::AuditEvent;
 use crate::policy::PolicyEngine;
-use crate::tools::{GlobError, ReadFileError, ToolRegistry};
+use crate::tools::{EffectiveTool, EffectiveToolCatalog, GlobError, ReadFileError, ToolRegistry};
 use crate::workspace::WorkspaceGuard;
 use harness_control_protocol::PolicyDecision;
 use std::sync::{
@@ -107,6 +107,17 @@ impl ExecutionPipeline {
     pub(crate) fn with_hook(mut self, hook: Arc<dyn ExecutionHook>) -> Self {
         self.hook = hook;
         self
+    }
+    /// Returns the exposure view derived from this immutable Runtime snapshot.
+    /// MCP consumes this view rather than re-evaluating policy or reading the
+    /// declared registry directly.
+    pub(crate) fn effective_tools(&self) -> Vec<EffectiveTool> {
+        EffectiveToolCatalog::compute(
+            &self.registry,
+            &self.policy,
+            self.security.mode.clone(),
+            self.readiness.load(Ordering::Acquire),
+        )
     }
 
     /// Parsing happens inside Validating, so invalid MCP payloads get the same

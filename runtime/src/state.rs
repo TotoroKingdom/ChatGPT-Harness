@@ -106,26 +106,21 @@ impl RuntimeCore {
         &self.tool_registry
     }
 
-    /// Returns the Runtime's current internal exposure view of declared tools.
+    /// Returns the Runtime's current effective exposure view.
     ///
-    /// This does not replace the policy engine or change the protocol-visible
-    /// `tools/list` catalog. Before the Runtime is ready, every tool remains
-    /// unavailable by runtime capability.
+    /// The MCP context consumes the same initialized Runtime snapshot. Before
+    /// the Runtime is ready, every tool remains unavailable by runtime
+    /// capability.
     #[allow(dead_code)]
     pub fn effective_tools(&self) -> Vec<EffectiveTool> {
-        let security_mode = self
-            .config
-            .as_ref()
-            .map(|config| config.security.mode.clone())
-            .unwrap_or(harness_control_protocol::SecurityMode::Normal);
-        let runtime_ready = self.phase == Phase::Ready
-            && self.mcp_readiness.load(Ordering::Acquire)
-            && self.execution_pipeline.is_some();
+        if let Some(pipeline) = &self.execution_pipeline {
+            return pipeline.effective_tools();
+        }
         EffectiveToolCatalog::compute(
             &self.tool_registry,
             &self.policy_engine,
-            security_mode,
-            runtime_ready,
+            harness_control_protocol::SecurityMode::Normal,
+            false,
         )
     }
 

@@ -421,11 +421,23 @@ mod tests {
         );
         let session_id = initialize(address, None).await;
 
+        let pre_ack_list = mcp_post(
+            address,
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }),
+            Some(&session_id),
+            None,
+        )
+        .await
+        .json_rpc();
+        assert!(pre_ack_list["result"]["tools"]
+            .as_array()
+            .expect("tool array")
+            .is_empty());
+
         let pre_ack = mcp_post(
             address,
             json!({
-                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": { "name": "read_file", "arguments": { "path": "README.md" } }
+                "jsonrpc": "2.0", "id": 3, "method": "tools/call",                "params": { "name": "read_file", "arguments": { "path": "README.md" } }
             }),
             Some(&session_id),
             None,

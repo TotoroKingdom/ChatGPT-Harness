@@ -1,6 +1,6 @@
 use crate::mcp::context::McpExecutionContext;
 use crate::mcp::{glob, read_file};
-use crate::tools::ToolRegistry;
+use crate::tools::{EffectiveTool, ToolAvailability};
 use rmcp::handler::server::common::schema_for_input;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::{
@@ -29,9 +29,16 @@ impl McpService {
         Self { context }
     }
 
-    /// Lists the externally visible MCP catalog in the Runtime registry order.
+    /// Lists only currently callable tools from the Runtime effective catalog.
+    /// Declared tools that are unavailable by policy, runtime, or disabled state
+    /// are intentionally omitted from the MCP exposure boundary.
     pub fn tools(&self) -> Vec<Tool> {
-        vec![read_file_tool(), glob_tool()]
+        self.context
+            .effective_tools()
+            .into_iter()
+            .filter(|tool| tool.availability == ToolAvailability::Available)
+            .filter_map(tool_from_effective)
+            .collect()
     }
 
     /// Executes one MCP tool adapter without creating a transport.
@@ -45,16 +52,6 @@ impl McpService {
             GLOB => Ok(glob::execute(&self.context, arguments)),
             _ => Err(McpProtocolError::UnknownTool),
         }
-    }
-
-    pub fn registry_is_consistent(&self, registry: &ToolRegistry) -> bool {
-        self.tools()
-            .iter()
-            .map(|tool| tool.name.as_ref())
-            .eq(registry
-                .exposed_catalog()
-                .iter()
-                .map(|descriptor| descriptor.name.as_str()))
     }
 }
 
@@ -99,20 +96,28 @@ impl ServerHandler for McpService {
     }
 }
 
-fn read_file_tool() -> Tool {
+fn tool_from_effective(tool: EffectiveTool) -> Option<Tool> {
+    match tool.name.as_str() {
+        READ_FILE => Some(read_file_tool_with_metadata(&tool.name, &tool.description)),
+        GLOB => Some(glob_tool_with_metadata(&tool.name, &tool.description)),
+        _ => None,
+    }
+}
+
+fn read_file_tool_with_metadata(name: &str, description: &str) -> Tool {
     Tool::new(
-        READ_FILE,
-        "Read a UTF-8 text file inside the active workspace. Read-only; supports zero-based line offset and line limit.",
+        name.to_owned(),
+        description.to_owned(),
         schema_for_input::<read_file::ReadFileArguments>()
             .expect("read_file MCP schema is statically valid"),
     )
     .with_annotations(ToolAnnotations::new().read_only(true).destructive(false))
 }
 
-fn glob_tool() -> Tool {
+fn glob_tool_with_metadata(name: &str, description: &str) -> Tool {
     Tool::new(
-        GLOB,
-        "Find workspace paths matching a glob pattern. Read-only.",
+        name.to_owned(),
+        description.to_owned(),
         schema_for_input::<glob::GlobArguments>().expect("glob MCP schema is statically valid"),
     )
     .with_annotations(ToolAnnotations::new().read_only(true).destructive(false))
@@ -227,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn catalog_matches_registry_and_excludes_non_v1_tools() {
+    fn ready_catalog_exposes_read_tools_and_excludes_non_v1_tools() {
         let workspace = TestWorkspace::new();
         let service = workspace.service();
         let names = service
@@ -236,7 +241,6 @@ mod tests {
             .map(|tool| tool.name.into_owned())
             .collect::<Vec<_>>();
         assert_eq!(names, [READ_FILE, GLOB]);
-        assert!(service.registry_is_consistent(&ToolRegistry::normal_mode()));
         for forbidden in [
             "bash",
             "tree",

@@ -76,8 +76,16 @@ PolicyEngine 和 Runtime capability（运行时能力）计算后的 exposure vi
   缺失 metadata、声明能力或运行时能力时 fail closed（默认不可用）。
 
 Effective Tool Catalog 不替代 PolicyEngine，不重新实现 policy matching（策略匹配），也不执行
-工具或检查 workspace boundary（工作区边界）。它只是供未来 UI、MCP `tools/list` 和诊断复用的
-Runtime 内部结果视图；本阶段不修改 `tools/list` wire contract（线协议契约）或 UI。
+工具或检查 workspace boundary（工作区边界）。MCP adapter（适配器）只消费 Runtime 的 Effective
+Catalog：
+
+`Declared Tool → Effective Tool → MCP tools/list`
+
+`tools/list` 仅暴露 `Available` 工具；`UnavailableByPolicy`、`UnavailableByRuntime` 和
+`UnavailableDisabled` 均不进入 MCP 返回。MCP schema（模式）和 `tools/list` response format
+（响应格式）保持不变。工具实现存在不等于 MCP 暴露；实际 `tools/call` 仍进入既有 ExecutionPipeline，
+继续执行 readiness、WorkspaceGuard、PolicyEngine 和 Audit 边界检查。UI 不消费此 MCP exposure
+路径。
 
 ## Error / Hook 边界
 

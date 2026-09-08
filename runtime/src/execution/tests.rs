@@ -165,9 +165,17 @@ impl Fixture {
         }
     }
     fn pipeline(&self, rules: Vec<PolicyRule>) -> ExecutionPipeline {
+        self.pipeline_with_registry(rules, ToolRegistry::normal_mode())
+    }
+
+    fn pipeline_with_registry(
+        &self,
+        rules: Vec<PolicyRule>,
+        registry: ToolRegistry,
+    ) -> ExecutionPipeline {
         ExecutionPipeline::new(
             Arc::clone(&self.guard),
-            Arc::new(ToolRegistry::normal_mode()),
+            Arc::new(registry),
             PolicyEngine::new(rules),
             SecurityContext {
                 workspace_id: self.workspace_id,
@@ -457,7 +465,6 @@ fn mcp_deny_ask_and_allow_preserve_catalog_and_existing_result_envelope() {
             let service = McpService::new(McpExecutionContext::new(Arc::new(
                 fixture.pipeline(rules(decision.clone())),
             )));
-            assert!(service.registry_is_consistent(&ToolRegistry::normal_mode()));
             let result = service.call_tool(tool, arguments).unwrap();
             let data = result.structured_content.unwrap();
             if let Some(code) = code {
@@ -660,4 +667,53 @@ fn audit_events_have_stable_request_order_and_redacted_argument_boundary() {
         .audit_events
         .windows(2)
         .all(|events| events[0].timestamp <= events[1].timestamp));
+}
+#[test]
+fn mcp_tools_list_exposes_only_available_effective_tools() {
+    let fixture = Fixture::new();
+    let normal = McpService::new(McpExecutionContext::new(Arc::new(
+        fixture.pipeline(PolicyEngine::system_rules()),
+    )));
+    assert_eq!(
+        normal
+            .tools()
+            .iter()
+            .map(|tool| tool.name.as_ref())
+            .collect::<Vec<_>>(),
+        ["read_file", "glob"]
+    );
+
+    fixture.ready.store(false, Ordering::Release);
+    assert!(normal.tools().is_empty());
+
+    fixture.ready.store(true, Ordering::Release);
+    let denied_read_file = McpService::new(McpExecutionContext::new(Arc::new(
+        fixture.pipeline_with_registry(
+            PolicyEngine::system_rules(),
+            ToolRegistry::normal_mode().with_test_scope(0, "outside_active_workspace"),
+        ),
+    )));
+    assert_eq!(
+        denied_read_file
+            .tools()
+            .iter()
+            .map(|tool| tool.name.as_ref())
+            .collect::<Vec<_>>(),
+        ["glob"]
+    );
+
+    let disabled_read_file = McpService::new(McpExecutionContext::new(Arc::new(
+        fixture.pipeline_with_registry(
+            PolicyEngine::system_rules(),
+            ToolRegistry::normal_mode().with_test_enabled(0, false),
+        ),
+    )));
+    assert_eq!(
+        disabled_read_file
+            .tools()
+            .iter()
+            .map(|tool| tool.name.as_ref())
+            .collect::<Vec<_>>(),
+        ["glob"]
+    );
 }

@@ -1,4 +1,5 @@
 use crate::execution::{ExecutionError, ExecutionPipeline, ExecutionReport, ToolExecutor};
+use crate::tools::EffectiveTool;
 use std::sync::Arc;
 
 /// Shares the exact initialized enforcement snapshot, not raw executor access.
@@ -17,6 +18,9 @@ impl McpExecutionContext {
         prepare: impl FnOnce() -> Result<E, ExecutionError>,
     ) -> ExecutionReport<E::Output> {
         self.pipeline.execute(prepare)
+    }
+    pub(crate) fn effective_tools(&self) -> Vec<EffectiveTool> {
+        self.pipeline.effective_tools()
     }
 }
 
