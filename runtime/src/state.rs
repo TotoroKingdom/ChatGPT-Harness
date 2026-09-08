@@ -1,3 +1,4 @@
+use crate::activity::{ActivityEntry, ActivityStore};
 use crate::events::EventBus;
 use crate::execution::{ExecutionError, ExecutionPipeline, SecurityContext};
 use crate::mcp::{McpContextError, McpExecutionContext, McpService};
@@ -35,11 +36,13 @@ pub struct RuntimeCore {
     tool_registry: Arc<ToolRegistry>,
     policy_engine: PolicyEngine,
     execution_pipeline: Option<Arc<ExecutionPipeline>>,
+    activity: Arc<ActivityStore>,
     pub last_error: Option<RuntimeErrorSummary>,
 }
 
 impl RuntimeCore {
     pub fn new() -> Self {
+        let tool_registry = Arc::new(ToolRegistry::normal_mode());
         Self {
             runtime_id: uuid::Uuid::new_v4().to_string(),
             started_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -48,7 +51,8 @@ impl RuntimeCore {
             events: None,
             workspace_guard: None,
             mcp_readiness: Arc::new(AtomicBool::new(false)),
-            tool_registry: Arc::new(ToolRegistry::normal_mode()),
+            activity: Arc::new(ActivityStore::new(Arc::clone(&tool_registry))),
+            tool_registry,
             policy_engine: PolicyEngine::new(PolicyEngine::system_rules()),
             execution_pipeline: None,
             last_error: None,
@@ -70,7 +74,8 @@ impl RuntimeCore {
             },
             config.runtime_limits.max_read_bytes,
             Arc::clone(&self.mcp_readiness),
-        );
+        )
+        .with_audit_sink(self.activity.clone());
         self.execution_pipeline = Some(Arc::new(pipeline));
         self.events = Some(events);
         self.config = Some(config);
@@ -102,6 +107,13 @@ impl RuntimeCore {
             .execute(|| Ok(request.clone()))
             .result
     }
+    /// Latest N observations in receipt order (oldest to newest), detached
+    /// from the store. This is not a readiness or authorization query.
+    #[allow(dead_code)] // Internal contract; transport/UI consumption is deferred.
+    pub(crate) fn activity_snapshot(&self, limit: usize) -> Vec<ActivityEntry> {
+        self.activity.snapshot(limit)
+    }
+
     pub fn tool_registry(&self) -> &ToolRegistry {
         &self.tool_registry
     }

@@ -1,5 +1,5 @@
 use super::{RequestContext, RequestState, SecurityContext, ToolExecutor, TransitionError};
-use crate::audit::AuditEvent;
+use crate::audit::{AuditEvent, AuditSink};
 use crate::policy::PolicyEngine;
 use crate::tools::{EffectiveTool, EffectiveToolCatalog, GlobError, ReadFileError, ToolRegistry};
 use crate::workspace::WorkspaceGuard;
@@ -80,6 +80,7 @@ pub(crate) struct ExecutionPipeline {
     max_read_bytes: u32,
     readiness: Arc<AtomicBool>,
     hook: Arc<dyn ExecutionHook>,
+    audit_sink: Option<Arc<dyn AuditSink>>,
 }
 
 impl ExecutionPipeline {
@@ -99,7 +100,14 @@ impl ExecutionPipeline {
             max_read_bytes,
             readiness,
             hook: Arc::new(NoopHook),
+            audit_sink: None,
         }
+    }
+
+    /// Observes the existing audit emission; does not add lifecycle events.
+    pub(crate) fn with_audit_sink(mut self, sink: Arc<dyn AuditSink>) -> Self {
+        self.audit_sink = Some(sink);
+        self
     }
 
     /// Internal observation seam, not user-defined executable hooks.
@@ -223,6 +231,9 @@ impl ExecutionPipeline {
     ) {
         self.hook.on_event(context, event);
         if let Some(audit_event) = AuditEvent::from_pipeline_event(context, event) {
+            if let Some(sink) = &self.audit_sink {
+                sink.on_audit_event(&audit_event);
+            }
             audit_events.push(audit_event);
         }
     }

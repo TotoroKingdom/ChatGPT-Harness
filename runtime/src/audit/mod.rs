@@ -12,3 +12,9 @@ pub(crate) use event::{
     AuditEvent, AuditEventType, AuditLifecycleState, AuditOutcome, WorkspaceValidation,
 };
 pub(crate) use redaction::redact_value;
+
+/// Internal observation-only receiver of an already-created audit event.
+/// It cannot return an authorization or execution result.
+pub(crate) trait AuditSink: Send + Sync {
+    fn on_audit_event(&self, event: &AuditEvent);
+}

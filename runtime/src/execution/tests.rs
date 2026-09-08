@@ -565,6 +565,7 @@ fn real_executor_content_error_maps_to_existing_code_and_failed_state() {
 
 #[test]
 fn audit_events_cover_allow_deny_and_ask_branches_in_order() {
+    use crate::activity::ActivityStore;
     use AuditEventType::*;
 
     for (decision, expected_types, expected_terminal) in [
@@ -601,10 +602,22 @@ fn audit_events_cover_allow_deny_and_ask_branches_in_order() {
         ),
     ] {
         let fixture = Fixture::new();
+        let activity = Arc::new(ActivityStore::new(Arc::new(ToolRegistry::normal_mode())));
         let report = fixture
             .pipeline(rules(decision.clone()))
+            .with_audit_sink(activity.clone())
             .execute(|| Ok(fixture.spy("sample.txt", false)));
         let audit_events = report.audit_events;
+        let entries = activity.snapshot(20);
+        assert_eq!(entries.len(), audit_events.len());
+        for (entry, audit) in entries.iter().zip(&audit_events) {
+            assert_eq!(entry.event_id, audit.event_id);
+            assert_eq!(entry.request_id, audit.request_id);
+            assert_eq!(entry.event_type, audit.event_type);
+            assert_eq!(entry.lifecycle_state, audit.lifecycle_state);
+            assert_eq!(entry.decision_summary, audit.policy_decision);
+            assert_eq!(entry.outcome_summary, audit.outcome);
+        }
 
         assert_eq!(
             audit_events

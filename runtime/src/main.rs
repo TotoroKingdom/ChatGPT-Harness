@@ -1,3 +1,4 @@
+mod activity;
 mod audit;
 mod diagnostics;
 mod events;
