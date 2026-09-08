@@ -2,7 +2,10 @@ use crate::events::EventBus;
 use crate::execution::{ExecutionError, ExecutionPipeline, SecurityContext};
 use crate::mcp::{McpContextError, McpExecutionContext, McpService};
 use crate::policy::PolicyEngine;
-use crate::tools::{GlobOutput, GlobRequest, ReadFileOutput, ReadFileRequest, ToolRegistry};
+use crate::tools::{
+    EffectiveTool, EffectiveToolCatalog, GlobOutput, GlobRequest, ReadFileOutput, ReadFileRequest,
+    ToolRegistry,
+};
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
     ActivityEvent, ActivityEventType, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeLifecycle,
@@ -30,6 +33,7 @@ pub struct RuntimeCore {
     workspace_guard: Option<Arc<WorkspaceGuard>>,
     mcp_readiness: Arc<AtomicBool>,
     tool_registry: Arc<ToolRegistry>,
+    policy_engine: PolicyEngine,
     execution_pipeline: Option<Arc<ExecutionPipeline>>,
     pub last_error: Option<RuntimeErrorSummary>,
 }
@@ -45,6 +49,7 @@ impl RuntimeCore {
             workspace_guard: None,
             mcp_readiness: Arc::new(AtomicBool::new(false)),
             tool_registry: Arc::new(ToolRegistry::normal_mode()),
+            policy_engine: PolicyEngine::new(PolicyEngine::system_rules()),
             execution_pipeline: None,
             last_error: None,
         }
@@ -58,7 +63,7 @@ impl RuntimeCore {
         let pipeline = ExecutionPipeline::new(
             Arc::clone(&workspace_guard),
             Arc::clone(&self.tool_registry),
-            PolicyEngine::new(PolicyEngine::system_rules()),
+            self.policy_engine.clone(),
             SecurityContext {
                 workspace_id: uuid::Uuid::new_v4(),
                 mode: config.security.mode.clone(),
@@ -99,6 +104,29 @@ impl RuntimeCore {
     }
     pub fn tool_registry(&self) -> &ToolRegistry {
         &self.tool_registry
+    }
+
+    /// Returns the Runtime's current internal exposure view of declared tools.
+    ///
+    /// This does not replace the policy engine or change the protocol-visible
+    /// `tools/list` catalog. Before the Runtime is ready, every tool remains
+    /// unavailable by runtime capability.
+    #[allow(dead_code)]
+    pub fn effective_tools(&self) -> Vec<EffectiveTool> {
+        let security_mode = self
+            .config
+            .as_ref()
+            .map(|config| config.security.mode.clone())
+            .unwrap_or(harness_control_protocol::SecurityMode::Normal);
+        let runtime_ready = self.phase == Phase::Ready
+            && self.mcp_readiness.load(Ordering::Acquire)
+            && self.execution_pipeline.is_some();
+        EffectiveToolCatalog::compute(
+            &self.tool_registry,
+            &self.policy_engine,
+            security_mode,
+            runtime_ready,
+        )
     }
 
     #[allow(dead_code)]
@@ -282,6 +310,44 @@ mod tests {
             core.status().unwrap().exposed_tool_catalog,
             core.tool_registry().exposed_catalog()
         );
+    }
+
+    #[test]
+    fn effective_tools_are_available_only_after_runtime_acknowledgement() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+
+        assert!(core
+            .effective_tools()
+            .iter()
+            .all(|tool| tool.availability == crate::tools::ToolAvailability::UnavailableByRuntime));
+
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        assert!(core
+            .effective_tools()
+            .iter()
+            .all(|tool| tool.availability == crate::tools::ToolAvailability::UnavailableByRuntime));
+
+        core.acknowledge().expect("acknowledge runtime");
+        let effective = core.effective_tools();
+        assert_eq!(
+            effective
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["read_file", "glob"]
+        );
+        assert!(effective.iter().all(|tool| {
+            tool.availability == crate::tools::ToolAvailability::Available
+                && tool.decision == harness_control_protocol::PolicyDecision::Allow
+        }));
+
+        core.stop().expect("stop runtime");
+        assert!(core
+            .effective_tools()
+            .iter()
+            .all(|tool| tool.availability == crate::tools::ToolAvailability::UnavailableByRuntime));
     }
 
     #[test]

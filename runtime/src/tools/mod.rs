@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 
+mod effective;
 mod glob;
 mod read_file;
 mod registry;
 
 #[allow(unused_imports)]
+pub use effective::{EffectiveTool, EffectiveToolCatalog, ToolAvailability};
 pub use glob::{
     GlobDiagnostic, GlobDiagnosticCode, GlobError, GlobMatch, GlobMatchKind, GlobOutput,
     GlobRequest, MAX_GLOB_DIAGNOSTICS, MAX_GLOB_RESULTS,

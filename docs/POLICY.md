@@ -19,7 +19,8 @@ MCP 入口和 `RuntimeCore` typed（类型化）入口共享同一个 `Execution
   TOCTOU（检查与使用之间竞态）修复的声明。
 
 M6-B 不实现 approval manager（批准管理器）、自动批准、Allow Once、可恢复等待、audit storage
-（审计存储）、新工具或有效工具目录推导。`ASK` 在本次调用中立即结束为
+（审计存储）或新工具。Effective Tool Catalog 由后续 M6-D1 作为 Runtime 内部结果视图引入，
+不改变 M6-B 的执行语义。`ASK` 在本次调用中立即结束为
 `AwaitingApproval`，返回 `APPROVAL_REQUIRED`，没有可继续执行的 token 或后台等待请求。
 
 ## Request State Machine（请求状态机）
@@ -59,6 +60,24 @@ arguments、秘密或输出。决策优先级为 `DENY > ASK > ALLOW`；无效/�
 
 策略引擎复用 ToolRegistry 的注册项，不维护第二份工具清单。`policies.list`、`tools.list` 和
 工具描述符中的 `effective_policy` 仍不是实时策略求值结果。
+
+## Effective Tool Catalog（有效工具目录）
+
+Runtime 内部另外提供 Effective Tool Catalog，作为 declared tool（已声明工具）经过当前
+PolicyEngine 和 Runtime capability（运行时能力）计算后的 exposure view（暴露视图）：
+
+- **Declared Tool**：ToolRegistry 中存在实现、metadata（元数据）和 executor binding（执行器绑定）
+  的工具声明；ToolRegistry 仍是唯一声明来源。
+- **Effective Tool**：包含工具名称、描述、策略决策、声明能力、availability（可用性）和 reason
+  （原因）的内部模型。可用性区分 `Available`、`UnavailableByPolicy`、
+  `UnavailableByRuntime` 和 `UnavailableDisabled`，而不是一个无法解释原因的布尔值。
+- **Policy exposure boundary**（策略暴露边界）：只有 Runtime 已就绪且 PolicyEngine 返回
+  `ALLOW` 的声明工具才是 `Available`；`ASK` 不能直接执行，`DENY` 和策略求值错误均不可用。
+  缺失 metadata、声明能力或运行时能力时 fail closed（默认不可用）。
+
+Effective Tool Catalog 不替代 PolicyEngine，不重新实现 policy matching（策略匹配），也不执行
+工具或检查 workspace boundary（工作区边界）。它只是供未来 UI、MCP `tools/list` 和诊断复用的
+Runtime 内部结果视图；本阶段不修改 `tools/list` wire contract（线协议契约）或 UI。
 
 ## Error / Hook 边界
 

@@ -1,4 +1,5 @@
 use harness_control_protocol::{PolicyDecision, RiskLevel, ToolDescriptor, ToolReadiness};
+use serde::{Deserialize, Serialize};
 
 const WORKSPACE_SCOPE: &str = "workspace";
 
@@ -10,7 +11,8 @@ pub struct ToolRegistry {
 
 /// Capability semantics live alongside the one authoritative tool registration.
 /// Future capability additions must extend this type and the policy match explicitly.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToolCapability {
     WorkspaceRead,
 }
@@ -23,6 +25,12 @@ struct RegisteredTool {
 
 impl ToolRegistry {
     /// Resolve only a currently executable registration, without deriving policy.
+    pub(crate) fn declared_capability(&self, name: &str) -> Option<ToolCapability> {
+        self.entries
+            .iter()
+            .find_map(|entry| (entry.descriptor.name == name).then_some(entry.capability))
+    }
+
     pub fn capability(&self, name: &str) -> Option<ToolCapability> {
         self.entries.iter().find_map(|entry| {
             let tool = &entry.descriptor;
@@ -68,6 +76,18 @@ impl ToolRegistry {
                 },
             ],
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_metadata(mut self, index: usize, description: &str) -> Self {
+        self.entries[index].descriptor.description = description.into();
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_scope(mut self, index: usize, scope: &str) -> Self {
+        self.entries[index].descriptor.scope = scope.into();
+        self
     }
 
     pub fn list(&self) -> Vec<ToolDescriptor> {

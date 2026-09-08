@@ -75,6 +75,7 @@ impl PolicyEvaluation {
 /// Immutable rule snapshot. Invalid enabled rules invalidate the entire evaluation;
 /// they must never be skipped in favor of a valid ALLOW elsewhere in the snapshot.
 /// There is deliberately no default-ALLOW or source-based precedence.
+#[derive(Clone)]
 pub(crate) struct PolicyEngine {
     rules: Vec<PolicyRule>,
 }

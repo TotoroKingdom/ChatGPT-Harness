@@ -5,7 +5,6 @@
 
 mod engine;
 
-#[cfg(test)]
 pub(crate) use engine::PolicyEvaluationReason;
 pub(crate) use engine::{PolicyContext, PolicyEngine, PolicyEvaluation};
 
