@@ -196,3 +196,29 @@ describe("TauriHarnessControlClient", () => {
     await expect(client.policiesList()).resolves.toEqual({ items: [] });
   });
 });
+
+
+describe("M8-D read adapter boundary", () => {
+  beforeEach(() => { tauri.invoke.mockReset(); });
+  it.each([0, -1, 257, 1.5, NaN, Infinity])("rejects invalid activity limit %s without IPC", async (limit) => {
+    await expect(new TauriHarnessControlClient().runtimeGetActivitySnapshot(limit)).rejects.toEqual({ code: "INVALID_REQUEST" });
+    expect(tauri.invoke).not.toHaveBeenCalled();
+  });
+  it.each([1, 256])("accepts the boundary limit %s", async (limit) => {
+    tauri.invoke.mockResolvedValue([]);
+    await expect(new TauriHarnessControlClient().runtimeGetActivitySnapshot(limit)).resolves.toEqual([]);
+    expect(tauri.invoke).toHaveBeenCalledWith("runtime_get_activity_snapshot", { limit });
+  });
+  it("discards unknown/sensitive fields before returning tools to React", async () => {
+    tauri.invoke.mockResolvedValue([{ name: "glob", availability: "disabled", decision: "allow", reason: "secret", arguments: { path: "private" }, result: "secret" }]);
+    await expect(new TauriHarnessControlClient().runtimeGetEffectiveTools()).resolves.toEqual([{ name: "glob", availability: "disabled", decision: "allow" }]);
+  });
+  it.each([
+    { name: "glob", availability: "unknown", decision: "allow" },
+    { name: "glob", availability: "available", decision: "unknown" },
+    { name: "D:\\private", availability: "available", decision: "allow" },
+  ])("fails closed on an unsupported tool display field", async (tool) => {
+    tauri.invoke.mockResolvedValue([tool]);
+    await expect(new TauriHarnessControlClient().runtimeGetEffectiveTools()).rejects.toEqual({ code: "INTERNAL_ERROR" });
+  });
+});

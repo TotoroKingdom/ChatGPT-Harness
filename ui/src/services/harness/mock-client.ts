@@ -1,3 +1,4 @@
+import type { ActivityEntry, RuntimeDiagnostics, ToolDiagnostic } from "./control-read";
 import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, PolicyRule, RuntimeState, SecurityMode, ToolDescriptor, ToolsListResult } from "@protocol/v1";
 import { HarnessClientError } from "./errors";
 import type { ActivityEventListener, ComponentStates, ComponentStatesListener, HarnessControlClient, RuntimeProcessStatus, Unsubscribe } from "./client";
@@ -39,6 +40,10 @@ export class MockHarnessControlClient implements HarnessControlClient {
  }
  private recordActivity(eventType: ActivityEventType, summary: string) { const created=event(this.nextSequence,eventType,summary,{source:"mock-lifecycle"}); this.nextSequence=incrementDecimal(this.nextSequence); this.activities=[...this.activities,created]; }
  private async respond<T>(value:T):Promise<T>{await delay(); if(this.scenario==="disconnected") throw new HarnessClientError("disconnected","The local Runtime is not connected."); if(this.scenario==="error") throw new HarnessClientError("error","The mock Runtime returned an example error."); return value;}
+ // Legacy mock lifecycle data is not evidence for M8-C observations.
+ runtimeGetDiagnostics(): Promise<RuntimeDiagnostics> { return Promise.reject({code:"RUNTIME_UNAVAILABLE"}); }
+ runtimeGetActivitySnapshot(_limit: number): Promise<ActivityEntry[]> { return this.scenario === "empty" ? Promise.resolve([]) : Promise.reject({code:"RUNTIME_UNAVAILABLE"}); }
+ runtimeGetEffectiveTools(): Promise<ToolDiagnostic[]> { return this.scenario === "empty" ? Promise.resolve([]) : Promise.reject({code:"RUNTIME_UNAVAILABLE"}); }
  configGet(){return this.respond(this.config);}
  configMetadata(){return this.respond({configDirectory:"%APPDATA%\\ChatGPT-Harness",configFile:"%APPDATA%\\ChatGPT-Harness\\config.json"});}
  configSave(config:AppConfig,apiKey?:string){

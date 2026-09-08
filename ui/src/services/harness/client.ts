@@ -1,3 +1,4 @@
+import type { ControlReadClient } from "./control-read";
 import type {
   ActivityEvent,
   ActivityListParams,
@@ -46,7 +47,7 @@ export function overallStatus(components: ComponentStates): OverallStatus {
   return "degraded";
 }
 
-export interface HarnessControlClient {
+export interface HarnessControlClient extends ControlReadClient {
   readonly adapterKind: HarnessAdapterKind;
   configGet(): Promise<AppConfig | null>;
   configMetadata(): Promise<ConfigMetadata>;

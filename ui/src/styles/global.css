@@ -129,3 +129,10 @@ h1, h2, p { margin: 0; } h1 { font-size: 27px; letter-spacing: -.04em; margin-to
   .input-action-row { flex-wrap: wrap; }
   .input-action-row input { flex-basis: 100%; }
 }
+
+/* M8-D safe read-only observation tables. */
+.observation-table-wrap { overflow-x: auto; }
+.observation-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+.observation-table caption { text-align: left; padding-bottom: 16px; }
+.observation-table th, .observation-table td { padding: 14px 12px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
+.observation-table th { font-weight: 600; }

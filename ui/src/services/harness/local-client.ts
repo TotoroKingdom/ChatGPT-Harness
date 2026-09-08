@@ -1,3 +1,4 @@
+import { parseActivity, parseDiagnostics, parseTools } from "./control-read";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
@@ -122,6 +123,19 @@ export class TauriHarnessControlClient implements HarnessControlClient {
 
   validatePath(path: string, file: boolean) {
     return this.call<boolean>("validate_path", { path, file });
+  }
+
+  async runtimeGetDiagnostics() {
+    return parseDiagnostics(await this.call<unknown>("runtime_get_diagnostics"));
+  }
+
+  async runtimeGetActivitySnapshot(limit: number) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 256) throw { code: "INVALID_REQUEST" };
+    return parseActivity(await this.call<unknown>("runtime_get_activity_snapshot", { limit }));
+  }
+
+  async runtimeGetEffectiveTools() {
+    return parseTools(await this.call<unknown>("runtime_get_effective_tools"));
   }
 
   localDiagnosticsRun() {
