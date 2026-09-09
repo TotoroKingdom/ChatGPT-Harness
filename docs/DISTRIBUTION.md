@@ -698,6 +698,6 @@ Uninstall removes application files, shortcuts, and installer registration, whil
 
 - The generated installer is unsigned and is for internal development/clean-machine validation only; code-signing is intentionally not part of M9-D2.
 - NSIS tool acquisition is performed by the installed Tauri CLI when the local NSIS toolchain is unavailable; the binary itself is never downloaded as an application payload.
-- In the current validation environment, Tauri reached the NSIS bundling step but the NSIS 3.11 tool download timed out; no installer was emitted until that tool is available.
+- On a clean environment without a local NSIS toolchain, the Tauri CLI may need to acquire NSIS 3.11 into its official cache before bundling; this can be affected by network or proxy policy.
 - M9-D2 does not implement MSI, updater, CI release, tunnel packaging, credential transport, telemetry, or automatic upload.
 - Full clean-machine install/uninstall acceptance remains a separate M9-E activity.
