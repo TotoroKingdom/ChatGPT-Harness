@@ -465,3 +465,173 @@ M9-C 将 First Run 接入既有 Local Control Plane 和 ConfigStore，不改变 
 - **Secret boundary**：API key 继续只写入既有 SecretStore，`config.json` 仅保留 opaque `SecretReference`，不保存 raw secret、PID、port、Runtime instance ID 或 resolved executable path。
 
 M9-C 不实现 installer、updater、Tunnel credential transport、telemetry 或新的 Runtime execution capability；M7-C 继续保持 `BLOCKED`。
+
+## M9-D1 Installer Strategy
+
+> Status: frozen design (investigation only)
+> Date: 2026-09-09
+> Scope: Windows V1 release packaging. This section does **not** implement an installer, an updater, a Runtime/Tunnel/SecretStore change, or a configuration-schema change.
+
+### 1. Current packaging audit
+
+| Area | Observed state | M9-D1 implication |
+| --- | --- | --- |
+| Tauri configuration | `ui/src-tauri/tauri.conf.json` is the only Tauri config. Its `bundle.active` is `false`; there are no configured bundle targets, Windows installer settings, resources, signing settings, or updater artifacts. | There is no current installer output to preserve or modify. M9-D1 only freezes the configuration that a later packaging task must add. |
+| Tauri bundler support | The checked-in local Tauri CLI v2.11.4 schema supports both `nsis` and `msi` Windows targets, NSIS `currentUser` / `perMachine` modes, Windows signing fields, WebView2 modes, and app resources. | NSIS and MSI are technically available options; choosing NSIS does not require replacing Tauri. |
+| Build scripts | `ui/package.json` provides `tauri:build`, but it first builds Runtime and currently emits only executable output because Tauri bundling is disabled. `distribution:stage` runs `ui/scripts/stage-distribution.ps1`. | The existing staging script is the sole release-payload boundary; it is not an installer pipeline. It must remain unchanged in M9-D1. |
+| Staged payload | `stage-distribution.ps1` builds the release workspace and stages `chatgpt-harness-ui.exe`, `runtime\\chatgpt-harness-runtime.exe`, and `distribution.json` into ignored `target-exe/distribution/`. The checked workspace contains that staged layout. | The future installer must consume this exact payload topology and must not invent a second Runtime location. |
+| Current artifacts | `target/release/` contains executable build outputs; no `.msi`, NSIS setup executable, ZIP release, or Tauri `bundle/` output exists. | There is no released installer format or upgrade behavior to maintain yet. |
+| Runtime discovery | Installed discovery derives `<install-root>` from the UI executable and validates `<install-root>\\distribution.json` plus the fixed `runtime/chatgpt-harness-runtime.exe` path before launch. | Any installer layout that changes these paths is incompatible and must be rejected rather than supported by fallback logic. |
+| Resources / sidecars | `tauri.conf.json` currently has no `bundle.resources` or `externalBin`/sidecar configuration. | The Runtime is not a Tauri resource or sidecar today; M9-D1 keeps it as an ordinary executable in the installer payload. |
+| Identity and version metadata | `tauri.conf.json`, UI Cargo manifest, Runtime Cargo manifest, and `ui/package.json` are all currently `0.1.0`. `distribution.json` is generated from UI/Runtime/protocol sources. Bundle publisher, icon, signing, and installer metadata are not configured. | A future release task must establish one release version and fill bundle metadata without adding a hand-maintained version source. |
+| Icons | The only current icon asset is `ui/src-tauri/icons/icon.ico`; no `bundle.icon` is configured. | Icon assets and installer/uninstaller icon metadata require release-readiness validation before the first public package; this task does not alter them. |
+
+### 2. Installer type decision
+
+#### Option comparison
+
+| Option | Installation UX | Upgrade / uninstall | Permissions and per-user fit | Enterprise compatibility | V1 assessment |
+| --- | --- | --- | --- | --- | --- |
+| A. Tauri NSIS bundle | Familiar single Setup `.exe`; can create Start-menu entry and uninstaller. | Supports in-place replacement and registered uninstall for the same product/install root. | Tauri supports `currentUser`; no administrator elevation is needed for the intended default. | Usable for individual developers, but less preferred than MSI for managed deployment. | **Recommended primary V1 format.** |
+| B. MSI | Familiar to IT deployment systems; more formal managed-install experience. | Strong managed upgrade/uninstall conventions. | Per-machine policy and administrative deployment are natural; per-user is less aligned with the V1 data and update model. | Best option for Intune/SCCM/GPO and other enterprise software distribution. | Post-V1 enterprise deliverable, not the V1 primary path. |
+| C. Portable ZIP | No installation and easy offline handoff. | No registered uninstall; users can mix versions or move/delete the directory, so reliable upgrades are weak. | No elevation, but an arbitrary extract location conflicts with the fixed-install-root requirement. | May be useful only where installers are prohibited; creates support and provenance burden. | Not a supported V1 end-user release format. The existing staging directory is a build/test artifact, not a portable product. |
+| D. Combination | Can serve different audiences. | Requires clear precedence and parallel test/release support. | Mixes per-user installer guarantees with uncontrolled ZIP behavior. | Could include MSI later. | Do not add a combination in V1; use NSIS only to keep one audited lifecycle. |
+
+**Frozen V1 decision:** ship one Windows release channel: a **Tauri NSIS bundle configured for current-user installation**. MSI is explicitly deferred for a managed-enterprise release. A ZIP must not be advertised as an installed V1 artifact and must not be accepted as a workaround for installer behavior.
+
+### 3. Install scope and directory
+
+**Frozen install scope: per-user (current Windows user).** The later NSIS configuration must use Tauri's `currentUser` install mode, not `perMachine` or the dual-mode `both` option.
+
+Rationale:
+
+- Local configuration already belongs to `%APPDATA%\\ChatGPT-Harness\\config.json`; it is intentionally per-user and must remain outside the install payload.
+- The existing SecretStore uses the Windows Credential Manager entry under service `ChatGPT-Harness` and key `tunnel-api-key`, which is also user-scoped. Per-machine installation would not make those credentials machine-wide and would create misleading expectations.
+- The UI starts the Runtime as its child process. That lifecycle does not require an elevated service, a shared Program Files directory, or a machine-wide Runtime registration.
+- Per-user installation avoids UAC/admin requirements for initial install and future manual installer upgrades, while keeping application binaries non-writable by unrelated users.
+- Enterprise policy can require a different deployment model; that is the reason to add a separately tested MSI later, rather than making V1's default installer ambiguous.
+
+**Frozen default install root:**
+
+```text
+%LOCALAPPDATA%\\Programs\\ChatGPT-Harness\\
+├─ chatgpt-harness-ui.exe
+├─ runtime\\
+│  └─ chatgpt-harness-runtime.exe
+└─ distribution.json
+```
+
+The future NSIS task must install into this one product-owned root for a given Windows user. It must not offer a Runtime-specific directory, accept a configuration-supplied Runtime path, or present arbitrary executable-location selection as a supported V1 flow. A user may choose neither a different Runtime path nor an alternate install folder in the normal V1 UX.
+
+**Upgrade stability:** the product identifier remains `com.chatgpt.harness`; a newer installer for the same user resolves the existing per-user product registration/install root and replaces the payload in that root. It must not create a versioned or random sibling folder. The UI continues to derive the Runtime location only from its own executable's parent, so a stable root prevents UI/Runtime path drift.
+
+### 4. Resource layout and packaging boundary
+
+**Frozen resource decision:** the Runtime is an **installer payload executable**, copied from the M9-B staging boundary into `<install-root>\\runtime\\chatgpt-harness-runtime.exe` during installation.
+
+It is deliberately **not**:
+
+- a Tauri `bundle.resources` file placed beneath Tauri's resource directory;
+- a Tauri sidecar with target-triple naming/discovery semantics;
+- a first-launch extracted binary in `%APPDATA%`, `%TEMP%`, or another writable data location;
+- a separately downloaded component; or
+- a user-configurable executable path.
+
+The future packaging implementation must take the complete staged M9-B payload as the input set:
+
+```text
+<staging-root>\\
+├─ chatgpt-harness-ui.exe
+├─ runtime\\
+│  └─ chatgpt-harness-runtime.exe
+└─ distribution.json
+```
+
+The installed layout must be byte-for-byte equivalent in topology, including the exact Runtime filename and manifest-relative path. Installer extraction is allowed only as the normal installation action into the fixed install root; there is no post-install/self-extraction design. This keeps M9-B's `current_exe()`-anchored discovery, canonical-path validation, manifest validation, and fail-closed behavior intact.
+
+### 5. Upgrade policy and boundary
+
+V1 provides **installer-mediated upgrades only**. It does not provide an in-app updater, background updater service, differential updater, rollback service, updater endpoint, or update credential transport.
+
+A later release-packaging implementation must enforce the following policy:
+
+1. A release installer contains one matched UI binary, Runtime binary, and `distribution.json` generated for the same release version/protocol set.
+2. Before replacement, the installer must require the UI to be closed; because Runtime is its child, it must also ensure the Runtime is no longer running. It must not overwrite a live Runtime executable.
+3. The installer replaces only the application payload in the fixed install root: `chatgpt-harness-ui.exe`, `runtime\\chatgpt-harness-runtime.exe`, and `distribution.json` (plus installer-owned shortcuts/uninstaller metadata where applicable).
+4. The installed UI remains the final compatibility gate. It validates `distribution.json`, the fixed Runtime path, the manifest application/protocol identity, and Runtime handshake compatibility. A partial/incorrect package therefore fails closed as `RUNTIME_DISTRIBUTION_INVALID` rather than selecting another binary.
+5. The later Tauri bundle configuration should disallow downgrades for normal releases. Downgrade/repair behavior, if ever needed for support, requires an explicit, separately tested recovery procedure rather than silently allowing mismatched files.
+6. Upgrade must never rewrite, migrate, or delete `%APPDATA%\\ChatGPT-Harness\\config.json` or Windows Credential Manager entries. Any future config migration is outside this installer decision and must preserve M9-C corruption/fail-closed rules.
+
+### 6. Uninstall policy
+
+**Frozen V1 uninstall behavior:** uninstall removes application-owned installation artifacts only:
+
+- the fixed install-root application binaries, including the Runtime binary;
+- `distribution.json`;
+- installer-created shortcuts, uninstall registration, and other installer-owned metadata.
+
+Uninstall **preserves by default**:
+
+- `%APPDATA%\\ChatGPT-Harness\\config.json` and any future user-local state/log data under that product-owned AppData directory; and
+- the Windows Credential Manager secret represented by `ChatGPT-Harness` / `tunnel-api-key`.
+
+Why: uninstall/reinstall or a repair install must not silently discard workspace selection or an opaque secret reference/credential, and a general uninstaller must not unexpectedly erase a user's credential. Preserving the credential does not weaken the secret boundary: it remains in Windows Credential Manager and is never copied into the installer or AppData.
+
+A future explicit **full local-data cleanup** UX may separately ask the signed-in Windows user to delete AppData and the Credential Manager entry. It is not part of V1 uninstall and must not be implemented by this task. The uninstaller must make preservation clear to the user rather than implying a secure wipe.
+
+### 7. Code-signing strategy
+
+**Frozen decision:** Authenticode code signing is **required before the first externally distributed V1 release**. Unsigned artifacts may exist only as clearly labeled internal development/clean-machine test candidates; they are not public release artifacts.
+
+The future release process must sign and timestamp:
+
+- the NSIS setup executable;
+- `chatgpt-harness-ui.exe`; and
+- `runtime\\chatgpt-harness-runtime.exe`.
+
+Use a trusted code-signing certificate, SHA-256 digest, and RFC 3161-capable timestamp service. Keep certificate private material out of the repository, installer payload, `distribution.json`, and local config. Tauri's local schema already provides Windows certificate thumbprint, digest, timestamp, and custom signing-command configuration points; M9-D1 does not enable them.
+
+Effects:
+
+| Area | Signing impact |
+| --- | --- |
+| SmartScreen | A signed, timestamped publisher identity materially improves provenance and reputation compared with an unsigned setup or child executable, although signing does not guarantee immediate reputation or eliminate all warnings. |
+| Installer trust | Users and enterprise security tools can identify the publisher and detect post-signing binary modification. The Runtime must be signed too because it is launched as a separate child executable. |
+| Upgrade | The same trusted publisher identity lets users and endpoint tooling assess replacement installers consistently. It does not itself implement update delivery or rollback. |
+| Future updater | If an updater is introduced later, it requires a separately designed update-metadata/artifact-signature model. Authenticode alone is not an updater protocol or authorization mechanism. |
+
+### 8. M9-E clean-machine acceptance plan
+
+M9-E validates the future packaged release on a clean, ordinary Windows user profile. It must use a release candidate built elsewhere; the acceptance machine/profile has:
+
+- no prior `%APPDATA%\\ChatGPT-Harness` data;
+- no pre-existing `ChatGPT-Harness` Credential Manager entry;
+- no source Git repository or staged distribution directory;
+- no Rust toolchain, Cargo, Node.js, pnpm/npm, or developer build scripts; and
+- no preinstalled ChatGPT-Harness UI/Runtime binaries, shortcuts, or uninstall registration.
+
+A small non-secret workspace fixture is created outside the install root and selected via the product UI. The acceptance run records installer version, installed paths, `distribution.json` contents, UI/Runtime versions, and only redacted diagnostics.
+
+| Step | Expected result / evidence |
+| --- | --- |
+| 1. Install signed NSIS release candidate as the clean user | Installs without administrator elevation into `%LOCALAPPDATA%\\Programs\\ChatGPT-Harness`; the exact three-item M9-B topology exists; no repo/Cargo/Node dependency is consulted. |
+| 2. Launch from installed shortcut or installed UI executable | UI derives the installed root from `current_exe()`; no path is accepted from CWD, `PATH`, Git, or an environment override. |
+| 3. First run | Missing AppData config yields Setup Required and creates only the safe non-secret local config state. No Tunnel ID/API key/tunnel-client is required for Local Runtime eligibility. |
+| 4. Select workspace | The UI picker persists a valid accessible fixture directory to AppData. The workspace is not copied into the install root and no Runtime path is configurable. |
+| 5. Start local Runtime | Eligibility becomes ready, `distribution.json` and the fixed Runtime binary validate, and the Runtime launches as the UI child process. Capture non-secret version/protocol diagnostics. |
+| 6. Issue local safe tool calls | Through the local Runtime acceptance path, verify `read_file` and `glob` against the selected fixture succeed and an outside-workspace access is denied. This does not require M7-C Tunnel credential transport, which remains blocked. |
+| 7. Stop and uninstall | Runtime stops before uninstall. Uninstall removes UI/Runtime/manifest/shortcuts/uninstaller registration from the fixed root, while the AppData config and Credential Manager entry remain. Verify no application binary is left in the install root. |
+| 8. Reinstall (recommended continuation) | The next install uses the same stable root; existing AppData setup is recognized without a false first-run state. This confirms the chosen preservation/upgrade boundary. |
+
+M9-E must fail if the product needs a repository, developer toolchain, arbitrary Runtime path, temporary extraction location, plaintext secret, or Tunnel availability to complete the Local Runtime/tool-call portion of the acceptance flow.
+
+### 9. Implementation guardrails for the follow-up packaging task
+
+The task that implements this frozen strategy may configure Tauri bundling and signing, but it must not change the following M9-A/M9-B/M9-C contracts:
+
+- installed Runtime discovery remains `<install-root>\\runtime\\chatgpt-harness-runtime.exe` plus validated `distribution.json`;
+- `%APPDATA%\\ChatGPT-Harness\\config.json` remains the machine-local config authority;
+- Windows Credential Manager remains the secret authority; and
+- Tunnel/external credential transport remains outside this packaging work while M7-C is blocked.
+
+No installer behavior is implemented by this M9-D1 documentation change.
