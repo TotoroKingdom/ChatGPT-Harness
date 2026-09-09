@@ -451,3 +451,17 @@ Manifest 版本从 UI/Runtime Cargo manifests 与 protocol source 读取，避�
 ### Security boundary and remaining work
 
 M9-B 不改变 secret、tunnel、MCP 或 policy 行为，不解除 M7-C `BLOCKED`。M9-C/D 仍负责 installer/安装生命周期与 First Run/发布流程；本阶段只保证 Runtime executable resolution、manifest validation、compatibility gate 和 staging topology。
+
+## M9-C implementation — First-run and machine-local configuration
+
+M9-C 将 First Run 接入既有 Local Control Plane 和 ConfigStore，不改变 M9-A/M9-B 的分发边界：
+
+- **Local config authority**：唯一机器配置仍为 `%APPDATA%\ChatGPT-Harness\config.json`。缺失时由 Control Plane 创建 schema v1 的安全默认值；不持久化 `first_run` 标记。
+- **First-run derivation**：Setup Required 由真实配置状态派生。默认不猜 Workspace、Runtime 路径、Tunnel ID、Tunnel client 或 API key；Workspace 只能通过 UI Folder Picker 设置。
+- **Workspace setup**：Workspace 路径在保存前由后端验证为可访问目录；配置写入使用临时文件、flush/sync 和原子替换。
+- **Corruption behavior**：malformed JSON、未知 schema/version 和其他安全相关未知状态均 fail closed。损坏配置不会被当作首次启动，也不会被普通保存静默覆盖；用户必须明确执行 Reset 后重新配置。
+- **Start eligibility**：Control Plane 提供 `runtime_start_eligibility`，统一返回 `SetupRequired`、`ConfigurationInvalid`、`RuntimeDistributionInvalid`、`ReadyToStart` 或 `RuntimeAlreadyRunning`。UI 不自行复制启动规则。
+- **Tunnel independence**：Tunnel、tunnel-client 和 API key 属于可选 External Connection 配置，不参与 Local Runtime Start Eligibility；没有 Tunnel 或 API key 时，只要 Workspace 和 Runtime distribution 有效，Local Runtime 仍可启动。
+- **Secret boundary**：API key 继续只写入既有 SecretStore，`config.json` 仅保留 opaque `SecretReference`，不保存 raw secret、PID、port、Runtime instance ID 或 resolved executable path。
+
+M9-C 不实现 installer、updater、Tunnel credential transport、telemetry 或新的 Runtime execution capability；M7-C 继续保持 `BLOCKED`。

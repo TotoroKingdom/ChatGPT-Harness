@@ -6,6 +6,7 @@ import type {
   DiagnosticRun,
   PoliciesListResult,
   RuntimeState,
+  StartEligibility,
   ToolsListResult,
 } from "@protocol/v1";
 import { HarnessClientError, toClientError } from "@/services/harness/errors";
@@ -37,6 +38,7 @@ type ContextValue = ResourceState & {
   config: AppConfig | null;
   configMetadata: ConfigMetadata | null;
   configError: HarnessClientError | null;
+  eligibility: StartEligibility | null;
   setupRequired: boolean;
   apiKeyConfigured: boolean;
   components: ComponentStates;
@@ -181,6 +183,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [metadata, setMetadata] = useState<ConfigMetadata | null>(null);
   const [configError, setConfigError] = useState<HarnessClientError | null>(null);
+  const [eligibility, setEligibility] = useState<StartEligibility | null>(null);
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [components, setComponents] = useState<ComponentStates>(client.getComponentStates());
   const [activeRevision, setActiveRevision] = useState<string | null>(null);
@@ -189,20 +192,23 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
 
   const refreshConfig = useCallback(async () => {
     try {
-      const [nextConfig, nextMetadata, keyConfigured] = await Promise.all([
+      const [nextConfig, nextMetadata, keyConfigured, nextEligibility] = await Promise.all([
         client.configGet(),
         client.configMetadata(),
         client.apiKeyStatus(),
+        client.runtimeStartEligibility(),
       ]);
       setConfig(nextConfig);
       setConfigLoaded(true);
       setMetadata(nextMetadata);
       setApiKeyConfigured(keyConfigured);
+      setEligibility(nextEligibility);
       setConfigError(null);
     } catch (error) {
       const clientError = toClientError(error);
       if (clientError.code === "CONFIG_INVALID") setConfigLoaded(true);
       setConfigError(clientError);
+      setEligibility(null);
     }
   }, [client]);
 
@@ -281,6 +287,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
         setConfig(saved);
         if (apiKey?.trim()) setApiKeyConfigured(true);
         setConfigError(null);
+        await refreshConfig();
         return { ok: true };
       } catch (error) {
         const clientError = toClientError(error);
@@ -288,7 +295,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: clientError };
       }
     },
-    [client],
+    [client, refreshConfig],
   );
 
   const resetConfig = useCallback(async (): Promise<SaveResult> => {
@@ -298,13 +305,14 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       setApiKeyConfigured(false);
       setConfigError(null);
       setLastDiagnostics(null);
+      await refreshConfig();
       return { ok: true };
     } catch (error) {
       const clientError = toClientError(error);
       setConfigError(clientError);
       return { ok: false, error: clientError };
     }
-  }, [client]);
+  }, [client, refreshConfig]);
 
   const refreshLifecycleActivity = useCallback(() => {
     void client
@@ -334,26 +342,13 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   }, [client]);
 
   const startHarness = useCallback(async (): Promise<SaveResult> => {
-    if (!config || !apiKeyConfigured) {
-      return {
-        ok: false,
-        error: new HarnessClientError("error", "Setup is incomplete.", undefined, "SETUP_INCOMPLETE"),
-      };
-    }
-    const overall = overallStatus(client.getComponentStates());
-    if (overall !== "stopped" && overall !== "error") {
-      return {
-        ok: false,
-        error: new HarnessClientError("error", "Harness is already running or changing state.", undefined, "LIFECYCLE_CONFLICT"),
-      };
-    }
     try {
-      const diagnostics = await client.localDiagnosticsRun();
-      setLastDiagnostics(diagnostics);
-      if (diagnostics.overallStatus === "fail") {
+      const nextEligibility = await client.runtimeStartEligibility();
+      setEligibility(nextEligibility);
+      if (!nextEligibility.canStart) {
         return {
           ok: false,
-          error: new HarnessClientError("error", "Diagnostics found a blocking configuration issue.", undefined, "SETUP_INCOMPLETE"),
+          error: new HarnessClientError("error", nextEligibility.message, undefined, nextEligibility.status.toUpperCase()),
         };
       }
       const start = client.runtimeStart();
@@ -366,7 +361,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       return { ok: false, error: toClientError(error) };
     }
-  }, [apiKeyConfigured, client, config, refreshRuntimeResources]);
+  }, [client, refreshRuntimeResources]);
 
   const stopHarness = useCallback(async (): Promise<SaveResult> => {
     if (overallStatus(client.getComponentStates()) === "stopped") {
@@ -383,11 +378,12 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       setActiveRevision(null);
       setResources((current) => ({ ...current, runtime: { status: "idle" } }));
       refreshLifecycleActivity();
+      await refreshConfig();
       return { ok: true };
     } catch (error) {
       return { ok: false, error: toClientError(error) };
     }
-  }, [client, refreshLifecycleActivity]);
+  }, [client, refreshConfig, refreshLifecycleActivity]);
 
   const restartHarness = useCallback(async () => {
     const stopped = await stopHarness();
@@ -437,7 +433,8 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       config,
       configMetadata: metadata,
       configError,
-      setupRequired: configLoaded && !config,
+      eligibility,
+      setupRequired: configLoaded && (eligibility?.status === "setup_required" || !config?.workspace.rootPath),
       apiKeyConfigured,
       components,
       overall: overallStatus(components),
@@ -472,6 +469,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       config,
       configError,
       configLoaded,
+      eligibility,
       lastDiagnostics,
       metadata,
       refreshConfig,

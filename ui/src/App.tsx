@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HarnessDataProvider, useHarnessData } from "./app/providers/HarnessDataProvider";
 import { useAppRouter } from "./app/router/useAppRouter";
 import { AppShell } from "./components/layout/AppShell";
@@ -13,10 +13,19 @@ function RoutedContent() {
   const data = useHarnessData();
   const { page, navigate } = useAppRouter();
   const [setupComplete, setSetupComplete] = useState(false);
+  const [setupActive, setSetupActive] = useState(false);
   const configBlocked = data.configError?.code === "CONFIG_INVALID";
-  const setupRequested = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("setup") === "first-run";
-  if ((data.setupRequired || configBlocked || setupRequested) && !setupComplete) {
-    return <FirstRunWizard onDone={() => { setSetupComplete(true); void data.refreshConfig(); }} />;
+
+  useEffect(() => {
+    if (!setupComplete && (data.setupRequired || configBlocked)) setSetupActive(true);
+  }, [configBlocked, data.setupRequired, setupComplete]);
+
+  if (setupActive && !setupComplete) {
+    return <FirstRunWizard onDone={() => {
+      setSetupComplete(true);
+      setSetupActive(false);
+      void data.refreshConfig();
+    }} />;
   }
   const content = page === "overview" ? <OverviewPage /> : page === "tools" ? <ToolsPage /> : page === "policies" ? <PoliciesPage /> : page === "activity" ? <ActivityPage /> : <SettingsPage />;
   return <AppShell page={page} onNavigate={navigate}>{content}</AppShell>;

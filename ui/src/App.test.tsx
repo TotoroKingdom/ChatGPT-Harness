@@ -54,44 +54,31 @@ describe("M1 application shell", () => {
 });
 
 describe("M2 configuration and lifecycle experience", () => {
-  it("walks through the four-step first-run wizard before showing the app shell", async () => {
+  it("completes the first-run local runtime setup before showing the app shell", async () => {
     window.history.replaceState({}, "", "/?setup=first-run");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Connect your local workspace", level: 2 })).toBeInTheDocument();
-    expect(screen.getByText("First run setup")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Local Runtime Setup", level: 2 })).toBeInTheDocument();
+    expect(screen.getByText("First run")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Workspace", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Runtime", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "External Connection", level: 2 })).toBeInTheDocument();
     expect(screen.queryByText("Tunnel ID")).not.toBeInTheDocument();
+    expect(screen.queryByText("API Key")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Security", level: 2 })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Diagnostics", level: 2 })).not.toBeInTheDocument();
-    expect(screen.queryByText("Save Changes")).not.toBeInTheDocument();
-    expect(screen.queryByText("All changes saved")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start Local Runtime" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Choose Folder" }));
     expect(await screen.findByDisplayValue("D:\\example-project")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
-    expect(await screen.findByRole("heading", { name: "Connection", level: 2 })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Workspace", level: 2 })).not.toBeInTheDocument();
-
-    expect(screen.queryByRole("button", { name: "Choose File" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Enter tunnel ID"), { target: { value: "mock-tunnel" } });
-    fireEvent.click(screen.getByRole("button", { name: "Choose Folder" }));
-    expect(await screen.findByDisplayValue("D:\\example-project\\tunnel-client-v0.0.13-windows-amd64")).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Enter API Key"), { target: { value: "test-api-key" } });
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
-    expect(await screen.findByRole("heading", { name: "Security", level: 2 })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Connection", level: 2 })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }));
-    expect(await screen.findByRole("heading", { name: "Diagnostics", level: 2 })).toBeInTheDocument();
-    expect(screen.getAllByText("Available after Runtime integration").length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Workspace" }));
+    expect(await screen.findByText("Workspace saved. Local Runtime readiness has been refreshed.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Start Local Runtime" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Start Local Runtime" }));
     expect(await screen.findByRole("heading", { name: "Overview", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Settings$/ })).toBeInTheDocument();
   });
-
   it("keeps a configured API Key out of the Settings form", async () => {
     render(<App />);
     fireEvent.click(nav("Settings"));

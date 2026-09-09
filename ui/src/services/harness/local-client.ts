@@ -14,6 +14,7 @@ import type {
   PoliciesListResult,
   RuntimeState,
   RuntimeStopResult,
+  StartEligibility,
   ToolsListResult,
 } from "@protocol/v1";
 import type {
@@ -140,6 +141,10 @@ export class TauriHarnessControlClient implements HarnessControlClient {
 
   localDiagnosticsRun() {
     return this.call<DiagnosticRun>("local_diagnostics_run");
+  }
+
+  runtimeStartEligibility() {
+    return this.call<StartEligibility>("runtime_start_eligibility");
   }
 
   async runtimeStart() {

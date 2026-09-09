@@ -32,6 +32,7 @@ pub fn run() {
             crate::commands::validate_path,
             crate::commands::local_diagnostics_run,
             crate::commands::runtime_start,
+            crate::commands::runtime_start_eligibility,
             crate::commands::runtime_status,
             crate::commands::runtime_process_status,
             crate::commands::runtime_stop,

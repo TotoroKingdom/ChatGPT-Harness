@@ -12,6 +12,7 @@ import type {
   PoliciesListResult,
   RuntimeState,
   RuntimeStopResult,
+  StartEligibility,
   ToolsListResult,
 } from "@protocol/v1";
 
@@ -60,6 +61,7 @@ export interface HarnessControlClient extends ControlReadClient {
   detectTunnelClient(): Promise<string | null>;
   validatePath(path: string, file: boolean): Promise<boolean>;
   localDiagnosticsRun(): Promise<DiagnosticRun>;
+  runtimeStartEligibility(): Promise<StartEligibility>;
   runtimeStart(): Promise<RuntimeState>;
   runtimeStatus(): Promise<RuntimeState>;
   runtimeProcessStatus(): Promise<RuntimeProcessStatus>;

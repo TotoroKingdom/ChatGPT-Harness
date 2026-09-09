@@ -64,6 +64,24 @@ pub struct UiConfig {
     pub theme: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum StartEligibilityStatus {
+    SetupRequired,
+    ConfigurationInvalid,
+    RuntimeDistributionInvalid,
+    ReadyToStart,
+    RuntimeAlreadyRunning,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct StartEligibility {
+    pub status: StartEligibilityStatus,
+    pub can_start: bool,
+    pub message: String,
+}
+
 /// The non-secret, immutable-at-startup configuration consumed by a Runtime.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

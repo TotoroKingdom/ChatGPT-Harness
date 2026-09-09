@@ -37,6 +37,8 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         SecurityMode,
         SecurityConfig,
         UiConfig,
+        StartEligibilityStatus,
+        StartEligibility,
         RuntimeConfigSnapshot,
         RuntimeLimits,
         ClientInfo,

@@ -1,4 +1,6 @@
-use harness_control_protocol::{AppConfig, DecimalU64};
+use harness_control_protocol::{
+    AppConfig, DecimalU64, SecurityConfig, SecurityMode, TunnelConfig, UiConfig, WorkspaceConfig,
+};
 use serde::Serialize;
 use std::{
     fs,
@@ -70,6 +72,34 @@ impl ConfigStore {
         }
         Ok(Some(config))
     }
+    pub fn load_or_create_defaults(&self) -> Result<AppConfig, ConfigError> {
+        match self.load()? {
+            Some(config) => Ok(config),
+            None => self.save(Self::safe_defaults()),
+        }
+    }
+
+    pub fn safe_defaults() -> AppConfig {
+        AppConfig {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            config_revision: DecimalU64::ZERO,
+            workspace: WorkspaceConfig {
+                root_path: String::new(),
+            },
+            tunnel: TunnelConfig {
+                tunnel_id: String::new(),
+                tunnel_client_path: None,
+                auto_detect: true,
+                api_key_ref: None,
+            },
+            security: SecurityConfig {
+                mode: SecurityMode::Normal,
+                developer_test_mode: false,
+            },
+            ui: UiConfig::default(),
+        }
+    }
+
     pub fn save(&self, mut config: AppConfig) -> Result<AppConfig, ConfigError> {
         if config.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(ConfigError::Invalid("unsupported schemaVersion".into()));
@@ -182,9 +212,13 @@ mod tests {
         }
     }
     #[test]
-    fn missing_is_first_run() {
+    fn missing_creates_safe_defaults() {
         let d = tempfile::tempdir().unwrap();
-        assert!(ConfigStore::new(d.path().into()).load().unwrap().is_none());
+        let config = ConfigStore::new(d.path().into())
+            .load_or_create_defaults()
+            .unwrap();
+        assert!(config.workspace.root_path.is_empty());
+        assert!(d.path().join("config.json").exists());
     }
     #[test]
     fn revisions_are_semantic() {
@@ -255,6 +289,68 @@ mod tests {
         assert!(!d.path().join("config.json.tmp").exists());
     }
 
+    #[test]
+    fn safe_defaults_do_not_guess_workspace_or_external_connection() {
+        let config = ConfigStore::safe_defaults();
+        assert!(config.workspace.root_path.is_empty());
+        assert!(config.tunnel.tunnel_id.is_empty());
+        assert!(config.tunnel.tunnel_client_path.is_none());
+        assert!(config.tunnel.api_key_ref.is_none());
+    }
+
+    #[test]
+    fn unsupported_schema_fails_closed() {
+        let d = tempfile::tempdir().unwrap();
+        let mut config = ConfigStore::safe_defaults();
+        config.schema_version = CURRENT_SCHEMA_VERSION + 1;
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec(&config).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            ConfigStore::new(d.path().into()).load(),
+            Err(ConfigError::Invalid(message)) if message.contains("unsupported schemaVersion")
+        ));
+    }
+
+    #[test]
+    fn save_and_reload_preserves_explicit_workspace() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let workspace = d.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let mut config = c();
+        config.workspace.root_path = workspace.display().to_string();
+        store.save(config).unwrap();
+        assert_eq!(
+            store.load().unwrap().unwrap().workspace.root_path,
+            workspace.display().to_string()
+        );
+    }
+
+    #[test]
+    fn secret_values_are_not_serialized() {
+        let mut config = c();
+        config.tunnel.api_key_ref = Some(harness_control_protocol::SecretReference {
+            provider: "windows-credential-manager".into(),
+            key: "tunnel-api-key".into(),
+        });
+        let encoded = serde_json::to_string(&config).unwrap();
+        assert!(!encoded.contains("raw-api-key"));
+        assert!(!encoded.contains("secret-value"));
+        assert!(encoded.contains("tunnel-api-key"));
+    }
+
+    #[test]
+    fn corrupt_config_cannot_be_overwritten_by_save() {
+        let d = tempfile::tempdir().unwrap();
+        let target = d.path().join("config.json");
+        fs::write(&target, b"{not-json").unwrap();
+        let error = ConfigStore::new(d.path().into()).save(c()).unwrap_err();
+        assert!(matches!(error, ConfigError::Invalid(_)));
+        assert_eq!(fs::read(&target).unwrap(), b"{not-json");
+    }
     #[test]
     fn reset_removes_invalid_config() {
         let d = tempfile::tempdir().unwrap();

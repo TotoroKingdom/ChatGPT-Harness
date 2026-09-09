@@ -11,7 +11,8 @@ use harness_control_protocol::{
     ActivityListParams, ActivityListResult, ActivitySubscribeParams, ActivitySubscribeResult,
     AppConfig, ApprovalsListParams, ApprovalsListResult, ApprovalsResolveParams,
     ApprovalsResolveResult, DiagnosticCheck, DiagnosticRun, DiagnosticStatus, PoliciesListResult,
-    RuntimeState, RuntimeStopResult, SecurityMode, ToolsListResult,
+    RuntimeState, RuntimeStopResult, SecurityMode, StartEligibility, StartEligibilityStatus,
+    ToolsListResult,
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -62,7 +63,10 @@ pub struct BackendState {
 
 #[tauri::command]
 pub fn config_get(app: AppHandle) -> Result<Option<AppConfig>, ControlError> {
-    store(&app)?.load().map_err(Into::into)
+    store(&app)?
+        .load_or_create_defaults()
+        .map(Some)
+        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -84,7 +88,12 @@ pub fn config_save(
         let normalized = crate::platform::normalize_tunnel_client_directory(path);
         *path = normalized.display().to_string();
     }
-    validate_config(&config)?;
+    // Validate the existing on-disk configuration before validating or persisting
+    // a replacement. A corrupt config must remain untouched and must not cause
+    // a partial save that changes the machine-local credential state.
+    let config_store = store(&app)?;
+    config_store.load().map_err(ControlError::from)?;
+    validate_config_for_save(&config)?;
     if let Some(secret) = api_key.filter(|value| !value.trim().is_empty()) {
         let reference = api_key_ref();
         state
@@ -95,23 +104,7 @@ pub fn config_save(
             .map_err(secret_error)?;
         config.tunnel.api_key_ref = Some(reference);
     }
-    let api_key_reference = config.tunnel.api_key_ref.clone().ok_or(ControlError {
-        code: "CONFIG_INVALID".into(),
-        message: "API Key is required before saving configuration.".into(),
-    })?;
-    let api_key_exists = state
-        .lock()
-        .map_err(|_| secret_error("Secret store unavailable."))?
-        .secrets
-        .exists(&api_key_reference.key)
-        .map_err(secret_error)?;
-    if !api_key_exists {
-        return Err(ControlError {
-            code: "CONFIG_INVALID".into(),
-            message: "API Key is not configured.".into(),
-        });
-    }
-    store(&app)?.save(config).map_err(Into::into)
+    config_store.save(config).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -227,8 +220,68 @@ pub fn runtime_start(
         code: "CONFIG_NOT_FOUND".into(),
         message: "Save configuration before starting the Runtime.".into(),
     })?;
-    validate_config(&config)?;
+    validate_config_for_local_start(&config)?;
     runtime.start(&app, &config).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn runtime_start_eligibility(
+    app: AppHandle,
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<StartEligibility, ControlError> {
+    let process = runtime.process_status();
+    if !matches!(
+        process.phase,
+        crate::runtime::RuntimeProcessPhase::Stopped | crate::runtime::RuntimeProcessPhase::Crashed
+    ) {
+        return Ok(StartEligibility {
+            status: StartEligibilityStatus::RuntimeAlreadyRunning,
+            can_start: false,
+            message: "Local Runtime is already running or changing state.".into(),
+        });
+    }
+    let config = match store(&app)?.load() {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            return Ok(StartEligibility {
+                status: StartEligibilityStatus::SetupRequired,
+                can_start: false,
+                message: "Choose a Workspace to finish local setup.".into(),
+            })
+        }
+        Err(ConfigError::Invalid(error)) => {
+            return Ok(StartEligibility {
+                status: StartEligibilityStatus::ConfigurationInvalid,
+                can_start: false,
+                message: format!("Configuration needs attention: {error}"),
+            })
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if let Err(error) = validate_config_for_local_start(&config) {
+        let status = if error.code == "WORKSPACE_INVALID" {
+            StartEligibilityStatus::SetupRequired
+        } else {
+            StartEligibilityStatus::ConfigurationInvalid
+        };
+        return Ok(StartEligibility {
+            status,
+            can_start: false,
+            message: error.message,
+        });
+    }
+    if let Err(error) = crate::runtime::discovery::resolve_runtime() {
+        return Ok(StartEligibility {
+            status: StartEligibilityStatus::RuntimeDistributionInvalid,
+            can_start: false,
+            message: error.message,
+        });
+    }
+    Ok(StartEligibility {
+        status: StartEligibilityStatus::ReadyToStart,
+        can_start: true,
+        message: "Local Runtime is ready to start.".into(),
+    })
 }
 
 #[tauri::command]
@@ -342,14 +395,15 @@ pub fn local_diagnostics_run(
         status: if tunnel_ok {
             DiagnosticStatus::Pass
         } else {
-            DiagnosticStatus::Fail
+            DiagnosticStatus::Warning
         },
         summary: if tunnel_ok {
             "Tunnel ID is configured.".into()
         } else {
-            "Tunnel ID is empty.".into()
+            "External connection is not configured (optional for Local Runtime).".into()
         },
-        remediation: (!tunnel_ok).then(|| "Enter a Tunnel ID in Settings.".into()),
+        remediation: (!tunnel_ok)
+            .then(|| "Configure an external connection in Settings when needed.".into()),
     });
     let client_ok = config
         .tunnel
@@ -363,15 +417,16 @@ pub fn local_diagnostics_run(
         status: if client_ok {
             DiagnosticStatus::Pass
         } else {
-            DiagnosticStatus::Fail
+            DiagnosticStatus::Warning
         },
         summary: if client_ok {
-            "Tunnel client found".into()
+            "External tunnel client found.".into()
         } else {
-            "This folder does not contain tunnel-client.exe.".into()
+            "External tunnel client is not configured (optional for Local Runtime).".into()
         },
-        remediation: (!client_ok)
-            .then(|| "Choose a tunnel-client package folder in Settings.".into()),
+        remediation: (!client_ok).then(|| {
+            "Choose a tunnel-client package folder when external connection is needed.".into()
+        }),
     });
     let api_key_ok = if let Some(reference) = config.tunnel.api_key_ref {
         state
@@ -388,14 +443,15 @@ pub fn local_diagnostics_run(
         status: if api_key_ok {
             DiagnosticStatus::Pass
         } else {
-            DiagnosticStatus::Fail
+            DiagnosticStatus::Warning
         },
         summary: if api_key_ok {
             "API Key is configured in the OS credential store.".into()
         } else {
-            "API Key is not configured.".into()
+            "API Key is not configured (optional for Local Runtime).".into()
         },
-        remediation: (!api_key_ok).then(|| "Save an API Key in Settings.".into()),
+        remediation: (!api_key_ok)
+            .then(|| "Save an API Key when external connection is needed.".into()),
     });
     let security_ok = (matches!(config.security.mode, SecurityMode::Normal)
         && !config.security.developer_test_mode)
@@ -438,7 +494,7 @@ pub fn local_diagnostics_run(
     })
 }
 
-fn validate_config(config: &AppConfig) -> Result<(), ControlError> {
+fn validate_config_for_save(config: &AppConfig) -> Result<(), ControlError> {
     if config.schema_version != CURRENT_SCHEMA_VERSION {
         return Err(ControlError {
             code: "CONFIG_INVALID".into(),
@@ -450,9 +506,17 @@ fn validate_config(config: &AppConfig) -> Result<(), ControlError> {
     {
         return Err(ControlError {
             code: "WORKSPACE_INVALID".into(),
-            message: "Workspace folder is missing or inaccessible.".into(),
+            message: "Choose an accessible Workspace folder.".into(),
         });
     }
+    validate_security(config)
+}
+
+fn validate_config_for_local_start(config: &AppConfig) -> Result<(), ControlError> {
+    validate_config_for_save(config)
+}
+
+fn validate_security(config: &AppConfig) -> Result<(), ControlError> {
     let security_consistent = (matches!(config.security.mode, SecurityMode::Normal)
         && !config.security.developer_test_mode)
         || (matches!(config.security.mode, SecurityMode::DeveloperTest)
@@ -463,30 +527,6 @@ fn validate_config(config: &AppConfig) -> Result<(), ControlError> {
             message: "Security mode fields must be consistent.".into(),
         });
     }
-    if config.tunnel.tunnel_id.trim().is_empty() {
-        return Err(ControlError {
-            code: "SETUP_INCOMPLETE".into(),
-            message: "Tunnel ID is required.".into(),
-        });
-    }
-    let tunnel_client_directory = config
-        .tunnel
-        .tunnel_client_path
-        .as_deref()
-        .filter(|path| !path.trim().is_empty());
-    let Some(tunnel_client_directory) = tunnel_client_directory else {
-        return Err(ControlError {
-            code: "TUNNEL_CLIENT_NOT_FOUND".into(),
-            message: "Tunnel client directory is missing or inaccessible.".into(),
-        });
-    };
-    crate::platform::resolve_tunnel_client_executable(std::path::Path::new(
-        tunnel_client_directory,
-    ))
-    .map_err(|message| ControlError {
-        code: "TUNNEL_CLIENT_NOT_FOUND".into(),
-        message: message.into(),
-    })?;
     Ok(())
 }
 
@@ -521,24 +561,23 @@ mod validation_tests {
     }
 
     #[test]
-    fn validation_rejects_incomplete_or_inconsistent_setup() {
+    fn local_start_requires_workspace_and_consistent_security_but_not_external_connection() {
         let directory = tempfile::tempdir().unwrap();
         let client = directory.path().join("tunnel-client.exe");
         std::fs::write(&client, b"mock").unwrap();
         let config = valid_config(directory.path());
-        assert!(validate_config(&config).is_ok());
+        assert!(validate_config_for_local_start(&config).is_ok());
 
         let mut empty_tunnel = config.clone();
         empty_tunnel.tunnel.tunnel_id.clear();
-        assert_eq!(
-            validate_config(&empty_tunnel).unwrap_err().code,
-            "SETUP_INCOMPLETE"
-        );
+        assert!(validate_config_for_local_start(&empty_tunnel).is_ok());
 
         let mut inconsistent_security = config.clone();
         inconsistent_security.security.developer_test_mode = true;
         assert_eq!(
-            validate_config(&inconsistent_security).unwrap_err().code,
+            validate_config_for_local_start(&inconsistent_security)
+                .unwrap_err()
+                .code,
             "CONFIG_INVALID"
         );
 
@@ -546,7 +585,9 @@ mod validation_tests {
         missing_workspace.workspace.root_path =
             directory.path().join("missing").display().to_string();
         assert_eq!(
-            validate_config(&missing_workspace).unwrap_err().code,
+            validate_config_for_local_start(&missing_workspace)
+                .unwrap_err()
+                .code,
             "WORKSPACE_INVALID"
         );
     }
