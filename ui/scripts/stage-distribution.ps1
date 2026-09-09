@@ -43,6 +43,10 @@ foreach ($path in @($uiExecutable, $runtimeExecutable)) {
 
 $appVersion = Get-CargoPackageVersion (Join-Path $repositoryRoot "ui\src-tauri\Cargo.toml")
 $runtimeVersion = Get-CargoPackageVersion (Join-Path $repositoryRoot "runtime\Cargo.toml")
+$uiPackage = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "ui\package.json") | ConvertFrom-Json
+if ($uiPackage.version -ne $appVersion -or $runtimeVersion -ne $appVersion) {
+    throw "UI, Runtime, and package versions must match before distribution staging."
+}
 $protocolContent = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "protocol\src\lib.rs")
 $protocolMatch = [regex]::Match($protocolContent, 'PROTOCOL_VERSION\s*:\s*u32\s*=\s*(\d+)')
 if (-not $protocolMatch.Success) { throw "Could not read protocol version." }

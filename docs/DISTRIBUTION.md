@@ -635,3 +635,69 @@ The task that implements this frozen strategy may configure Tauri bundling and s
 - Tunnel/external credential transport remains outside this packaging work while M7-C is blocked.
 
 No installer behavior is implemented by this M9-D1 documentation change.
+
+## M9-D2 Implementation — Tauri NSIS Installer Pipeline
+
+> Status: implemented, unsigned internal build pipeline
+> Date: 2026-09-09
+> Scope: Windows V1 NSIS packaging only
+
+M9-D2 enables the frozen M9-D1 strategy without changing Runtime discovery, configuration, secrets, or distribution architecture.
+
+### Build command
+
+From the repository root:
+
+```powershell
+npm run bundle:windows --prefix ui
+```
+
+The command first runs the existing `distribution:stage` boundary, which builds the workspace in release mode and stages the payload from the current workspace build artifacts. It then runs Tauri with the explicit `nsis` bundle target and performs a static bundle verification. No upload, signing, updater, or release automation is run.
+
+### Generated artifact
+
+The internal Windows installer is generated under:
+
+```text
+target\release\bundle\nsis\ChatGPT-Harness_<version>_x64-setup.exe
+```
+
+The exact version is read from the existing package metadata; the staging guard rejects a mismatch between `ui/package.json`, the UI Cargo package, and the Runtime Cargo package before bundling.
+
+### Payload layout
+
+The M9-B staging payload remains the source boundary and has this topology:
+
+```text
+<staging-root>\
+├─ chatgpt-harness-ui.exe
+├─ runtime\
+│  └─ chatgpt-harness-runtime.exe
+└─ distribution.json
+```
+
+Tauri maps the staged `runtime` directory and `distribution.json` into the install root, producing the same installed discovery contract:
+
+```text
+%LOCALAPPDATA%\Programs\ChatGPT-Harness\
+├─ chatgpt-harness-ui.exe
+├─ runtime\
+│  └─ chatgpt-harness-runtime.exe
+└─ distribution.json
+```
+
+The Runtime is not a sidecar, resource extracted to AppData, downloaded component, or user-configurable executable.
+
+### Install and uninstall boundary
+
+The NSIS bundle uses `currentUser` mode and creates installer-owned application files plus the normal Start-menu shortcut/uninstaller metadata. It does not create `config.json` or a Credential Manager secret; First Run remains owned by M9-C.
+
+Uninstall removes application files, shortcuts, and installer registration, while preserving `%APPDATA%\ChatGPT-Harness\` and the Windows Credential Manager secret.
+
+### Known limitations
+
+- The generated installer is unsigned and is for internal development/clean-machine validation only; code-signing is intentionally not part of M9-D2.
+- NSIS tool acquisition is performed by the installed Tauri CLI when the local NSIS toolchain is unavailable; the binary itself is never downloaded as an application payload.
+- In the current validation environment, Tauri reached the NSIS bundling step but the NSIS 3.11 tool download timed out; no installer was emitted until that tool is available.
+- M9-D2 does not implement MSI, updater, CI release, tunnel packaging, credential transport, telemetry, or automatic upload.
+- Full clean-machine install/uninstall acceptance remains a separate M9-E activity.

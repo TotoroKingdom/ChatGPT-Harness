@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ChatGPT-Harness",
-  "version": "0.1.0",
   "identifier": "com.chatgpt.harness",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -22,5 +21,19 @@
     ],
     "security": { "csp": null }
   },
-  "bundle": { "active": false }
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "resources": {
+      "../../target-exe/distribution/runtime": "runtime",
+      "../../target-exe/distribution/distribution.json": "distribution.json"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "nsis": {
+        "installMode": "currentUser",
+        "startMenuFolder": "ChatGPT-Harness"
+      }
+    }
+  }
 }
