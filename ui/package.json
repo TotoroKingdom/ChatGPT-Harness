@@ -12,6 +12,7 @@
     "runtime:release": "cargo build --manifest-path ../Cargo.toml -p chatgpt-harness-runtime --release",
     "tauri:dev": "npm run dev:preflight && npm run runtime:dev && tauri dev",
     "tauri:build": "npm run runtime:release && tauri build",
+    "distribution:stage": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-distribution.ps1",
     "tauri": "tauri",
     "dev:preflight": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/free-dev-port.ps1"
   },

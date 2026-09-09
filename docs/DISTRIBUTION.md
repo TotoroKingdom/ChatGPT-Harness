@@ -418,3 +418,36 @@ Installed discovery 只信任 UI executable 旁的固定 runtime layout 和发�
 | M7-C | 保持 `BLOCKED`；M9 不解决 external credential transport |
 
 
+
+## M9-B implementation — Runtime packaging & installed discovery
+
+M9-B 将冻结的分发边界接入 RuntimeSupervisor，但不实现 installer、updater、签名或 First Run UI。
+
+### Runtime discovery
+
+- Development build 使用仓库内确定的 Cargo target 路径：`ui/src-tauri/../../target/{debug|release}/chatgpt-harness-runtime(.exe)`；不读取 `PATH`、CWD 或 `CHATGPT_HARNESS_RUNTIME_PATH`。
+- Installed build 由 `current_exe()` 的 parent 推导 install root，仅解析 `runtime/chatgpt-harness-runtime.exe`。
+- Installed build 必须先通过 `<install-root>\distribution.json` 校验，再校验固定 Runtime 目录、regular file、canonical path 和目录边界；符号链接、缺失文件、错误文件名或边界逃逸均 fail closed。
+- Discovery 返回 canonical executable；解析失败使用 `RUNTIME_DISTRIBUTION_INVALID`，错误摘要不包含完整内部路径。
+
+### Manifest and compatibility
+
+`distribution.json` schema version 1 包含：`distribution_schema_version`、`distribution_id`、`app_version`、`runtime_version`、`protocol_version` 和固定的 `runtime.relative_path`。UI 在 Runtime initialize 后同时校验 protocol version 与 `server_info.version`，任一不匹配都不会进入 Running/Ready。现有 protocol handshake 未扩展 distribution identity 字段；identity 由 manifest 与固定布局校验提供。
+
+### Packaging staging
+
+`ui/scripts/stage-distribution.ps1` 执行 release workspace build，并在被 `.gitignore` 忽略的 `target-exe/distribution/` 生成：
+
+~~~text
+<install-root>\
+├─ chatgpt-harness-ui.exe
+├─ runtime\
+│  └─ chatgpt-harness-runtime.exe
+└─ distribution.json
+~~~
+
+Manifest 版本从 UI/Runtime Cargo manifests 与 protocol source 读取，避免手写第二套版本源。该 staging 目录是 M9-B 的可验证 packaging boundary，不等同于 installer 或正式安装器。
+
+### Security boundary and remaining work
+
+M9-B 不改变 secret、tunnel、MCP 或 policy 行为，不解除 M7-C `BLOCKED`。M9-C/D 仍负责 installer/安装生命周期与 First Run/发布流程；本阶段只保证 Runtime executable resolution、manifest validation、compatibility gate 和 staging topology。

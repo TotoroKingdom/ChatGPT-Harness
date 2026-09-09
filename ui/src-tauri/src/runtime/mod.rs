@@ -1,4 +1,6 @@
 mod control_read;
+mod discovery;
+mod manifest;
 use harness_control_protocol::{
     ActivityEvent, ActivityListParams, ActivityListResult, ActivitySubscribeParams,
     ActivitySubscribeResult, AppConfig, ApprovalsListParams, ApprovalsListResult,
@@ -10,9 +12,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
-    env,
     io::{BufRead, BufReader, Read, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Child, ChildStdin, Command, Stdio},
     sync::{mpsc, Arc, Condvar, Mutex},
     thread,
@@ -131,6 +132,13 @@ impl SupervisorError {
         }
     }
 
+    fn distribution(message: impl Into<String>) -> Self {
+        Self {
+            code: "RUNTIME_DISTRIBUTION_INVALID".into(),
+            message: message.into(),
+        }
+    }
+
     fn spawn(message: impl Into<String>) -> Self {
         Self {
             code: "RUNTIME_SPAWN_FAILED".into(),
@@ -164,6 +172,7 @@ struct RuntimeProcess {
     exited: Arc<(Mutex<bool>, Condvar)>,
     child: Arc<Mutex<Child>>,
     identity: Arc<Mutex<RuntimeProcessIdentity>>,
+    expected_runtime_version: String,
 }
 
 #[derive(Clone)]
@@ -175,6 +184,7 @@ struct RuntimeProcessRef {
     exited: Arc<(Mutex<bool>, Condvar)>,
     child: Arc<Mutex<Child>>,
     identity: Arc<Mutex<RuntimeProcessIdentity>>,
+    expected_runtime_version: String,
 }
 
 struct SupervisorInner {
@@ -528,6 +538,11 @@ impl RuntimeSupervisor {
                 "Runtime protocol version mismatch.",
             ));
         }
+        if result.server_info.version != process.expected_runtime_version {
+            return Err(SupervisorError::distribution(
+                "Runtime version is incompatible with the installed distribution.",
+            ));
+        }
         if let Ok(mut identity) = process.identity.lock() {
             identity.runtime_id = result.runtime_id;
             identity.runtime_version = result.server_info.version;
@@ -542,14 +557,26 @@ impl RuntimeSupervisor {
         config: &AppConfig,
         generation: uuid::Uuid,
     ) -> Result<RuntimeProcess, SupervisorError> {
-        #[cfg(test)]
-        let executable_path = self
-            .test_command
-            .as_ref()
-            .map(|command| command.executable_path.clone())
-            .map_or_else(discover_runtime_executable, Ok)?;
-        #[cfg(not(test))]
-        let executable_path = discover_runtime_executable()?;
+        let (executable_path, expected_runtime_version) = {
+            #[cfg(test)]
+            if let Some(test_command) = &self.test_command {
+                (test_command.executable_path.clone(), "test".to_string())
+            } else {
+                let resolved = discovery::resolve_runtime()?;
+                {
+                    let expected_runtime_version = resolved.expected_runtime_version().to_string();
+                    (resolved.executable_path, expected_runtime_version)
+                }
+            }
+            #[cfg(not(test))]
+            {
+                let resolved = discovery::resolve_runtime()?;
+                {
+                    let expected_runtime_version = resolved.expected_runtime_version().to_string();
+                    (resolved.executable_path, expected_runtime_version)
+                }
+            }
+        };
         let mut command = Command::new(&executable_path);
         #[cfg(test)]
         if let Some(test_command) = &self.test_command {
@@ -566,12 +593,9 @@ impl RuntimeSupervisor {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
-        let mut child = command.spawn().map_err(|error| {
-            SupervisorError::spawn(format!(
-                "Could not start {}: {error}",
-                executable_path.display()
-            ))
-        })?;
+        let mut child = command
+            .spawn()
+            .map_err(|_| SupervisorError::spawn("Could not start the Runtime process."))?;
         let stdin = child
             .stdin
             .take()
@@ -620,6 +644,7 @@ impl RuntimeSupervisor {
             exited,
             child,
             identity,
+            expected_runtime_version,
         })
     }
 
@@ -827,6 +852,7 @@ fn runtime_process_ref(process: &RuntimeProcess) -> RuntimeProcessRef {
         exited: process.exited.clone(),
         child: process.child.clone(),
         identity: process.identity.clone(),
+        expected_runtime_version: process.expected_runtime_version.clone(),
     }
 }
 
@@ -1064,33 +1090,6 @@ fn route_response(
     }
 }
 
-fn discover_runtime_executable() -> Result<PathBuf, SupervisorError> {
-    if let Ok(path) = env::var("CHATGPT_HARNESS_RUNTIME_PATH") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-        return Err(SupervisorError::spawn(format!(
-            "CHATGPT_HARNESS_RUNTIME_PATH does not point to a file: {}",
-            path.display()
-        )));
-    }
-    let filename = if cfg!(windows) {
-        "chatgpt-harness-runtime.exe"
-    } else {
-        "chatgpt-harness-runtime"
-    };
-    let current = env::current_exe().map_err(|error| SupervisorError::spawn(error.to_string()))?;
-    let sibling = current
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(filename);
-    if sibling.is_file() {
-        return Ok(sibling);
-    }
-    Err(SupervisorError::spawn(format!("Runtime executable not found at {}. Build it with cargo build -p chatgpt-harness-runtime or set CHATGPT_HARNESS_RUNTIME_PATH.", sibling.display())))
-}
-
 fn machine_code(code: &harness_control_protocol::MachineErrorCode) -> &'static str {
     match code {
         harness_control_protocol::MachineErrorCode::NotInitialized => "NOT_INITIALIZED",
@@ -1115,6 +1114,7 @@ mod tests {
         DecimalU64, RpcResponse, RuntimeLifecycle, RuntimeReadiness, SecurityConfig, SecurityMode,
         ServerInfo, TunnelConfig, UiConfig, WorkspaceConfig,
     };
+    use std::env;
     use std::io::{BufRead, BufReader, BufWriter};
     use std::sync::Arc;
     use std::time::Instant;
