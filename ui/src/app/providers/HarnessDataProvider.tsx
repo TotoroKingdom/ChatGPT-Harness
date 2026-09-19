@@ -16,6 +16,7 @@ import type {
   ComponentStates,
   ConfigMetadata,
   HarnessControlClient,
+  HarnessStatus,
   OverallStatus,
   Unsubscribe,
 } from "@/services/harness/client";
@@ -42,6 +43,7 @@ type ContextValue = ResourceState & {
   setupRequired: boolean;
   apiKeyConfigured: boolean;
   components: ComponentStates;
+  harness: HarnessStatus;
   overall: OverallStatus;
   restartRequired: boolean;
   lastDiagnostics: DiagnosticRun | null;
@@ -127,7 +129,7 @@ async function rehydrateRuntime(client: HarnessControlClient): Promise<RuntimeRe
         if (resource.status === "success" || resource.status === "empty") {
           return {
             resource,
-            components: componentStatesFromRuntime(resource.data, client.getComponentStates()),
+            components: client.getComponentStates(),
             activeRevision: resource.data.configRevision,
           };
         }
@@ -186,6 +188,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const [eligibility, setEligibility] = useState<StartEligibility | null>(null);
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [components, setComponents] = useState<ComponentStates>(client.getComponentStates());
+  const [harness, setHarness] = useState<HarnessStatus>(client.getHarnessStatus());
   const [activeRevision, setActiveRevision] = useState<string | null>(null);
   const [lastDiagnostics, setLastDiagnostics] = useState<DiagnosticRun | null>(null);
   const activityCursorRef = useRef<string | undefined>(undefined);
@@ -196,7 +199,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
         client.configGet(),
         client.configMetadata(),
         client.apiKeyStatus(),
-        client.runtimeStartEligibility(),
+        client.harnessStartEligibility(),
       ]);
       setConfig(nextConfig);
       setConfigLoaded(true);
@@ -218,6 +221,22 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     void client.componentStatesSubscribe((nextComponents, runtime, process) => {
       if (!mounted) return;
       setComponents(nextComponents);
+      const harnessState = client.getHarnessStatus();
+      setHarness(harnessState);
+      if (harnessState.lastError && nextComponents.runtime === "error") {
+        setResources((current) => ({
+          ...current,
+          runtime: {
+            status: "error",
+            error: new HarnessClientError(
+              "error",
+              harnessState.lastError?.message ?? "Harness Runtime failed.",
+              undefined,
+              harnessState.lastError?.code,
+            ),
+          },
+        }));
+      }
       if (process?.phase === "crashed") {
         setActiveRevision(null);
         setResources((current) => ({
@@ -261,12 +280,17 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       activity: { status: "loading" },
     });
     void Promise.all([
+      load(() => client.harnessStatus(), () => false),
       rehydrateRuntime(client),
       load(() => client.toolsList(), (data) => data.items.length === 0),
       load(() => client.policiesList(), (data) => data.items.length === 0),
       load(() => client.activityList(), (data) => data.items.length === 0),
-    ]).then(([runtime, tools, policies, activity]) => {
+    ]).then(([harnessResource, runtime, tools, policies, activity]) => {
       if (!mounted) return;
+      if (harnessResource.status === "success" || harnessResource.status === "empty") {
+        setHarness(harnessResource.data);
+        client.setComponentStates({ runtime: harnessResource.data.runtime, mcp: harnessResource.data.mcp, tunnel: harnessResource.data.tunnel });
+      }
       client.setComponentStates(runtime.components);
       setComponents(runtime.components);
       setResources({ runtime: runtime.resource, tools, policies, activity });
@@ -343,7 +367,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
 
   const startHarness = useCallback(async (): Promise<SaveResult> => {
     try {
-      const nextEligibility = await client.runtimeStartEligibility();
+      const nextEligibility = await client.harnessStartEligibility();
       setEligibility(nextEligibility);
       if (!nextEligibility.canStart) {
         return {
@@ -351,11 +375,12 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
           error: new HarnessClientError("error", nextEligibility.message, undefined, nextEligibility.status.toUpperCase()),
         };
       }
-      const start = client.runtimeStart();
+      const start = client.harnessStart();
       setComponents(client.getComponentStates());
       const state = await start;
       setComponents(client.getComponentStates());
-      setActiveRevision(state.configRevision);
+      setHarness(state);
+      setActiveRevision(state.configRevision ?? null);
       await refreshRuntimeResources();
       return { ok: true };
     } catch (error) {
@@ -364,17 +389,18 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   }, [client, refreshRuntimeResources]);
 
   const stopHarness = useCallback(async (): Promise<SaveResult> => {
-    if (overallStatus(client.getComponentStates()) === "stopped") {
+    if (client.getHarnessStatus().lifecycle === "stopped") {
       return {
         ok: false,
         error: new HarnessClientError("error", "Harness is already stopped.", undefined, "LIFECYCLE_CONFLICT"),
       };
     }
     try {
-      const stop = client.runtimeStop();
+      const stop = client.harnessStop();
       setComponents(client.getComponentStates());
-      await stop;
+      const stopped = await stop;
       setComponents(client.getComponentStates());
+      setHarness(stopped);
       setActiveRevision(null);
       setResources((current) => ({ ...current, runtime: { status: "idle" } }));
       refreshLifecycleActivity();
@@ -437,7 +463,8 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       setupRequired: configLoaded && (eligibility?.status === "setup_required" || !config?.workspace.rootPath),
       apiKeyConfigured,
       components,
-      overall: overallStatus(components),
+      harness,
+      overall: harness.lifecycle,
       restartRequired: activeRevision !== null && config !== null && activeRevision !== config.configRevision,
       lastDiagnostics,
       refreshConfig,
@@ -466,6 +493,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       appendActivity,
       client,
       components,
+      harness,
       config,
       configError,
       configLoaded,

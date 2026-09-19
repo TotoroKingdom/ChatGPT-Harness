@@ -48,7 +48,7 @@ export function SettingsPage() {
   const detect = async () => {
     const path = await data.detectTunnelClient();
     if (path) update({ tunnel: { ...form.tunnel, tunnelClientPath: path, autoDetect: true } });
-    else setMessage("No tunnel-client was detected. External connection remains optional.");
+    else setMessage("The bundled Tunnel client will be used in the installed build.");
   };
 
   const setMode = (mode: SecurityMode) => {
@@ -136,21 +136,21 @@ export function SettingsPage() {
           <p className="settings-help">Only this workspace will be used by the Harness.</p>
         </SettingsSection>
 
-        <SettingsSection eyebrow="External connection" title="Optional connection">
+        <SettingsSection eyebrow="Tunnel connection" title="Required for Harness">
           <label className="form-field">
-            <span>Tunnel ID (optional)</span>
+            <span>Tunnel ID (required)</span>
             <input value={form.tunnel.tunnelId} onChange={(event) => update({ tunnel: { ...form.tunnel, tunnelId: event.target.value } })} placeholder="Enter tunnel ID" />
           </label>
           <div className="form-row">
             <label className="form-field grow">
-              <span>Tunnel client directory (optional)</span>
+              <span>Development Tunnel override (optional)</span>
               <input className="path-input" value={form.tunnel.tunnelClientPath ?? ""} readOnly placeholder="Not selected" title={form.tunnel.tunnelClientPath || undefined} />
             </label>
-            <button className="button button-secondary align-end" onClick={() => void detect()}>Auto Detect</button>
-            <button className="button button-secondary align-end" onClick={() => void chooseClient()}>Choose Folder</button>
+            <button className="button button-secondary align-end" onClick={() => void detect()}>Use Bundled</button>
+            <button className="button button-secondary align-end" onClick={() => void chooseClient()}>Choose Override</button>
           </div>
           <label className="form-field">
-            <span>API Key (optional)</span>
+            <span>API Key (required)</span>
             {data.apiKeyConfigured && !replacingApiKey ? (
               <div className="secret-state">
                 <StatusBadge tone="success">Configured</StatusBadge>
@@ -200,6 +200,7 @@ export function SettingsPage() {
 export function FirstRunWizard({ onDone }: { onDone: () => void }) {
   const data = useHarnessData();
   const [form, setForm] = useState<AppConfig>(data.config ?? emptyConfig);
+  const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -222,10 +223,14 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
     if (data.configError) return setError("Reset the invalid local configuration before saving a Workspace.");
     if (!form.workspace.rootPath.trim()) return setError("Choose a Workspace folder.");
     setSaving(true);
-    const result = await data.saveConfig({ ...form, tunnel: { ...form.tunnel, tunnelId: form.tunnel.tunnelId.trim() } });
+    const result = await data.saveConfig(
+      { ...form, tunnel: { ...form.tunnel, tunnelId: form.tunnel.tunnelId.trim() } },
+      apiKey.trim() || undefined,
+    );
     setSaving(false);
+    setApiKey("");
     if (!result.ok) return setError(result.error?.message ?? "Could not save the Workspace.");
-    setMessage("Workspace saved. Local Runtime readiness has been refreshed.");
+    setMessage("Configuration saved. Harness readiness has been refreshed.");
   };
 
   const resetConfiguration = async () => {
@@ -238,14 +243,14 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
     setMessage("Invalid configuration was removed. Choose a Workspace to continue.");
   };
 
-  const startLocalRuntime = async () => {
+  const startHarness = async () => {
     const result = await data.startHarness();
-    if (!result.ok) return setError(result.error?.message ?? "Local Runtime could not start.");
+    if (!result.ok) return setError(result.error?.message ?? "Harness could not start.");
     onDone();
   };
 
   const connectionConfigured = Boolean(
-    form.tunnel.tunnelId.trim() && form.tunnel.tunnelClientPath && data.apiKeyConfigured,
+    form.tunnel.tunnelId.trim() && (data.apiKeyConfigured || apiKey.trim()),
   );
 
   return (
@@ -261,23 +266,25 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
           ) : (
             <>
               <section aria-labelledby="workspace-step-title">
-                <SectionHeading title="Workspace" description="Choose the only folder Local Runtime may access." />
+                <SectionHeading title="Workspace" description="Choose the only folder Harness may access." />
                 <label className="form-field"><span>Workspace root</span><div className="input-action-row"><input className="path-input" value={form.workspace.rootPath} readOnly placeholder="Choose a folder" title={form.workspace.rootPath || undefined} /><button className="button button-secondary" onClick={() => void chooseFolder()}>Choose Folder</button></div></label>
               </section>
               <section aria-labelledby="runtime-status-title">
-                <SectionHeading title="Runtime" description="Bundled Runtime readiness is checked by the Local Control Plane." />
-                <p className="settings-help">{data.eligibility?.message ?? "Checking Local Runtime readiness…"}</p>
+                <SectionHeading title="Runtime" description="Bundled Runtime readiness is checked by the local control plane." />
+                <p className="settings-help">{data.eligibility?.message ?? "Checking Harness readiness…"}</p>
               </section>
               <section aria-labelledby="external-connection-title">
-                <SectionHeading title="External Connection" description={connectionConfigured ? "Configured." : "Not configured / currently unavailable."} />
-                <p className="settings-help">External connection is optional and does not block Local Runtime startup.</p>
+                <SectionHeading title="Tunnel connection" description={connectionConfigured ? "Configured." : "Tunnel ID and API Key are required."} />
+                <label className="form-field"><span>Tunnel ID (required)</span><input value={form.tunnel.tunnelId} onChange={(event) => setForm((current) => ({ ...current, tunnel: { ...current.tunnel, tunnelId: event.target.value } }))} placeholder="Enter tunnel ID" /></label>
+                <label className="form-field"><span>API Key (required)</span><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Enter API Key" autoComplete="off" /></label>
+                <p className="settings-help">The installed Tunnel client is bundled and resolved automatically.</p>
               </section>
             </>
           )}
         </Card>
         {error && <div className="notice notice-danger">{error}</div>}
         {message && <div className="notice notice-success">{message}</div>}
-        {!data.configError && <div className="wizard-actions"><button className="button button-secondary" onClick={() => void saveWorkspace()} disabled={saving || !form.workspace.rootPath.trim()}>{saving ? "Saving…" : "Save Workspace"}</button><button className="button button-primary" onClick={() => void startLocalRuntime()} disabled={saving || !data.eligibility?.canStart}>Start Local Runtime</button></div>}
+        {!data.configError && <div className="wizard-actions"><button className="button button-secondary" onClick={() => void saveWorkspace()} disabled={saving || !form.workspace.rootPath.trim()}>{saving ? "Saving…" : "Save Configuration"}</button><button className="button button-primary" onClick={() => void startHarness()} disabled={saving || !data.eligibility?.canStart}>Start Harness</button></div>}
       </div>
     </div>
   );

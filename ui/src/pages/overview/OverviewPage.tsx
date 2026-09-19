@@ -18,7 +18,7 @@ export function OverviewPage() {
   return (
     <div className="page-stack">
       <Card className="hero-card">
-        <div><div className="eyebrow">Runtime status</div><div className="hero-status"><span className="hero-orb" /><div><h2>Harness is {data.overall}</h2><p>Local control-plane lifecycle backed by the Runtime.</p></div></div></div>
+        <div><div className="eyebrow">Harness status</div><div className="hero-status"><span className="hero-orb" /><div><h2>Harness is {data.overall}</h2><p>Runtime, MCP, and Tunnel readiness are owned by the local control plane.</p></div></div></div>
         <div className="hero-actions">{data.overall === "stopped" || data.overall === "error" ? <button className="button button-primary" onClick={() => void run(data.startHarness)} disabled={!canStart}>Start Harness</button> : <button className="button button-secondary" disabled={data.overall === "stopping" || data.overall === "starting"} onClick={() => void run(data.stopHarness)}>Stop Harness</button>}{data.restartRequired && <button className="button button-warning" onClick={() => void run(data.restartHarness)}>Restart Harness</button>}</div>
       </Card>
       {data.restartRequired && <div className="notice notice-warning"><strong>Restart Required</strong><span>Configuration has changed since the current Harness session started.</span></div>}{(data.overall === "stopped" || data.overall === "error") && data.eligibility && <div className={`notice ${data.eligibility.canStart ? "notice-success" : "notice-warning"}`}><strong>{data.eligibility.status}</strong><span>{data.eligibility.message}</span></div>}

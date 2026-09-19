@@ -1,7 +1,7 @@
 import type { ActivityEntry, RuntimeDiagnostics, ToolDiagnostic } from "./control-read";
 import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, StartEligibility, PolicyRule, RuntimeState, SecurityMode, ToolDescriptor, ToolsListResult } from "@protocol/v1";
 import { HarnessClientError } from "./errors";
-import type { ActivityEventListener, ComponentStates, ComponentStatesListener, HarnessControlClient, RuntimeProcessStatus, Unsubscribe } from "./client";
+import type { ActivityEventListener, ComponentStates, ComponentStatesListener, HarnessControlClient, HarnessStatus, RuntimeProcessStatus, Unsubscribe } from "./client";
 export type MockScenario = "ready" | "disconnected" | "empty" | "error";
 const delay = (ms=120) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 const MAX_DECIMAL_U64 = "18446744073709551615";
@@ -38,6 +38,7 @@ export class MockHarnessControlClient implements HarnessControlClient {
   this.configured = apiKeyConfigured;
   if (!config) { this.components = { runtime: "stopped", tunnel: "stopped", mcp: "stopped" }; this.activeRevision="0"; }
  }
+ private harnessState(): HarnessStatus { const lifecycle = this.components.runtime === "error" || this.components.tunnel === "error" || this.components.mcp === "error" ? "error" : this.components.runtime === "stopping" || this.components.tunnel === "stopping" || this.components.mcp === "stopping" ? "stopping" : this.components.runtime === "starting" || this.components.tunnel === "starting" || this.components.mcp === "starting" ? "starting" : this.components.runtime === "ready" && this.components.tunnel === "ready" && this.components.mcp === "ready" ? "ready" : this.components.runtime === "stopped" && this.components.tunnel === "stopped" && this.components.mcp === "stopped" ? "stopped" : "degraded"; return { lifecycle, ...this.components, activeSessionId: lifecycle === "stopped" ? null : "mock-session", configRevision: lifecycle === "stopped" ? null : this.activeRevision, lastError: null }; }
  private recordActivity(eventType: ActivityEventType, summary: string) { const created=event(this.nextSequence,eventType,summary,{source:"mock-lifecycle"}); this.nextSequence=incrementDecimal(this.nextSequence); this.activities=[...this.activities,created]; }
  private async respond<T>(value:T):Promise<T>{await delay(); if(this.scenario==="disconnected") throw new HarnessClientError("disconnected","The local Runtime is not connected."); if(this.scenario==="error") throw new HarnessClientError("error","The mock Runtime returned an example error."); return value;}
  // Legacy mock lifecycle data is not evidence for M8-C observations.
@@ -62,16 +63,24 @@ export class MockHarnessControlClient implements HarnessControlClient {
  validatePath(){return this.respond(true);}
  runtimeStartEligibility(): Promise<StartEligibility> {
   const running = this.components.runtime !== "stopped" && this.components.runtime !== "error";
-  if (running) return this.respond({ status: "runtime_already_running", canStart: false, message: "Local Runtime is already running or changing state." });
+ if (running) return this.respond({ status: "runtime_already_running", canStart: false, message: "Local Runtime is already running or changing state." });
   if (!this.config?.workspace.rootPath.trim()) return this.respond({ status: "setup_required", canStart: false, message: "Choose a Workspace to finish local setup." });
+  if (!this.config.tunnel.tunnelId.trim()) return this.respond({ status: "tunnel_id_required", canStart: false, message: "Configure a Tunnel ID before starting Harness." });
+  if (!this.configured) return this.respond({ status: "api_key_required", canStart: false, message: "Save a Tunnel API Key before starting Harness." });
   return this.respond({ status: "ready_to_start", canStart: true, message: "Local Runtime is ready to start." });
  }
+ harnessStartEligibility(): Promise<StartEligibility> { return this.runtimeStartEligibility(); }
  localDiagnosticsRun():Promise<DiagnosticRun>{const checks=[{id:"workspace",status:"pass" as const,summary:"Workspace folder is accessible."},{id:"tunnel_id",status:"pass" as const,summary:"Tunnel ID is configured."},{id:"tunnel_client",status:this.config?.tunnel.tunnelClientPath?"pass" as const:"warning" as const,summary:this.config?.tunnel.tunnelClientPath?"Tunnel client found":"Choose or detect a tunnel-client package folder."},{id:"api_key",status:this.configured?"pass" as const:"warning" as const,summary:this.configured?"API Key is configured in the OS credential store.":"API Key is not configured."},{id:"security",status:"pass" as const,summary:"Security settings are consistent."}]; return this.respond({runId:"diagnostic_mock",startedAt:"2026-09-02T00:00:00Z",finishedAt:"2026-09-02T00:00:01Z",overallStatus:"warning",checks});}
  private runtime():RuntimeState{return {runtimeId:"runtime_mock_01",startedAt:"2026-09-02T00:00:00Z",lifecycle:this.components.runtime==="ready"?"ready":this.components.runtime==="stopping"?"stopping":"initializing",readiness:this.components.runtime==="ready"?"ready":this.components.runtime==="degraded"?"degraded":"not_ready",configRevision:this.activeRevision,activeWorkspace:this.config?.workspace.rootPath ?? "",securityMode:this.config?.security.mode ?? "normal",exposedToolCatalog:tools.filter(t=>t.exposed),activeRequests:0,pendingApprovals:1,runningExecutions:0};}
  async runtimeStart(){this.components={runtime:"starting",tunnel:"stopped",mcp:"stopped"}; await delay(90); this.components={runtime:"ready",tunnel:"starting",mcp:"stopped"}; await delay(90); this.components={runtime:"ready",tunnel:"ready",mcp:"starting"}; await delay(90); this.components={runtime:"ready",tunnel:"ready",mcp:"ready"}; this.activeRevision=this.config?.configRevision??"1"; this.recordActivity("runtime_started","Runtime started in mock mode."); return this.respond(this.runtime());}
  runtimeStatus(){return this.respond(this.runtime());}
  runtimeProcessStatus():Promise<RuntimeProcessStatus>{const phase=this.components.runtime==="starting"?"starting":this.components.runtime==="stopping"?"stopping":this.components.runtime==="error"?"crashed":this.components.runtime==="stopped"?"stopped":"running";return this.respond({phase,last_error:null});}
  async runtimeStop(){if(this.components.runtime==="stopped")return this.respond({accepted:false});this.components={runtime:"ready",tunnel:"ready",mcp:"stopping"};await delay(90);this.components={runtime:"ready",tunnel:"stopping",mcp:"stopped"};await delay(90);this.components={runtime:"stopping",tunnel:"stopped",mcp:"stopped"};await delay(90);this.components={runtime:"stopped",tunnel:"stopped",mcp:"stopped"};this.activeRevision="0";this.recordActivity("runtime_stopped","Runtime stopped in mock mode.");return this.respond({accepted:true});}
+ async harnessStart(){await this.runtimeStart();return this.respond(this.harnessState());}
+ async harnessStatus(){return this.respond(this.harnessState());}
+ async harnessStop(){await this.runtimeStop();return this.respond(this.harnessState());}
+ async harnessRestart(){await this.runtimeStop();await this.runtimeStart();return this.respond(this.harnessState());}
+ getHarnessStatus(){return this.harnessState();}
  getComponentStates(){return this.components;} setComponentStates(s:ComponentStates){this.components=s;if(s.runtime==="stopped"&&s.tunnel==="stopped"&&s.mcp==="stopped")this.activeRevision="0";} async componentStatesSubscribe(_listener:ComponentStatesListener):Promise<Unsubscribe>{return ()=>{};}
  toolsList(){return this.respond({items:this.scenario==="empty"?[]:tools});} policiesList(){return this.respond({items:this.scenario==="empty"?[]:policies});}
  activityList():Promise<ActivityListResult>{return this.respond({items:this.activities,latestSequence:decrementDecimal(this.nextSequence)});}

@@ -24,6 +24,7 @@ import type {
   ConfigMetadata,
   HarnessControlClient,
   HarnessAdapterKind,
+  HarnessStatus,
   RuntimeProcessEvent,
   RuntimeProcessStatus,
   Unsubscribe,
@@ -48,6 +49,10 @@ function componentStatesFromRuntime(state: RuntimeState): ComponentStates {
   // In M5 the MCP endpoint is hosted by the Runtime process, so RuntimeState is
   // the authority for both components. Tunnel remains unimplemented until M7.
   return { runtime, tunnel: "stopped", mcp: runtime };
+}
+
+function componentStatesFromHarness(state: HarnessStatus): ComponentStates {
+  return { runtime: state.runtime, tunnel: state.tunnel, mcp: state.mcp };
 }
 
 function componentStatesFromProcess(
@@ -76,6 +81,17 @@ function componentStatesFromProcess(
 export class TauriHarnessControlClient implements HarnessControlClient {
   readonly adapterKind: HarnessAdapterKind = "real";
   private components: ComponentStates = { runtime: "stopped", tunnel: "stopped", mcp: "stopped" };
+  private harness: HarnessStatus = {
+    lifecycle: "stopped",
+    runtime: "stopped",
+    tunnel: "stopped",
+    mcp: "stopped",
+    activeSessionId: null,
+    configRevision: null,
+    lastError: null,
+  };
+  private harnessListener?: Unsubscribe;
+  private componentListener?: ComponentStatesListener;
 
   private call<T>(cmd: string, args?: Record<string, unknown>) {
     return invoke<T>(cmd, args);
@@ -84,6 +100,19 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   private applyRuntimeState(state: RuntimeState, listener?: ComponentStatesListener) {
     this.components = componentStatesFromRuntime(state);
     listener?.(this.components, state);
+  }
+
+  private applyHarnessStatus(state: HarnessStatus) {
+    this.harness = state;
+    this.components = componentStatesFromHarness(state);
+    this.componentListener?.(this.components);
+  }
+
+  private async ensureHarnessListener() {
+    if (this.harnessListener) return;
+    this.harnessListener = await listen<HarnessStatus>("harness:status", (event) => {
+      this.applyHarnessStatus(event.payload);
+    });
   }
 
   async configGet() {
@@ -173,6 +202,39 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     return result;
   }
 
+  harnessStartEligibility() {
+    return this.call<StartEligibility>("harness_start_eligibility");
+  }
+
+  async harnessStart() {
+    const status = await this.call<HarnessStatus>("harness_start");
+    this.applyHarnessStatus(status);
+    return status;
+  }
+
+  async harnessStatus() {
+    await this.ensureHarnessListener();
+    const status = await this.call<HarnessStatus>("harness_status");
+    this.applyHarnessStatus(status);
+    return status;
+  }
+
+  async harnessStop() {
+    const status = await this.call<HarnessStatus>("harness_stop");
+    this.applyHarnessStatus(status);
+    return status;
+  }
+
+  async harnessRestart() {
+    const status = await this.call<HarnessStatus>("harness_restart");
+    this.applyHarnessStatus(status);
+    return status;
+  }
+
+  getHarnessStatus() {
+    return this.harness;
+  }
+
   getComponentStates() {
     return this.components;
   }
@@ -182,7 +244,9 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   async componentStatesSubscribe(listener: ComponentStatesListener): Promise<Unsubscribe> {
-    return listen<RuntimeProcessEvent>("runtime:process", (event) => {
+    this.componentListener = listener;
+    const runtimeUnlisten = await listen<RuntimeProcessEvent>("runtime:process", (event) => {
+      if (this.harnessListener) return;
       this.components = componentStatesFromProcess(event.payload, this.components);
       listener(this.components, undefined, event.payload);
 
@@ -192,6 +256,12 @@ export class TauriHarnessControlClient implements HarnessControlClient {
           .catch(() => undefined);
       }
     });
+    return () => {
+      runtimeUnlisten();
+      this.harnessListener?.();
+      this.harnessListener = undefined;
+      this.componentListener = undefined;
+    };
   }
 
   activityList(params: ActivityListParams = {}) {

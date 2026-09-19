@@ -19,6 +19,15 @@ import type {
 export type ComponentStatus = "stopped" | "starting" | "ready" | "degraded" | "error" | "stopping";
 export type OverallStatus = "stopped" | "starting" | "ready" | "degraded" | "error" | "stopping";
 export type ComponentStates = { runtime: ComponentStatus; tunnel: ComponentStatus; mcp: ComponentStatus };
+export type HarnessStatus = {
+  lifecycle: OverallStatus;
+  runtime: ComponentStatus;
+  mcp: ComponentStatus;
+  tunnel: ComponentStatus;
+  activeSessionId?: string | null;
+  configRevision?: string | null;
+  lastError?: { code: string; message: string } | null;
+};
 export type ConfigMetadata = { configDirectory: string; configFile: string };
 export type Unsubscribe = () => void;
 export type ActivityEventListener = (event: ActivityEvent) => void;
@@ -66,6 +75,12 @@ export interface HarnessControlClient extends ControlReadClient {
   runtimeStatus(): Promise<RuntimeState>;
   runtimeProcessStatus(): Promise<RuntimeProcessStatus>;
   runtimeStop(): Promise<RuntimeStopResult>;
+  harnessStartEligibility(): Promise<StartEligibility>;
+  harnessStart(): Promise<HarnessStatus>;
+  harnessStatus(): Promise<HarnessStatus>;
+  harnessStop(): Promise<HarnessStatus>;
+  harnessRestart(): Promise<HarnessStatus>;
+  getHarnessStatus(): HarnessStatus;
   getComponentStates(): ComponentStates;
   setComponentStates(states: ComponentStates): void;
   componentStatesSubscribe(listener: ComponentStatesListener): Promise<Unsubscribe>;
