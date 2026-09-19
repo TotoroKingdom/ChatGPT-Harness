@@ -3,9 +3,12 @@ use harness_control_protocol::PROTOCOL_VERSION;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
-pub(crate) const DISTRIBUTION_SCHEMA_VERSION: u32 = 1;
+pub(crate) const DISTRIBUTION_SCHEMA_VERSION: u32 = 2;
 pub(crate) const DISTRIBUTION_ID: &str = "chatgpt-harness";
 pub(crate) const RUNTIME_RELATIVE_PATH: &str = "runtime/chatgpt-harness-runtime.exe";
+pub(crate) const TUNNEL_CLIENT_RELATIVE_PATH: &str = "tunnel/tunnel-client.exe";
+pub(crate) const CLOUDFLARED_RELATIVE_PATH: &str = "tunnel/cloudflared.exe";
+pub(crate) const TUNNEL_CLIENT_VERSION: &str = "0.0.13";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,12 +19,21 @@ pub(crate) struct DistributionManifest {
     pub(crate) runtime_version: String,
     pub(crate) protocol_version: u32,
     pub(crate) runtime: RuntimeManifest,
+    pub(crate) tunnel: TunnelManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RuntimeManifest {
     pub(crate) relative_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TunnelManifest {
+    pub(crate) version: String,
+    pub(crate) relative_path: String,
+    pub(crate) cloudflared_relative_path: String,
 }
 
 pub(crate) fn read_and_validate(path: &Path) -> Result<DistributionManifest, SupervisorError> {
@@ -55,6 +67,16 @@ pub(crate) fn validate(
             "Installed distribution Runtime path is invalid.",
         ));
     }
+    if manifest.tunnel.version != TUNNEL_CLIENT_VERSION
+        || manifest.tunnel.relative_path != TUNNEL_CLIENT_RELATIVE_PATH
+        || manifest.tunnel.cloudflared_relative_path != CLOUDFLARED_RELATIVE_PATH
+        || !valid_relative_path(&manifest.tunnel.relative_path)
+        || !valid_relative_path(&manifest.tunnel.cloudflared_relative_path)
+    {
+        return Err(SupervisorError::distribution(
+            "Installed distribution Tunnel payload is invalid.",
+        ));
+    }
     if manifest.protocol_version != PROTOCOL_VERSION {
         return Err(SupervisorError::distribution(
             "Installed distribution protocol version is incompatible.",
@@ -68,19 +90,28 @@ pub(crate) fn validate(
     Ok(manifest.clone())
 }
 
+fn valid_relative_path(path: &str) -> bool {
+    !Path::new(path).is_absolute() && !path.contains("..")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn valid() -> DistributionManifest {
         DistributionManifest {
-            distribution_schema_version: 1,
+            distribution_schema_version: 2,
             distribution_id: DISTRIBUTION_ID.into(),
             app_version: env!("CARGO_PKG_VERSION").into(),
             runtime_version: env!("CARGO_PKG_VERSION").into(),
             protocol_version: PROTOCOL_VERSION,
             runtime: RuntimeManifest {
                 relative_path: RUNTIME_RELATIVE_PATH.into(),
+            },
+            tunnel: TunnelManifest {
+                version: TUNNEL_CLIENT_VERSION.into(),
+                relative_path: TUNNEL_CLIENT_RELATIVE_PATH.into(),
+                cloudflared_relative_path: CLOUDFLARED_RELATIVE_PATH.into(),
             },
         }
     }
@@ -93,7 +124,13 @@ mod tests {
     #[test]
     fn rejects_schema_identity_path_and_versions() {
         let mut value = valid();
-        value.distribution_schema_version = 2;
+        value.distribution_schema_version = 1;
+        assert!(validate(&value).is_err());
+        let mut value = valid();
+        value.tunnel.relative_path = "../outside.exe".into();
+        assert!(validate(&value).is_err());
+        let mut value = valid();
+        value.tunnel.cloudflared_relative_path = "cloudflared.exe".into();
         assert!(validate(&value).is_err());
         let mut value = valid();
         value.distribution_id = "other".into();

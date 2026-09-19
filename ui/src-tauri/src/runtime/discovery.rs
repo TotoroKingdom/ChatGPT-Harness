@@ -168,7 +168,7 @@ mod tests {
 
     fn manifest() -> String {
         format!(
-            r#"{{"distribution_schema_version":1,"distribution_id":"chatgpt-harness","app_version":"{}","runtime_version":"{}","protocol_version":1,"runtime":{{"relative_path":"runtime/chatgpt-harness-runtime.exe"}}}}"#,
+            r#"{{"distribution_schema_version":2,"distribution_id":"chatgpt-harness","app_version":"{}","runtime_version":"{}","protocol_version":1,"runtime":{{"relative_path":"runtime/chatgpt-harness-runtime.exe"}},"tunnel":{{"version":"0.0.13","relative_path":"tunnel/tunnel-client.exe","cloudflared_relative_path":"tunnel/cloudflared.exe"}}}}"#,
             env!("CARGO_PKG_VERSION"),
             env!("CARGO_PKG_VERSION")
         )

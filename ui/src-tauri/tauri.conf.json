@@ -26,6 +26,7 @@
     "targets": ["nsis"],
     "resources": {
       "../../target-exe/distribution/runtime": "runtime",
+      "../../target-exe/distribution/tunnel": "tunnel",
       "../../target-exe/distribution/distribution.json": "distribution.json"
     },
     "windows": {

@@ -1,3 +1,7 @@
+mod discovery;
+
+pub(crate) use discovery::{resolve_tunnel, ResolvedTunnel, TunnelDistributionMode};
+
 use chrono::{SecondsFormat, Utc};
 use serde::Serialize;
 use std::{
@@ -402,6 +406,13 @@ impl TunnelProcessManager {
 }
 
 impl TunnelProcessError {
+    pub(crate) fn distribution(message: impl Into<String>) -> Self {
+        Self {
+            code: "TUNNEL_DISTRIBUTION_INVALID".into(),
+            message: message.into(),
+        }
+    }
+
     fn conflict(message: impl Into<String>) -> Self {
         Self {
             code: "LIFECYCLE_CONFLICT".into(),

@@ -32,9 +32,13 @@ function Assert-File([string]$Path, [string]$Description) {
 
 $uiExecutable = Join-Path $stagingDirectory "chatgpt-harness-ui.exe"
 $runtimeExecutable = Join-Path $stagingDirectory "runtime\chatgpt-harness-runtime.exe"
+$tunnelClientExecutable = Join-Path $stagingDirectory "tunnel\tunnel-client.exe"
+$cloudflaredExecutable = Join-Path $stagingDirectory "tunnel\cloudflared.exe"
 $manifestPath = Join-Path $stagingDirectory "distribution.json"
 Assert-File $uiExecutable "Staged UI executable"
 Assert-File $runtimeExecutable "Staged Runtime executable"
+Assert-File $tunnelClientExecutable "Staged Tunnel client executable"
+Assert-File $cloudflaredExecutable "Staged cloudflared executable"
 Assert-File $manifestPath "Staged distribution manifest"
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
@@ -42,6 +46,12 @@ $appVersion = Get-CargoPackageVersion (Join-Path $repositoryRoot "ui\src-tauri\C
 $runtimeVersion = Get-CargoPackageVersion (Join-Path $repositoryRoot "runtime\Cargo.toml")
 if ($manifest.app_version -ne $appVersion -or $manifest.runtime_version -ne $runtimeVersion) {
     throw "Staged distribution manifest versions do not match Cargo package versions."
+}
+if ($manifest.distribution_schema_version -ne 2 -or
+    $manifest.tunnel.version -ne "0.0.13" -or
+    $manifest.tunnel.relative_path -ne "tunnel/tunnel-client.exe" -or
+    $manifest.tunnel.cloudflared_relative_path -ne "tunnel/cloudflared.exe") {
+    throw "Staged distribution manifest does not describe the complete Tunnel payload."
 }
 if ($manifest.runtime.relative_path -ne "runtime/chatgpt-harness-runtime.exe") {
     throw "Staged distribution manifest does not use the M9-B Runtime path."
@@ -70,6 +80,6 @@ if ($unexpected) {
 
 Write-Output "Verified NSIS installer: $bundlePath"
 Write-Output "Verified payload source: $stagingDirectory"
-Write-Output "Verified payload layout: chatgpt-harness-ui.exe, runtime/chatgpt-harness-runtime.exe, distribution.json"
+Write-Output "Verified payload layout: chatgpt-harness-ui.exe, runtime/chatgpt-harness-runtime.exe, tunnel/tunnel-client.exe, tunnel/cloudflared.exe, distribution.json"
 Write-Output "Verified version: $appVersion"
 

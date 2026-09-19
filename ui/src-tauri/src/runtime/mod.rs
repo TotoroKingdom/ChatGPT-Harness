@@ -1,6 +1,6 @@
 mod control_read;
 pub(crate) mod discovery;
-mod manifest;
+pub(crate) mod manifest;
 use harness_control_protocol::{
     ActivityEvent, ActivityListParams, ActivityListResult, ActivitySubscribeParams,
     ActivitySubscribeResult, AppConfig, ApprovalsListParams, ApprovalsListResult,

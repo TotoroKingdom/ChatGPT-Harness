@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repositoryRoot = (Resolve-Path (Join-Path $scriptDirectory "..\..")).Path
 $targetDirectory = Join-Path $repositoryRoot "target\release"
+$tunnelPackageDirectory = Join-Path $repositoryRoot "tunnel-client-v0.0.13-windows-amd64"
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repositoryRoot "target-exe\distribution"
 }
@@ -36,6 +37,14 @@ try {
     Pop-Location
 }
 
+$tunnelClientSource = Join-Path $tunnelPackageDirectory "tunnel-client.exe"
+$cloudflaredSource = Join-Path $tunnelPackageDirectory "cloudflared.exe"
+if (-not (Test-Path -LiteralPath $tunnelClientSource -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $cloudflaredSource -PathType Leaf)) {
+    throw "The bundled Tunnel package is incomplete."
+}
+$tunnelVersion = "0.0.13"
+
 $runtimeExecutable = Join-Path $targetDirectory "chatgpt-harness-runtime.exe"
 if (-not (Test-Path -LiteralPath $runtimeExecutable -PathType Leaf)) {
     throw "Required Runtime release executable was not produced."
@@ -54,15 +63,22 @@ $protocolVersion = [int]$protocolMatch.Groups[1].Value
 
 $stagingPath = Join-Path (Split-Path -Parent $outputPath) (".distribution-staging-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingPath "runtime") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stagingPath "tunnel") | Out-Null
 try {
     Copy-Item -LiteralPath $runtimeExecutable -Destination (Join-Path $stagingPath "runtime\chatgpt-harness-runtime.exe")
+    Copy-Item -Path (Join-Path $tunnelPackageDirectory "*") -Destination (Join-Path $stagingPath "tunnel") -Recurse -Force
     $manifest = [ordered]@{
-        distribution_schema_version = 1
+        distribution_schema_version = 2
         distribution_id = "chatgpt-harness"
         app_version = $appVersion
         runtime_version = $runtimeVersion
         protocol_version = $protocolVersion
         runtime = [ordered]@{ relative_path = "runtime/chatgpt-harness-runtime.exe" }
+        tunnel = [ordered]@{
+            version = $tunnelVersion
+            relative_path = "tunnel/tunnel-client.exe"
+            cloudflared_relative_path = "tunnel/cloudflared.exe"
+        }
     }
     $json = $manifest | ConvertTo-Json -Depth 4
     [IO.File]::WriteAllText((Join-Path $stagingPath "distribution.json"), $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
@@ -95,8 +111,12 @@ Copy-Item -LiteralPath $uiExecutable -Destination (Join-Path $outputPath "chatgp
 
 $manifestPath = Join-Path $outputPath "distribution.json"
 $runtimePath = Join-Path $outputPath "runtime\chatgpt-harness-runtime.exe"
+$tunnelClientPath = Join-Path $outputPath "tunnel\tunnel-client.exe"
+$cloudflaredPath = Join-Path $outputPath "tunnel\cloudflared.exe"
 if (-not (Test-Path -LiteralPath (Join-Path $outputPath "chatgpt-harness-ui.exe") -PathType Leaf) -or
     -not (Test-Path -LiteralPath $runtimePath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $tunnelClientPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $cloudflaredPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "Distribution staging validation failed."
 }
