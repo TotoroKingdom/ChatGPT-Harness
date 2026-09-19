@@ -5,8 +5,9 @@ use harness_control_protocol::{
     ActivityEvent, ActivityListParams, ActivityListResult, ActivitySubscribeParams,
     ActivitySubscribeResult, AppConfig, ApprovalsListParams, ApprovalsListResult,
     ApprovalsResolveParams, ClientInfo, DiagnosticRun, InitializeParams, InitializeResult,
-    PoliciesListResult, RpcMessage, RpcNotification, RpcRequest, RuntimeConfigSnapshot,
-    RuntimeLimits, RuntimeState, RuntimeStopResult, ToolsListResult, PROTOCOL_VERSION,
+    McpEndpointResult, PoliciesListResult, RpcMessage, RpcNotification, RpcRequest,
+    RuntimeConfigSnapshot, RuntimeLimits, RuntimeState, RuntimeStopResult, ToolsListResult,
+    PROTOCOL_VERSION,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -173,6 +174,7 @@ struct RuntimeProcess {
     child: Arc<Mutex<Child>>,
     identity: Arc<Mutex<RuntimeProcessIdentity>>,
     expected_runtime_version: String,
+    mcp_endpoint: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone)]
@@ -185,6 +187,7 @@ struct RuntimeProcessRef {
     child: Arc<Mutex<Child>>,
     identity: Arc<Mutex<RuntimeProcessIdentity>>,
     expected_runtime_version: String,
+    mcp_endpoint: Arc<Mutex<Option<String>>>,
 }
 
 struct SupervisorInner {
@@ -363,6 +366,19 @@ impl RuntimeSupervisor {
         } else {
             Err(SupervisorError::disconnected("Runtime is not running."))
         }
+    }
+
+    pub(crate) fn mcp_endpoint(&self) -> Result<String, SupervisorError> {
+        let process = self
+            .process()
+            .ok_or_else(|| SupervisorError::disconnected("Runtime is not connected."))?;
+        let endpoint = process
+            .mcp_endpoint
+            .lock()
+            .map_err(|_| SupervisorError::disconnected("Runtime endpoint state unavailable."))?
+            .clone();
+        endpoint
+            .ok_or_else(|| SupervisorError::disconnected("Runtime MCP endpoint is unavailable."))
     }
 
     pub fn stop<R: Runtime>(
@@ -548,6 +564,12 @@ impl RuntimeSupervisor {
             identity.runtime_version = result.server_info.version;
         }
         self.notify_on_process(process, "initialized", json!({}))?;
+        let endpoint: McpEndpointResult =
+            self.request_on_process(process, "mcp.endpoint.get", json!({}))?;
+        validate_mcp_endpoint(&endpoint.url)?;
+        if let Ok(mut active_endpoint) = process.mcp_endpoint.lock() {
+            *active_endpoint = Some(endpoint.url);
+        }
         self.request_on_process(process, "runtime.status", json!({}))
     }
 
@@ -622,6 +644,7 @@ impl RuntimeSupervisor {
             workspace: config.workspace.root_path.clone(),
             config_revision: config.config_revision.get().to_string(),
         }));
+        let mcp_endpoint = Arc::new(Mutex::new(None));
         #[cfg(test)]
         let protocol_on_stderr = self
             .test_command
@@ -645,6 +668,7 @@ impl RuntimeSupervisor {
             child,
             identity,
             expected_runtime_version,
+            mcp_endpoint,
         })
     }
 
@@ -853,7 +877,26 @@ fn runtime_process_ref(process: &RuntimeProcess) -> RuntimeProcessRef {
         child: process.child.clone(),
         identity: process.identity.clone(),
         expected_runtime_version: process.expected_runtime_version.clone(),
+        mcp_endpoint: process.mcp_endpoint.clone(),
     }
+}
+
+fn validate_mcp_endpoint(url: &str) -> Result<(), SupervisorError> {
+    let authority_and_path = url.strip_prefix("http://").ok_or_else(|| {
+        SupervisorError::disconnected("Runtime MCP endpoint must use loopback HTTP.")
+    })?;
+    let (authority, path) = authority_and_path
+        .split_once('/')
+        .ok_or_else(|| SupervisorError::disconnected("Runtime MCP endpoint path is invalid."))?;
+    let address: std::net::SocketAddr = authority
+        .parse()
+        .map_err(|_| SupervisorError::disconnected("Runtime MCP endpoint authority is invalid."))?;
+    if !address.ip().is_loopback() || address.port() == 0 || path != "mcp" {
+        return Err(SupervisorError::disconnected(
+            "Runtime MCP endpoint must be a loopback /mcp URL.",
+        ));
+    }
+    Ok(())
 }
 
 fn process_is_alive(process: &RuntimeProcess) -> bool {
@@ -1058,6 +1101,13 @@ fn transition_process_exit(
             .clone()
             .or_else(|| Some(SupervisorError::crashed(status)))
     };
+    if let Some(process) = supervisor.process.as_ref() {
+        if process.generation == generation {
+            if let Ok(mut endpoint) = process.mcp_endpoint.lock() {
+                *endpoint = None;
+            }
+        }
+    }
     supervisor.process = None;
     supervisor.active_generation = None;
     supervisor.process_status = RuntimeProcessStatus {
@@ -1261,6 +1311,15 @@ mod tests {
                         std::process::exit(17);
                     }
                 }
+                RpcMessage::Request(request) if request.method == "mcp.endpoint.get" => {
+                    write_fixture_result(
+                        &mut output,
+                        request.id,
+                        McpEndpointResult {
+                            url: "http://127.0.0.1:39001/mcp".into(),
+                        },
+                    );
+                }
                 RpcMessage::Request(request) if request.method == "runtime.stop" => {
                     write_fixture_result(
                         &mut output,
@@ -1422,5 +1481,23 @@ mod tests {
             RuntimeProcessPhase::Stopped
         );
         assert!(supervisor.identity().is_none());
+    }
+
+    #[test]
+    fn mcp_endpoint_validation_accepts_only_loopback_mcp_urls() {
+        assert!(validate_mcp_endpoint("http://127.0.0.1:39001/mcp").is_ok());
+        for invalid in [
+            "https://127.0.0.1:39001/mcp",
+            "http://0.0.0.0:39001/mcp",
+            "http://192.0.2.1:39001/mcp",
+            "http://127.0.0.1:39001/other",
+            "http://127.0.0.1:0/mcp",
+            "not-a-url",
+        ] {
+            assert!(
+                validate_mcp_endpoint(invalid).is_err(),
+                "accepted {invalid}"
+            );
+        }
     }
 }

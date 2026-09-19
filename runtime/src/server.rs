@@ -6,8 +6,9 @@ use harness_control_protocol::{
     error_codes, ActivityEvent, ActivityListParams, ActivityListResult, ActivitySubscribeParams,
     ActivitySubscribeResult, ApprovalsListResult, ApprovalsResolveParams, DiagnosticCheck,
     DiagnosticRun, DiagnosticStatus, EmptyParams, InitializeParams, InitializeResult,
-    MachineErrorCode, PoliciesListResult, RpcError, RpcErrorData, RpcErrorResponse, RpcMessage,
-    RpcNotification, RpcRequest, RpcResponse, RuntimeStopResult, ToolsListResult, PROTOCOL_VERSION,
+    MachineErrorCode, McpEndpointResult, PoliciesListResult, RpcError, RpcErrorData,
+    RpcErrorResponse, RpcMessage, RpcNotification, RpcRequest, RpcResponse, RuntimeStopResult,
+    ToolsListResult, PROTOCOL_VERSION,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -256,6 +257,24 @@ fn handle_request<W: Write>(
                 Err(error) => return write_invalid_params(output, id, error),
             };
             write_result(output, id, core.status().expect("initialized state exists"))?;
+            Ok(false)
+        }
+        "mcp.endpoint.get" => {
+            let _: EmptyParams = match params_or_default(&request.params) {
+                Ok(value) => value,
+                Err(error) => return write_invalid_params(output, id, error),
+            };
+            let Some(url) = mcp_service.endpoint_url() else {
+                write_error(
+                    output,
+                    id,
+                    RUNTIME_NOT_READY_ERROR,
+                    MachineErrorCode::RuntimeNotReady,
+                    "Runtime MCP endpoint is not active.",
+                )?;
+                return Ok(false);
+            };
+            write_result(output, id, McpEndpointResult { url: url.into() })?;
             Ok(false)
         }
         "runtime.stop" => {
@@ -686,6 +705,28 @@ mod tests {
             panic!("expected stop response");
         };
         assert_eq!(stop.result, json!({ "accepted": true }));
+    }
+
+    #[test]
+    fn endpoint_rpc_returns_the_active_loopback_mcp_url() {
+        let workspace = TestWorkspace::new();
+        let output = run_lines(&[
+            request(
+                "initialize",
+                "initialize",
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
+            ),
+            notification("initialized"),
+            request("endpoint", "mcp.endpoint.get", json!({})),
+            request("stop", "runtime.stop", json!({})),
+        ]);
+        let RpcMessage::Response(endpoint) = &output[1] else {
+            panic!("expected endpoint response");
+        };
+        let endpoint: harness_control_protocol::McpEndpointResult =
+            serde_json::from_value(endpoint.result.clone()).expect("endpoint result");
+        assert!(endpoint.url.starts_with("http://127.0.0.1:"));
+        assert!(endpoint.url.ends_with("/mcp"));
     }
 
     #[test]

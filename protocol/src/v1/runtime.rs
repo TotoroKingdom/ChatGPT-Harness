@@ -56,6 +56,12 @@ pub type RuntimeStopParams = super::common::EmptyParams;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct McpEndpointResult {
+    pub url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeStopResult {
     pub accepted: bool,
 }

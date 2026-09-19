@@ -11,6 +11,7 @@ pub const ACTIVITY_SUBSCRIBE: &str = "activity.subscribe";
 pub const APPROVALS_LIST: &str = "approvals.list";
 pub const APPROVALS_RESOLVE: &str = "approvals.resolve";
 pub const DIAGNOSTICS_RUN: &str = "diagnostics.run";
+pub const MCP_ENDPOINT_GET: &str = "mcp.endpoint.get";
 
 pub const INITIALIZED: &str = "initialized";
 pub const ACTIVITY_EVENT: &str = "activity.event";
@@ -26,6 +27,7 @@ pub const REQUEST_METHODS: &[&str] = &[
     APPROVALS_LIST,
     APPROVALS_RESOLVE,
     DIAGNOSTICS_RUN,
+    MCP_ENDPOINT_GET,
     DIAGNOSTICS_GET,
     ACTIVITY_SNAPSHOT,
     EFFECTIVE_TOOLS_GET,

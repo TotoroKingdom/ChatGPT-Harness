@@ -155,6 +155,7 @@ fn control_method_registry_is_exact() {
             "approvals.list",
             "approvals.resolve",
             "diagnostics.run",
+            "mcp.endpoint.get",
             "control.diagnostics.get",
             "control.activity.snapshot",
             "control.effective_tools.get",

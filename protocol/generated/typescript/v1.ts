@@ -40,6 +40,7 @@ export type RuntimeState = { runtimeId: string,
  */
 startedAt: string, lifecycle: RuntimeLifecycle, readiness: RuntimeReadiness, configRevision: string, activeWorkspace: string, securityMode: SecurityMode, exposedToolCatalog: Array<ToolDescriptor>, activeRequests: number, pendingApprovals: number, runningExecutions: number, lastError?: RuntimeErrorSummary, };
 export type RuntimeStopResult = { accepted: boolean, };
+export type McpEndpointResult = { url: string, };
 export type ToolReadiness = "ready" | "unavailable";
 export type RiskLevel = "low" | "medium" | "high";
 export type ToolDescriptor = { name: string, description: string, implemented: boolean, enabled: boolean, exposed: boolean, effectivePolicy: PolicyDecision, scope: string, readiness: ToolReadiness, riskLevel: RiskLevel, };

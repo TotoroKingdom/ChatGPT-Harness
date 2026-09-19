@@ -1,0 +1,14 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "url"
+  ],
+  "title": "McpEndpointResult",
+  "type": "object"
+}
