@@ -1,6 +1,6 @@
 mod discovery;
 
-pub(crate) use discovery::{resolve_tunnel, ResolvedTunnel, TunnelDistributionMode};
+pub(crate) use discovery::resolve_tunnel;
 
 use chrono::{SecondsFormat, Utc};
 use serde::Serialize;
@@ -176,6 +176,18 @@ pub struct TunnelProcessManager {
     test_command: Option<TestTunnelCommand>,
     #[cfg(test)]
     stop_timeout: Duration,
+}
+
+impl Clone for TunnelProcessManager {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            #[cfg(test)]
+            test_command: self.test_command.clone(),
+            #[cfg(test)]
+            stop_timeout: self.stop_timeout,
+        }
+    }
 }
 
 #[cfg(test)]

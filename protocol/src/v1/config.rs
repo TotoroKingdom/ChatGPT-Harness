@@ -70,8 +70,13 @@ pub enum StartEligibilityStatus {
     SetupRequired,
     ConfigurationInvalid,
     RuntimeDistributionInvalid,
+    TunnelIdRequired,
+    ApiKeyRequired,
+    TunnelDistributionInvalid,
     ReadyToStart,
     RuntimeAlreadyRunning,
+    HarnessAlreadyRunning,
+    LifecycleConflict,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

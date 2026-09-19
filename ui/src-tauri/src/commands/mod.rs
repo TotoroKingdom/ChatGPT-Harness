@@ -3,8 +3,10 @@ pub use control_read::*;
 
 use crate::{
     config::{ConfigError, ConfigMetadata, ConfigStore, CURRENT_SCHEMA_VERSION},
+    harness::{HarnessController, HarnessStatus},
     runtime::{RuntimeProcessStatus, RuntimeSupervisor, SupervisorError},
     secrets::{api_key_ref, SecretStore},
+    tunnel::TunnelProcessError,
 };
 use chrono::{SecondsFormat, Utc};
 use harness_control_protocol::{
@@ -38,6 +40,15 @@ impl From<ConfigError> for ControlError {
         Self {
             code: error.code().into(),
             message: error.message(),
+        }
+    }
+}
+
+impl From<TunnelProcessError> for ControlError {
+    fn from(error: TunnelProcessError) -> Self {
+        Self {
+            code: error.code,
+            message: error.message,
         }
     }
 }
@@ -532,6 +543,46 @@ fn validate_security(config: &AppConfig) -> Result<(), ControlError> {
 
 fn current_timestamp() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+#[tauri::command]
+pub fn harness_start_eligibility(
+    app: AppHandle,
+    controller: State<'_, HarnessController>,
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<StartEligibility, ControlError> {
+    controller.start_eligibility(&app, &state)
+}
+
+#[tauri::command]
+pub fn harness_start(
+    app: AppHandle,
+    controller: State<'_, HarnessController>,
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<HarnessStatus, ControlError> {
+    controller.start(&app, &state)
+}
+
+#[tauri::command]
+pub fn harness_status(controller: State<'_, HarnessController>) -> HarnessStatus {
+    controller.status()
+}
+
+#[tauri::command]
+pub fn harness_stop(
+    app: AppHandle,
+    controller: State<'_, HarnessController>,
+) -> Result<HarnessStatus, ControlError> {
+    controller.stop(&app)
+}
+
+#[tauri::command]
+pub fn harness_restart(
+    app: AppHandle,
+    controller: State<'_, HarnessController>,
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<HarnessStatus, ControlError> {
+    controller.restart(&app, &state)
 }
 
 #[cfg(test)]

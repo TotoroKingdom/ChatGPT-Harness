@@ -27,6 +27,15 @@ trait ProcessEventSink: Send + Sync {
     fn emit_activity(&self, event: ActivityEvent);
 }
 
+pub(crate) trait RuntimeEventSink: Send + Sync {
+    fn runtime_event(
+        &self,
+        generation: uuid::Uuid,
+        phase: RuntimeProcessPhase,
+        error: Option<&SupervisorError>,
+    );
+}
+
 struct TauriProcessEventSink<R: Runtime> {
     app: AppHandle<R>,
 }
@@ -195,6 +204,7 @@ struct SupervisorInner {
     process_status: RuntimeProcessStatus,
     active_generation: Option<uuid::Uuid>,
     last_identity: Option<RuntimeProcessIdentity>,
+    observer: Option<Arc<dyn RuntimeEventSink>>,
 }
 
 pub struct RuntimeSupervisor {
@@ -203,6 +213,18 @@ pub struct RuntimeSupervisor {
     test_command: Option<TestRuntimeCommand>,
     #[cfg(test)]
     stop_timeout: Duration,
+}
+
+impl Clone for RuntimeSupervisor {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            #[cfg(test)]
+            test_command: self.test_command.clone(),
+            #[cfg(test)]
+            stop_timeout: self.stop_timeout,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -231,12 +253,26 @@ impl RuntimeSupervisor {
                 },
                 active_generation: None,
                 last_identity: None,
+                observer: None,
             })),
             #[cfg(test)]
             test_command: None,
             #[cfg(test)]
             stop_timeout: STOP_TIMEOUT,
         }
+    }
+
+    pub(crate) fn set_event_sink(&self, sink: Arc<dyn RuntimeEventSink>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.observer = Some(sink);
+        }
+    }
+
+    pub(crate) fn active_generation(&self) -> Option<uuid::Uuid> {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.active_generation)
     }
 
     pub fn start<R: Runtime>(
@@ -292,12 +328,14 @@ impl RuntimeSupervisor {
             generation
         };
         sink.emit_process(RuntimeProcessPhase::Starting, None);
+        self.notify_observer(generation, RuntimeProcessPhase::Starting, None);
 
         let process = match self.spawn_process(sink.clone(), config, generation) {
             Ok(process) => process,
             Err(error) => {
                 self.fail_start(generation, error.clone());
                 sink.emit_process(RuntimeProcessPhase::Stopped, Some(&error));
+                self.notify_observer(generation, RuntimeProcessPhase::Stopped, Some(&error));
                 return Err(error);
             }
         };
@@ -348,11 +386,13 @@ impl RuntimeSupervisor {
                     ));
                 }
                 sink.emit_process(RuntimeProcessPhase::Running, None);
+                self.notify_observer(generation, RuntimeProcessPhase::Running, None);
                 Ok(state)
             }
             Err(error) => {
                 if self.abort_start(generation, error.clone()) {
                     sink.emit_process(RuntimeProcessPhase::Stopped, Some(&error));
+                    self.notify_observer(generation, RuntimeProcessPhase::Stopped, Some(&error));
                 }
                 Err(error)
             }
@@ -425,6 +465,7 @@ impl RuntimeSupervisor {
             }
         };
         sink.emit_process(RuntimeProcessPhase::Stopping, None);
+        self.notify_observer(generation, RuntimeProcessPhase::Stopping, None);
 
         let stop_result = self.request_on_process(&process, "runtime.stop", json!({}));
         let stop_timeout = self.stop_timeout();
@@ -441,6 +482,7 @@ impl RuntimeSupervisor {
         if let Err(error) = kill_and_wait(&process, stop_timeout) {
             self.mark_crashed(generation, error.clone());
             sink.emit_process(RuntimeProcessPhase::Crashed, Some(&error));
+            self.notify_observer(generation, RuntimeProcessPhase::Crashed, Some(&error));
             return Err(error);
         }
         Ok(RuntimeStopResult { accepted: true })
@@ -865,6 +907,19 @@ impl RuntimeSupervisor {
             }
         }
     }
+
+    fn notify_observer(
+        &self,
+        generation: uuid::Uuid,
+        phase: RuntimeProcessPhase,
+        error: Option<&SupervisorError>,
+    ) {
+        if let Ok(inner) = self.inner.lock() {
+            if let Some(observer) = &inner.observer {
+                observer.runtime_event(generation, phase, error);
+            }
+        }
+    }
 }
 
 fn runtime_process_ref(process: &RuntimeProcess) -> RuntimeProcessRef {
@@ -1068,6 +1123,11 @@ fn spawn_waiter(
         });
         if let Some((phase, error)) = transition {
             sink.emit_process(phase, error.as_ref());
+            if let Ok(supervisor) = inner.lock() {
+                if let Some(observer) = &supervisor.observer {
+                    observer.runtime_event(generation, phase, error.as_ref());
+                }
+            }
         }
         let (lock, cvar) = &*exited;
         if let Ok(mut completed) = lock.lock() {
@@ -1461,6 +1521,7 @@ mod tests {
             },
             active_generation: Some(active_generation),
             last_identity: None,
+            observer: None,
         };
 
         assert!(transition_process_exit(&mut inner, stale_generation, None, None).is_none());
