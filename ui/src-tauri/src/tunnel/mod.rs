@@ -304,6 +304,15 @@ impl TunnelProcessManager {
                 return Err(error);
             }
         };
+        #[cfg(windows)]
+        if let Err(error) = resume_suspended_process(&child) {
+            let mut child = child;
+            let _ = child.kill();
+            let _ = child.wait();
+            remove_health_file(&health_url_file);
+            self.set_failed(None, error.clone());
+            return Err(error);
+        }
 
         let instance = TunnelInstance {
             instance_id,
@@ -533,7 +542,8 @@ impl TunnelProcessManager {
             use std::os::windows::process::CommandExt;
             const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+            const CREATE_SUSPENDED: u32 = 0x0000_0004;
+            command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_SUSPENDED);
         }
         command.spawn().map_err(|error| {
             TunnelProcessError::spawn(format!(
@@ -1192,6 +1202,27 @@ extern "system" {
     fn AssignProcessToJobObject(job: *mut std::ffi::c_void, process: *mut std::ffi::c_void) -> i32;
     fn TerminateJobObject(job: *mut std::ffi::c_void, exit_code: u32) -> i32;
     fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+    fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> *mut std::ffi::c_void;
+    fn Thread32First(snapshot: *mut std::ffi::c_void, entry: *mut ThreadEntry32) -> i32;
+    fn Thread32Next(snapshot: *mut std::ffi::c_void, entry: *mut ThreadEntry32) -> i32;
+    fn OpenThread(
+        desired_access: u32,
+        inherit_handle: i32,
+        thread_id: u32,
+    ) -> *mut std::ffi::c_void;
+    fn ResumeThread(thread: *mut std::ffi::c_void) -> u32;
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct ThreadEntry32 {
+    size: u32,
+    usage: u32,
+    thread_id: u32,
+    owner_process_id: u32,
+    base_priority: i32,
+    delta_priority: i32,
+    flags: u32,
 }
 
 #[cfg(windows)]
@@ -1261,6 +1292,52 @@ fn terminate_job(job: &WindowsJobObject) -> Result<(), String> {
         Err(std::io::Error::last_os_error().to_string())
     } else {
         Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn resume_suspended_process(child: &Child) -> Result<(), TunnelProcessError> {
+    const TH32CS_SNAPTHREAD: u32 = 0x0000_0004;
+    const THREAD_SUSPEND_RESUME: u32 = 0x0002;
+    const INVALID_HANDLE_VALUE: *mut std::ffi::c_void = -1isize as *mut std::ffi::c_void;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE || snapshot.is_null() {
+        return Err(TunnelProcessError::spawn(
+            "Could not enumerate the suspended Tunnel process thread.",
+        ));
+    }
+    let mut entry = ThreadEntry32 {
+        size: std::mem::size_of::<ThreadEntry32>() as u32,
+        usage: 0,
+        thread_id: 0,
+        owner_process_id: 0,
+        base_priority: 0,
+        delta_priority: 0,
+        flags: 0,
+    };
+    let mut resumed = false;
+    let mut found = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+    while found {
+        if entry.owner_process_id == child.id() {
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.thread_id) };
+            if !thread.is_null() {
+                let result = unsafe { ResumeThread(thread) };
+                unsafe { CloseHandle(thread) };
+                if result != u32::MAX {
+                    resumed = true;
+                    break;
+                }
+            }
+        }
+        found = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+    }
+    unsafe { CloseHandle(snapshot) };
+    if resumed {
+        Ok(())
+    } else {
+        Err(TunnelProcessError::spawn(
+            "Could not resume the managed Tunnel process.",
+        ))
     }
 }
 
