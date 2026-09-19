@@ -4,6 +4,7 @@ use std::sync::Mutex;
 
 pub trait SecretStore: Send + Sync {
     fn set(&self, key: &str, value: &str) -> Result<(), String>;
+    fn get(&self, key: &str) -> Result<Option<String>, String>;
     fn exists(&self, key: &str) -> Result<bool, String>;
     fn delete(&self, key: &str) -> Result<(), String>;
 }
@@ -19,6 +20,14 @@ impl SecretStore for MemorySecretStore {
             .map_err(|e| e.to_string())?
             .insert(k.into(), v.into());
         Ok(())
+    }
+    fn get(&self, k: &str) -> Result<Option<String>, String> {
+        Ok(self
+            .values
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get(k)
+            .cloned())
     }
     fn exists(&self, k: &str) -> Result<bool, String> {
         Ok(self
@@ -42,6 +51,16 @@ impl SecretStore for WindowsCredentialStore {
             .map_err(|e| e.to_string())?
             .set_password(v)
             .map_err(|e| e.to_string())
+    }
+    fn get(&self, k: &str) -> Result<Option<String>, String> {
+        match keyring::Entry::new("ChatGPT-Harness", k)
+            .map_err(|e| e.to_string())?
+            .get_password()
+        {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
     }
     fn exists(&self, k: &str) -> Result<bool, String> {
         match keyring::Entry::new("ChatGPT-Harness", k)
@@ -84,10 +103,19 @@ mod tests {
         let store = MemorySecretStore::default();
         store.set("api-key", "first-secret").unwrap();
         assert!(store.exists("api-key").unwrap());
+        assert_eq!(
+            store.get("api-key").unwrap().as_deref(),
+            Some("first-secret")
+        );
         store.set("api-key", "replacement-secret").unwrap();
         assert!(store.exists("api-key").unwrap());
+        assert_eq!(
+            store.get("api-key").unwrap().as_deref(),
+            Some("replacement-secret")
+        );
         store.delete("api-key").unwrap();
         assert!(!store.exists("api-key").unwrap());
+        assert_eq!(store.get("api-key").unwrap(), None);
     }
 
     #[test]

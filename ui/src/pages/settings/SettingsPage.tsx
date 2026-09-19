@@ -64,9 +64,9 @@ export function SettingsPage() {
       apiKey.trim() || undefined,
     );
     setSaving(false);
+    setApiKey("");
     if (!result.ok) return setError(result.error?.message ?? "Could not save configuration.");
 
-    setApiKey("");
     setReplacingApiKey(false);
     setDirty(false);
     setMessage("Changes saved.");
