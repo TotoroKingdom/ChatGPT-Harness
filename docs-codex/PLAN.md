@@ -80,6 +80,13 @@ If the bundled version does not support the V2 contract:
 
 Do not proceed with a launch implementation that cannot prove readiness.
 
+The repository preflight has confirmed the bundled `tunnel-client` 0.0.13
+supports Tunnel ID, non-literal API key references, MCP server URL, loopback
+health binding, health URL-file discovery, and `/readyz`. Record the exact
+documented invocation and its machine-readable readiness semantics in the
+implementation tests. Do not infer flags or treat a successful process spawn,
+health listener, or PID as proof of Tunnel Ready.
+
 ## 5. Add Runtime MCP Endpoint Handoff
 
 ### Protocol
@@ -147,6 +154,13 @@ Expected behavior:
 ```text
 get(key) -> value or not-found/error
 ```
+
+The Settings input is the only short-lived UI exception for the raw API key.
+The allowed path is `Settings → Tauri → SecretStore → OS Credential Storage`.
+After submission, the raw value must not remain in React Provider state, global
+state, AppConfig, RuntimeConfigSnapshot, Runtime, any IPC response, Activity,
+logs, or errors. Tauri may materialize it only for the controlled child launch
+environment and must clear the input after the save operation completes.
 
 Implement for:
 
@@ -244,7 +258,18 @@ If output is needed for diagnostics/tests:
 
 Preserve existing single-owner semantics.
 
-Strengthen shutdown verification so managed stop does not leave owned Tunnel/Cloudflared descendants running.
+On Windows, create a per-session Job Object with kill-on-close semantics and
+assign `tunnel-client.exe` to it before the child can create owned
+descendants. Keep the Job Object handle tied to the Tunnel instance/generation
+and outside serialized status objects.
+
+Normal stop requests graceful termination of `tunnel-client.exe`, waits for
+the owned process tree, and escalates to Job Object termination after the
+bounded timeout. Verify that `tunnel-client.exe`, `cloudflared.exe`, and all
+other descendants owned by that Job Object have exited before reporting
+cleanup complete.
+
+Managed stop must not leave owned Tunnel/Cloudflared descendants running.
 
 Do not kill unrelated processes by name.
 
@@ -258,7 +283,8 @@ Retain existing lifecycle tests and add tests for:
 - duplicate start is rejected;
 - stop is instance-safe;
 - crash state remains observable;
-- owned descendant cleanup behavior is verified to the extent feasible in process fixtures.
+- owned descendant cleanup behavior is verified with a Windows process fixture
+  and Job Object ownership assertions.
 
 ## 9. Add Tunnel Readiness Discovery and Monitoring
 
@@ -270,10 +296,16 @@ After spawn:
 
 1. wait for health URL discovery with a bounded timeout;
 2. require loopback health URL;
-3. probe authoritative readiness (`/readyz` or verified equivalent);
-4. only then mark Tunnel product state `ready`.
+3. use the documented tunnel-client health contract, including the
+   control-plane-poll requirement where supported;
+4. require evidence that the configured MCP target is reachable;
+5. only then mark Tunnel product state `ready`.
 
 A spawned process that never becomes ready is a startup failure.
+
+Tunnel Ready is not equivalent to process existence, a listening health port,
+or a successful control-plane process start. The exact 0.0.13 command/endpoint
+semantics must be captured in tests rather than guessed by the implementation.
 
 ### Runtime monitoring
 
@@ -337,6 +369,11 @@ last structured error
 
 A Harness session identity should prevent stale callbacks from an earlier Runtime/Tunnel generation mutating a newer session.
 
+Lifecycle commands must be serialized by the HarnessController. The controller
+is the only lifecycle state writer. Runtime and Tunnel watcher events must be
+delivered through the controller with the active session identity and the
+component generation/instance identity; stale events are ignored.
+
 ### Lifecycle observation
 
 Wire existing Runtime waiter and Tunnel watcher events into the Harness controller/shared lifecycle state.
@@ -365,6 +402,7 @@ Validate:
 - Tunnel ID;
 - API key reference;
 - API key retrieval;
+- reject an already-running Runtime that is not owned by the active Harness session;
 - lifecycle conflicts.
 
 Return structured statuses/messages that the current Overview/first-run UI can render.
@@ -406,7 +444,8 @@ Rollback must:
 - clear endpoint/session state;
 - remove temp health artifacts;
 - return a structured non-secret error;
-- leave Harness in deterministic error/stopped state according to the final implementation contract.
+- leave Harness in `error` with Runtime/Tunnel cleanup complete and a safe
+  structured `lastError`.
 
 Write integration tests for failure injection at every major boundary.
 
@@ -428,7 +467,9 @@ Always make a best effort to stop both.
 
 Clear active endpoint/session state only after shutdown has converged.
 
-Make repeated stop safe.
+Make repeated stop safe. A user-requested stop converges Harness to
+`stopped`; a failed start remains `error` until an explicit successful start
+or explicit stop clears the failed session.
 
 ### Restart
 
@@ -514,6 +555,10 @@ to call product-level Harness commands.
 
 Rehydrate from `harness_status`, not by reconstructing the complete product state from Runtime process status.
 
+Lifecycle state must come from the Harness status/event surface. React must not
+infer Harness, MCP, or Tunnel readiness from Runtime status or process
+existence.
+
 Continue loading Runtime tools/policies/activity/diagnostics through existing Runtime read APIs after Runtime is available.
 
 ### Overview
@@ -567,6 +612,11 @@ Example conceptual manifest:
 
 Exact schema may differ, but it must be explicit and validated.
 
+The Tunnel manifest section must identify the supported `tunnel-client` version,
+the Tunnel client relative path, and the `cloudflared` companion relative
+path. Staging must preserve the client metadata plus the applicable
+license/notice/SBOM artifacts needed by the installed product.
+
 ### `stage-distribution.ps1`
 
 Stage:
@@ -577,6 +627,7 @@ Stage:
 - Cloudflared companion;
 - required Tunnel package metadata;
 - notices/licenses;
+- applicable Tunnel SBOM/provenance artifacts;
 - updated distribution manifest.
 
 ### `tauri.conf.json`
@@ -635,6 +686,11 @@ npm run bundle:windows
 
 If new tests reveal existing unrelated failures, document them explicitly; do not silently disable tests.
 
+The V2-specific test gate must additionally cover transient API key handling,
+documented Tunnel readiness semantics, Windows Job Object descendant cleanup,
+rejection of Runtime ownership conflicts, serialized lifecycle commands, and
+stale session/generation callback suppression.
+
 ## 20. Real Development E2E
 
 With real credentials and the development build:
@@ -644,14 +700,16 @@ With real credentials and the development build:
 3. save Runtime API key;
 4. Start Harness;
 5. confirm UI shows Runtime/MCP/Tunnel/Harness Ready;
-6. configure/select the Tunnel in ChatGPT;
-7. confirm ChatGPT tool discovery;
-8. call `read_file`;
-9. call `glob`;
-10. verify WorkspaceGuard/Policy/Execution behavior;
-11. verify corresponding Activity in UI;
-12. Stop Harness;
-13. confirm Runtime/Tunnel/Cloudflared owned processes exit.
+6. confirm Tunnel Ready evidence includes control-plane connection, configured
+   MCP target reachability, and the authoritative tunnel-client health check;
+7. configure/select the Tunnel in ChatGPT;
+8. confirm ChatGPT tool discovery;
+9. call `read_file`;
+10. call `glob`;
+11. verify WorkspaceGuard/Policy/Execution behavior;
+12. verify corresponding Activity in UI;
+13. Stop Harness;
+14. confirm Runtime/Tunnel/Cloudflared owned processes exit.
 
 Do not mark E2E passed from local Runtime HTTP tests alone.
 
@@ -699,5 +757,10 @@ glob via ChatGPT                       PASS
 Activity visible                       PASS
 all required automated tests           PASS
 ```
+
+A completion report must also prove that no owned Tunnel/cloudflared
+descendants remain, no raw API key appears in errors/logs/IPC responses, and
+Tunnel Ready was based on the three required readiness conditions rather than
+process existence.
 
 A partially working chain must be reported as incomplete rather than redefining V2 readiness.

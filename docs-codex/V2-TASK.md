@@ -36,6 +36,25 @@ Do not use:
 
 The repository code is authoritative for existing behavior.
 
+The following lifecycle and security decisions are frozen for this task:
+
+- The Settings API key input is the only short-lived UI holding point for the
+  raw value. The submission path is `Settings → Tauri → SecretStore → OS
+  Credential Storage`; the raw value must not remain in Provider/global state,
+  AppConfig, Runtime config, Runtime, IPC responses, Activity, logs, or errors.
+- `Tunnel Process Running` is not `Tunnel Ready`, and `Tunnel Ready` is not
+  `Harness Ready`. Tunnel Ready requires control-plane connection, configured
+  MCP target reachability, and the authoritative documented tunnel-client
+  readiness check.
+- Startup failure ends in Harness `error`; user-requested stop ends in
+  Harness `stopped`.
+- Only a Runtime started by the active Harness session belongs to that
+  lifecycle. Existing Runtime processes are not adopted or bound to Tunnel.
+- Harness lifecycle commands are serialized and watcher callbacks are routed
+  through HarnessController with session/generation identity.
+- Windows Tunnel ownership uses a per-session Job Object; direct-child kill is
+  insufficient for cleanup.
+
 ------------------------------------------------------------------------
 
 # Core Goal
@@ -105,6 +124,11 @@ If the bundled client cannot satisfy the SPEC:
 
 Do not weaken the security contract.
 
+The repository preflight has confirmed tunnel-client 0.0.13 support for Tunnel
+ID, non-literal API key references, MCP URL, loopback health, health URL-file
+discovery, and `/readyz`. Record the exact documented invocation and readiness
+semantics in tests; do not guess flags or treat process existence as readiness.
+
 ------------------------------------------------------------------------
 
 # 2. Runtime MCP Endpoint Contract
@@ -148,7 +172,11 @@ Requirements:
 
 -   Windows Credential Manager implementation.
 -   Memory implementation for tests.
+-   Settings may hold the raw API key only transiently during submission.
+-   Submission path is Settings → Tauri → SecretStore → OS Credential Storage.
 -   No raw secret serialization.
+-   No raw API key in React Provider/global state, AppConfig, Runtime config,
+    Runtime, IPC responses, Activity, logs, or errors.
 -   No frontend secret retrieval API.
 -   No Runtime access to API key.
 -   No API key in logs/errors/activity.
@@ -210,6 +238,11 @@ Requirements:
 -   no raw API key in status;
 -   no raw API key in errors;
 -   child processes are owned and cleaned.
+-   On Windows, create a per-session Job Object with kill-on-close semantics
+    and assign tunnel-client before it can create owned descendants.
+-   Graceful stop must wait for the owned tree; timeout must terminate the Job
+    Object and verify tunnel-client/cloudflared descendants have exited.
+-   Do not kill unrelated processes by name.
 
 ------------------------------------------------------------------------
 
@@ -239,6 +272,10 @@ Support:
 -   process crash;
 -   cleanup.
 
+Tunnel Ready requires all three signals: control-plane connected, configured
+MCP target reachable, and authoritative documented tunnel-client readiness.
+PID existence, a spawned process, or a listening health port is insufficient.
+
 ------------------------------------------------------------------------
 
 # 7. Harness Controller
@@ -261,6 +298,11 @@ Harness owns:
 -   lifecycle state;
 -   session identity;
 -   last structured error.
+
+HarnessController is the only lifecycle state owner. Lifecycle commands are
+serialized. Runtime/Tunnel watcher callbacks must flow through the controller
+and carry session/generation identity so stale callbacks cannot mutate a newer
+Harness session.
 
 Do not duplicate Runtime/Tunnel ownership logic.
 
@@ -302,7 +344,8 @@ Rollback must:
 -   stop Runtime started by this session;
 -   clear endpoint/session state;
 -   remove temporary artifacts;
--   return structured non-secret errors.
+-   return structured non-secret errors;
+-   leave Harness in `error` with safe `lastError` after cleanup.
 
 ------------------------------------------------------------------------
 
@@ -330,6 +373,11 @@ Restart:
 
 Repeated stop must be safe.
 
+User-requested stop converges Harness to `stopped` only after Tunnel,
+cloudflared, and Runtime owned processes have exited and session state is
+cleared. A startup failure remains `error` until an explicit stop or
+successful restart changes it.
+
 ------------------------------------------------------------------------
 
 # 10. Crash Handling
@@ -350,6 +398,10 @@ Tunnel crash:
 -   explicit restart required.
 
 Prevent stale watcher events from modifying newer sessions.
+
+An already-running Runtime that was not started by the active Harness session
+must not be adopted, bound to Tunnel, or counted toward Harness Ready. The
+legacy `runtime_start` operation remains an internal/development capability.
 
 ------------------------------------------------------------------------
 
@@ -373,6 +425,10 @@ UI must show:
     Tunnel
 
 from authoritative state.
+
+Product lifecycle actions must use `harness_start`, `harness_stop`, and
+`harness_restart`. UI code must not derive Harness, MCP, or Tunnel lifecycle
+from Runtime status or process existence.
 
 Update:
 
@@ -417,8 +473,8 @@ Package:
     Runtime
     Tunnel client
     cloudflared
-    metadata
-    licenses
+    Tunnel metadata and manifest
+    licenses/notices/SBOM artifacts
 
 Installed build must run without source tree dependencies.
 
@@ -467,6 +523,11 @@ Before completion run:
     npm run distribution:stage
     npm run bundle:windows
 
+Automated validation must also cover transient API key boundaries, documented
+Tunnel Ready semantics, Windows Job Object descendant cleanup, Runtime
+ownership rejection, serialized lifecycle commands, and stale
+session/generation callback suppression.
+
 ------------------------------------------------------------------------
 
 # Real E2E Acceptance
@@ -493,6 +554,9 @@ Must verify:
     ↓
 
     Tunnel Ready
+
+    Tunnel Ready must have evidence of control-plane connection, configured MCP
+    target reachability, and the authoritative tunnel-client readiness check.
 
     ↓
 
@@ -556,6 +620,12 @@ Do not declare completion unless:
     ChatGPT glob                     PASS
     Activity visibility              PASS
     Automated tests                  PASS
+
+Completion also requires proof that no owned tunnel-client/cloudflared
+descendants remain after stop or failure, that no raw API key appears in
+errors, logs, IPC responses, or serialized state, and that Tunnel Ready was
+based on the three required readiness conditions rather than process
+existence.
 
 If any item is incomplete:
 

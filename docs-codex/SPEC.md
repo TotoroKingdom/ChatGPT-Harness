@@ -117,6 +117,13 @@ Tauri is the local control plane and owns:
 - Aggregated Runtime / MCP / Tunnel / Harness state.
 - Installed distribution discovery for Runtime and Tunnel.
 
+Harness ownership is session-scoped. Only a Runtime generation started by the
+active Harness start operation belongs to that Harness session. Tauri must not
+adopt an already-running Runtime, bind a Tunnel to it, or count it toward
+Harness Ready. The existing `runtime_start` operation may remain available as
+an internal/development capability, but the product lifecycle is owned by the
+Harness operations.
+
 ### Tunnel
 
 The managed `tunnel-client` process owns:
@@ -137,7 +144,9 @@ UI owns:
 - Display of real component state.
 - Display of Runtime diagnostics and execution Activity.
 
-UI must not receive the raw API key or the Runtime MCP endpoint URL.
+UI must not receive or retain the raw API key outside the transient Settings
+input submission described in the Secret Contract. UI must never receive the
+Runtime MCP endpoint URL.
 
 ## 6. Runtime MCP Endpoint Contract
 
@@ -194,13 +203,30 @@ delete(key)
 
 ### Security requirements
 
+The Settings API key input is the only permitted short-lived UI holding point
+for the raw value. The intended submission path is:
+
+```text
+Settings input
+    ↓
+Tauri save operation
+    ↓
+SecretStore
+    ↓
+OS Credential Storage
+```
+
+After submission, the raw value must not be retained in a React Provider,
+global/application state, or any persisted UI state. The input must be cleared
+after the save operation completes or fails.
+
 The raw Tunnel API key:
 
 - must not be written to `config.json`;
 - must not be placed in `AppConfig`;
 - must not enter `RuntimeConfigSnapshot`;
 - must not be sent to Runtime;
-- must not enter React state;
+- must not enter React Provider state, global state, or normal application state;
 - must not be returned by a Tauri command;
 - must not be emitted in Activity, diagnostics, error messages, stdout/stderr capture, or normal logs;
 - must not be passed as a literal command-line argument.
@@ -208,6 +234,11 @@ The raw Tunnel API key:
 For V2, Tauri may materialize the secret only long enough to launch the managed Tunnel process through a secret-reference mechanism supported by the bundled `tunnel-client`.
 
 The preferred launch contract is a **child-scoped environment value referenced by name from the Tunnel CLI**, so the raw key is not present in argv or persistent configuration.
+
+The environment variable name and its lifetime must be launch-scoped and must
+not be copied into product status, errors, diagnostics, or serialized launch
+objects. The controlled credential value exists only for the managed child
+launch and is not part of the Harness state payload.
 
 If the repository-bundled Tunnel client version cannot satisfy the required Tunnel ID, MCP server URL, secret-reference, and health/readiness contract, the bundled client must be upgraded as part of V2 rather than weakening the above requirements.
 
@@ -236,6 +267,12 @@ health URL discovery file
 
 Exact flags must be verified against the actual bundled binary before implementation.
 
+The repository-verified `tunnel-client` 0.0.13 supports the required semantic
+inputs: Tunnel ID, API key references using an environment variable or file
+reference, MCP server URL, loopback health binding, health URL-file discovery,
+and `/readyz`. The implementation must use the documented client contract and
+must not invent or infer unsupported flags or wire semantics.
+
 ### Launch rules
 
 - Only one managed Tunnel instance may exist.
@@ -247,6 +284,20 @@ Exact flags must be verified against the actual bundled binary before implementa
 - Temporary health-discovery artifacts must be removed on stop, startup failure, and normal cleanup.
 - Tunnel stdout/stderr must not be surfaced raw into user-visible or audit channels.
 - Managed shutdown must not leave owned `tunnel-client.exe` or `cloudflared.exe` descendants running.
+
+### Process ownership and shutdown
+
+On Windows, Tauri must create one process-ownership Job Object per managed
+Tunnel session and assign `tunnel-client.exe` to it before the child can create
+owned descendants. The Job Object must use kill-on-close semantics and remain
+associated with the Tunnel instance/generation, never with an unrelated
+process name.
+
+Normal stop first requests graceful termination of `tunnel-client.exe` and
+waits for the owned process tree. If the bounded timeout expires, Tauri must
+terminate the Job Object, wait for all owned descendants to exit, and verify
+that the managed `tunnel-client.exe` and `cloudflared.exe` descendants are no
+longer running. Direct-child termination alone is insufficient.
 
 ## 9. Tunnel State Semantics
 
@@ -290,12 +341,20 @@ Rules:
 
 - `stopped`: no managed Tunnel.
 - `starting`: launch accepted, process may exist, readiness not yet proven.
-- `ready`: managed Tunnel is alive and its authoritative readiness probe is healthy.
+- `ready`: the managed Tunnel is alive, the control plane connection is
+  established, the configured MCP target is reachable, and the authoritative
+  tunnel-client readiness check is healthy.
 - `degraded`: process is alive but readiness was previously established and is temporarily unhealthy.
 - `error`: startup failed, process exited unexpectedly, readiness timed out, or continued readiness is lost beyond the bounded tolerance.
 - `stopping`: managed shutdown is in progress.
 
 A live PID alone can never produce `ready`.
+
+The authoritative check must use the documented health contract of the
+bundled tunnel-client, including its loopback `/readyz`/health probe and the
+control-plane-poll requirement where supported. A listening health port or a
+successful process spawn alone does not prove configured MCP target reachability
+and must not produce Tunnel Ready.
 
 ## 10. MCP State Semantics
 
@@ -322,9 +381,15 @@ HarnessState
   runtime
   mcp
   tunnel
+  activeSessionId
   configRevision
   lastError
 ```
+
+HarnessController is the single lifecycle state owner. Lifecycle commands are
+serialized. Runtime and Tunnel watcher callbacks update state only through the
+controller and must carry the active Harness session identity plus the Runtime
+generation or Tunnel instance generation. Stale callbacks must be ignored.
 
 Product lifecycle:
 
@@ -370,6 +435,7 @@ Required checks:
 - Tunnel ID is configured;
 - API key reference exists and the secret is retrievable;
 - a usable Tunnel distribution/executable is resolvable;
+- no Runtime already running outside the active Harness session may be adopted;
 - no conflicting Runtime/Tunnel/Harness lifecycle transition is active.
 
 If any required V2 connection input is absent, Start Harness is disabled and the UI must explain the specific remediation.
@@ -391,6 +457,9 @@ harness_restart
 ```
 
 Frontend product lifecycle must use these operations instead of directly composing Runtime lifecycle operations.
+
+Lifecycle operations are serialized by the HarnessController. The frontend
+must not reconstruct lifecycle truth from Runtime or Tunnel process status.
 
 Runtime-specific read/diagnostic/tool/policy commands may continue to use `RuntimeSupervisor`.
 
@@ -433,6 +502,11 @@ If any stage after Runtime start fails:
 5. Final state must be deterministic and user-visible.
 6. Returned errors must be structured and must not contain secrets.
 
+The final Harness lifecycle state for a failed start is `error`, with all
+components started by that session cleaned up and a safe structured
+`lastError` retained. A failed start must never be reported as `stopped` while
+silently discarding the failure.
+
 ## 15. Stop Sequence
 
 The authoritative sequence is:
@@ -457,6 +531,10 @@ Stop must make a best effort to clean both owned components even if one stop ope
 
 Repeated stop must be safe and converge to `stopped`.
 
+Only a user-requested or completed Harness stop converges to `stopped`. A
+startup failure remains `error` until an explicit successful start or an
+explicit stop clears the session error according to the controller contract.
+
 ## 16. Restart Sequence
 
 Restart means:
@@ -474,6 +552,10 @@ A changed configuration is not active until restart completes successfully.
 ## 17. Crash and Failure Convergence
 
 Tauri must react to asynchronous Runtime and Tunnel exits.
+
+Watcher events must be delivered through HarnessController and validated
+against the active session/generation before mutating aggregated state. The UI
+must not be responsible for detecting crashes or repairing lifecycle state.
 
 ### Runtime crash
 
@@ -524,6 +606,10 @@ The existing behavior that equates MCP state with Runtime state must be replaced
 - Restart Harness uses `harness_restart`.
 - Buttons are disabled during incompatible transitions.
 
+React consumes the authoritative Harness state/event surface. It must not
+derive Harness, MCP, or Tunnel readiness from Runtime state or process
+existence.
+
 ### Settings
 
 V2 configuration must support:
@@ -536,6 +622,12 @@ V2 configuration must support:
 In an installed build, the user must not need to browse for `tunnel-client.exe`.
 
 Tunnel ID and API key are required for V2 Start Harness.
+
+The API key field may hold the raw value only transiently while the Settings
+submission is in progress. After submission, the value must exist only in the
+OS-backed SecretStore path and the short-lived controlled child launch
+environment; it must not be copied into Provider/global state or returned to
+the frontend.
 
 ### Activity
 
@@ -560,6 +652,11 @@ distribution manifest
 ```
 
 Distribution staging and verification must include Tunnel payload validation.
+
+The staged Tunnel payload must include the bundled `tunnel-client`, its
+`cloudflared` companion, the client/package metadata, and the applicable
+license, notice, and SBOM artifacts. The distribution manifest must describe
+the supported Tunnel version and both executable relative paths.
 
 Installed Tunnel resolution must be deterministic and fail closed in the same spirit as installed Runtime resolution.
 
@@ -596,9 +693,16 @@ Must cover:
 - Tunnel launch argument/reference construction.
 - Tunnel process lifecycle.
 - Tunnel readiness timeout/success/failure.
+- Tunnel Ready evidence for control-plane connection, configured MCP target
+  reachability, and the authoritative health check.
+- API key transient-input and no-leak boundaries.
+- Windows managed process-tree ownership and descendant cleanup.
 - Harness start success.
 - Harness start rollback.
 - Harness stop ordering.
+- Rejection of an already-running Runtime that is not owned by the active
+  Harness session.
+- Serialized lifecycle commands and stale session/generation callbacks.
 - Runtime crash convergence.
 - Tunnel crash convergence.
 - UI state mapping.
@@ -673,7 +777,10 @@ V2 is complete only when:
 - Harness lifecycle is a single Tauri-owned product lifecycle.
 - startup failure cannot leave a false Ready state.
 - managed stop does not leave owned Tunnel/Cloudflared/Runtime processes behind.
-- the raw API key remains outside config, Runtime, protocol responses, UI state, Activity, diagnostics, and literal argv.
+- the raw API key remains outside config, Runtime, protocol responses, React
+  Provider/global state, Activity, diagnostics, errors, logs, and literal argv.
+- Tunnel Ready proves control-plane connection, configured MCP target
+  reachability, and authoritative tunnel-client readiness.
 - installed distribution contains and resolves both Runtime and Tunnel dependencies.
 - a clean installed build can complete the same external ChatGPT flow.
 - Bash, database tools, write tools, and Git write operations remain out of scope until this chain is complete.
