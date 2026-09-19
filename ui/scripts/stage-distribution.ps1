@@ -27,18 +27,18 @@ function Get-CargoPackageVersion([string]$ManifestPath) {
 
 Push-Location $repositoryRoot
 try {
-    & cargo build --workspace --release --manifest-path (Join-Path $repositoryRoot "Cargo.toml")
-    if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
+    # Build Runtime first. The Tauri UI build consumes the staged Runtime and
+    # distribution manifest as bundle resources, so building the whole
+    # workspace here would create a first-build circular dependency.
+    & cargo build --release --manifest-path (Join-Path $repositoryRoot "Cargo.toml") -p chatgpt-harness-runtime
+    if ($LASTEXITCODE -ne 0) { throw "Runtime release build failed." }
 } finally {
     Pop-Location
 }
 
-$uiExecutable = Join-Path $targetDirectory "chatgpt-harness-ui.exe"
 $runtimeExecutable = Join-Path $targetDirectory "chatgpt-harness-runtime.exe"
-foreach ($path in @($uiExecutable, $runtimeExecutable)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Required release executable was not produced."
-    }
+if (-not (Test-Path -LiteralPath $runtimeExecutable -PathType Leaf)) {
+    throw "Required Runtime release executable was not produced."
 }
 
 $appVersion = Get-CargoPackageVersion (Join-Path $repositoryRoot "ui\src-tauri\Cargo.toml")
@@ -55,7 +55,6 @@ $protocolVersion = [int]$protocolMatch.Groups[1].Value
 $stagingPath = Join-Path (Split-Path -Parent $outputPath) (".distribution-staging-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingPath "runtime") | Out-Null
 try {
-    Copy-Item -LiteralPath $uiExecutable -Destination (Join-Path $stagingPath "chatgpt-harness-ui.exe")
     Copy-Item -LiteralPath $runtimeExecutable -Destination (Join-Path $stagingPath "runtime\chatgpt-harness-runtime.exe")
     $manifest = [ordered]@{
         distribution_schema_version = 1
@@ -78,6 +77,21 @@ try {
         Remove-Item -LiteralPath $stagingPath -Recurse -Force
     }
 }
+
+$uiExecutable = Join-Path $targetDirectory "chatgpt-harness-ui.exe"
+Push-Location $repositoryRoot
+try {
+    # The staging directory now exists, allowing the Tauri build script to
+    # resolve its configured Runtime and distribution resources.
+    & cargo build --release --manifest-path (Join-Path $repositoryRoot "Cargo.toml") -p chatgpt-harness-ui
+    if ($LASTEXITCODE -ne 0) { throw "UI release build failed." }
+} finally {
+    Pop-Location
+}
+if (-not (Test-Path -LiteralPath $uiExecutable -PathType Leaf)) {
+    throw "Required UI release executable was not produced."
+}
+Copy-Item -LiteralPath $uiExecutable -Destination (Join-Path $outputPath "chatgpt-harness-ui.exe") -Force
 
 $manifestPath = Join-Path $outputPath "distribution.json"
 $runtimePath = Join-Path $outputPath "runtime\chatgpt-harness-runtime.exe"
