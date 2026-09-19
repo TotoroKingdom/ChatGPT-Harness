@@ -1,1 +1,1 @@
-# ChatGPT-Harness Agent Instructions
+Do not read or use docs/archive/** unless the user explicitly asks for historical documentation.
