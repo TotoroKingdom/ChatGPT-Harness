@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "icon": [
+      "icons/portable/generated/16x16.png",
+      "icons/portable/generated/32x32.png",
+      "icons/portable/generated/48x48.png",
+      "icons/portable/generated/64x64.png",
+      "icons/portable/generated/128x128.png",
+      "icons/portable/generated/256x256.png",
+      "icons/portable/generated/icon.ico"
+    ]
+  }
+}

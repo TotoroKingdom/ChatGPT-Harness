@@ -1,7 +1,7 @@
 {
   "name": "chatgpt-harness-ui",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,9 @@
     "distribution:stage": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-distribution.ps1",
     "tauri": "tauri",
     "dev:preflight": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/free-dev-port.ps1",
-    "bundle:windows": "npm run distribution:stage && tauri build --bundles nsis && powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-nsis-bundle.ps1"
+    "bundle:windows": "npm run distribution:stage && tauri build --bundles nsis && powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify-nsis-bundle.ps1",
+    "portable:icons": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-portable-icons.ps1",
+    "portable:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-portable.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

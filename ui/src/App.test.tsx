@@ -65,6 +65,7 @@ describe("M2 configuration and lifecycle experience", () => {
     expect(screen.getByRole("heading", { name: "Tunnel connection", level: 2 })).toBeInTheDocument();
     expect(screen.getByText("Tunnel ID (required)")).toBeInTheDocument();
     expect(screen.getByText("API Key (required)")).toBeInTheDocument();
+    expect(screen.queryByText("Control-plane HTTP proxy (optional)")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Security", level: 2 })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Diagnostics", level: 2 })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
@@ -101,6 +102,22 @@ describe("M2 configuration and lifecycle experience", () => {
     await waitFor(() => {
       expect(screen.queryByText("Config Mismatch — Restart Required")).not.toBeInTheDocument();
     });
+    expect(await screen.findByText("Harness restarted with the saved configuration.")).toBeInTheDocument();
+  });
+
+  it("validates and saves the control-plane-only proxy from Settings", async () => {
+    render(<App />);
+    fireEvent.click(nav("Settings"));
+    const proxy = await screen.findByLabelText("Control-plane HTTP proxy (optional)");
+    fireEvent.click(screen.getByRole("button", { name: "Choose Folder" }));
+    await screen.findByDisplayValue("D:\\example-project");
+    fireEvent.change(proxy, { target: { value: "socks5://127.0.0.1:7897" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(await screen.findByText("Proxy URL must use http:// or https://.")).toBeInTheDocument();
+
+    fireEvent.change(proxy, { target: { value: "http://127.0.0.1:7897" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(await screen.findByText("Config Mismatch — Restart Required")).toBeInTheDocument();
   });
 });
 

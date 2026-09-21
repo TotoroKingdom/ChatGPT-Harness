@@ -58,6 +58,12 @@
         "autoDetect": {
           "type": "boolean"
         },
+        "controlPlaneHttpProxy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "tunnelClientPath": {
           "type": [
             "string",

@@ -89,6 +89,7 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     activeSessionId: null,
     configRevision: null,
     lastError: null,
+    tunnelReadiness: null,
   };
   private harnessListener?: Unsubscribe;
   private componentListener?: ComponentStatesListener;

@@ -1238,6 +1238,7 @@ mod tests {
             },
             tunnel: TunnelConfig {
                 tunnel_id: "test-tunnel".into(),
+                control_plane_http_proxy: None,
                 tunnel_client_path: None,
                 auto_detect: false,
                 api_key_ref: None,

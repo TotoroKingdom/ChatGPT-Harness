@@ -70,6 +70,9 @@ impl ConfigStore {
             let normalized = crate::platform::normalize_tunnel_client_directory(path);
             *path = normalized.display().to_string();
         }
+        normalize_and_validate_control_plane_http_proxy(
+            &mut config.tunnel.control_plane_http_proxy,
+        )?;
         Ok(Some(config))
     }
     pub fn load_or_create_defaults(&self) -> Result<AppConfig, ConfigError> {
@@ -88,6 +91,7 @@ impl ConfigStore {
             },
             tunnel: TunnelConfig {
                 tunnel_id: String::new(),
+                control_plane_http_proxy: None,
                 tunnel_client_path: None,
                 auto_detect: true,
                 api_key_ref: None,
@@ -108,6 +112,9 @@ impl ConfigStore {
             let normalized = crate::platform::normalize_tunnel_client_directory(path);
             *path = normalized.display().to_string();
         }
+        normalize_and_validate_control_plane_http_proxy(
+            &mut config.tunnel.control_plane_http_proxy,
+        )?;
         let previous = self.load()?;
         config.config_revision = match previous {
             None => DecimalU64::new(1),
@@ -134,6 +141,45 @@ impl ConfigStore {
         Ok(())
     }
 }
+
+pub(crate) fn normalize_and_validate_control_plane_http_proxy(
+    proxy: &mut Option<String>,
+) -> Result<(), ConfigError> {
+    let Some(value) = proxy.as_mut() else {
+        return Ok(());
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        *proxy = None;
+        return Ok(());
+    }
+    let parsed = url::Url::parse(trimmed).map_err(|_| {
+        ConfigError::Invalid("controlPlaneHttpProxy must be a valid HTTP or HTTPS proxy URL".into())
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(ConfigError::Invalid(
+            "controlPlaneHttpProxy must use http:// or https://".into(),
+        ));
+    }
+    if parsed.host_str().is_none() {
+        return Err(ConfigError::Invalid(
+            "controlPlaneHttpProxy must include a host".into(),
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(ConfigError::Invalid(
+            "controlPlaneHttpProxy must not contain credentials".into(),
+        ));
+    }
+    if parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(ConfigError::Invalid(
+            "controlPlaneHttpProxy must not contain a path, query, or fragment".into(),
+        ));
+    }
+    *value = trimmed.to_owned();
+    Ok(())
+}
+
 fn same_semantics(a: &AppConfig, b: &AppConfig) -> bool {
     let mut left = a.clone();
     let mut right = b.clone();
@@ -200,6 +246,7 @@ mod tests {
             },
             tunnel: TunnelConfig {
                 tunnel_id: "t".into(),
+                control_plane_http_proxy: None,
                 tunnel_client_path: None,
                 auto_detect: true,
                 api_key_ref: None,
@@ -233,6 +280,57 @@ mod tests {
         let mut b = a;
         b.tunnel.tunnel_id = "next".into();
         assert_eq!(s.save(b).unwrap().config_revision, DecimalU64::new(2));
+    }
+
+    #[test]
+    fn proxy_is_optional_normalized_and_semantic() {
+        let d = tempfile::tempdir().unwrap();
+        let s = ConfigStore::new(d.path().into());
+        let mut config = c();
+        config.tunnel.control_plane_http_proxy = Some("  http://127.0.0.1:7897  ".into());
+        let saved = s.save(config).unwrap();
+        assert_eq!(
+            saved.tunnel.control_plane_http_proxy.as_deref(),
+            Some("http://127.0.0.1:7897")
+        );
+        let mut changed = saved.clone();
+        changed.tunnel.control_plane_http_proxy = None;
+        assert_eq!(s.save(changed).unwrap().config_revision, DecimalU64::new(2));
+    }
+
+    #[test]
+    fn legacy_config_without_proxy_field_still_loads() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["tunnel"]
+            .as_object_mut()
+            .unwrap()
+            .remove("controlPlaneHttpProxy");
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+        let loaded = ConfigStore::new(d.path().into()).load().unwrap().unwrap();
+        assert!(loaded.tunnel.control_plane_http_proxy.is_none());
+    }
+
+    #[test]
+    fn proxy_validation_rejects_unsupported_or_sensitive_urls() {
+        for invalid in [
+            "socks5://127.0.0.1:7897",
+            "http://user:secret@127.0.0.1:7897",
+            "http://127.0.0.1:7897/path",
+            "http://127.0.0.1:7897?mode=test",
+            "http://127.0.0.1:7897#fragment",
+            "http://",
+        ] {
+            let mut value = Some(invalid.to_owned());
+            assert!(normalize_and_validate_control_plane_http_proxy(&mut value).is_err());
+        }
+        let mut blank = Some("   ".into());
+        normalize_and_validate_control_plane_http_proxy(&mut blank).unwrap();
+        assert!(blank.is_none());
     }
     #[test]
     fn load_normalizes_legacy_executable_path_and_save_persists_directory() {

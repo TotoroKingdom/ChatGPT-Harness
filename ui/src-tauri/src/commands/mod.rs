@@ -99,6 +99,10 @@ pub fn config_save(
         let normalized = crate::platform::normalize_tunnel_client_directory(path);
         *path = normalized.display().to_string();
     }
+    crate::config::normalize_and_validate_control_plane_http_proxy(
+        &mut config.tunnel.control_plane_http_proxy,
+    )
+    .map_err(ControlError::from)?;
     // Validate the existing on-disk configuration before validating or persisting
     // a replacement. A corrupt config must remain untouched and must not cause
     // a partial save that changes the machine-local credential state.
@@ -599,6 +603,7 @@ mod validation_tests {
             },
             tunnel: TunnelConfig {
                 tunnel_id: "tunnel".into(),
+                control_plane_http_proxy: None,
                 tunnel_client_path: Some(directory.display().to_string()),
                 auto_detect: false,
                 api_key_ref: None,

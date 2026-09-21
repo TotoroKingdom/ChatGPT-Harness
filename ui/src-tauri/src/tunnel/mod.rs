@@ -3,7 +3,7 @@ mod discovery;
 pub(crate) use discovery::resolve_tunnel;
 
 use chrono::{SecondsFormat, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::{Read, Write},
@@ -57,10 +57,42 @@ pub struct TunnelProcessError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelControlPlaneRoute {
+    pub route_mode: String,
+    pub proxy_source: String,
+    pub proxy_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TunnelReadinessEvidence {
     pub control_plane_connected: bool,
     pub mcp_target_reachable: bool,
     pub health_check_passed: bool,
+    pub control_plane_route: Option<TunnelControlPlaneRoute>,
+    pub control_plane_error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminStatus {
+    control_plane_route: Option<AdminRoute>,
+    tunnel_metadata_error: Option<String>,
+    #[serde(default)]
+    channels: Vec<AdminChannel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminRoute {
+    route_mode: String,
+    proxy_source: String,
+    proxy_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminChannel {
+    name: String,
+    probe_status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -99,6 +131,7 @@ pub struct TunnelLaunch {
     pub executable_path: PathBuf,
     pub cloudflared_path: PathBuf,
     pub tunnel_id: Option<String>,
+    pub control_plane_http_proxy: Option<String>,
     pub runtime_endpoint: String,
     credential: Option<TunnelCredential>,
     health_url_file: Option<PathBuf>,
@@ -111,6 +144,7 @@ impl TunnelLaunch {
             executable_path,
             cloudflared_path: PathBuf::new(),
             tunnel_id: None,
+            control_plane_http_proxy: None,
             runtime_endpoint: runtime_endpoint.into(),
             credential: None,
             health_url_file: None,
@@ -125,6 +159,11 @@ impl TunnelLaunch {
 
     pub fn with_cloudflared_path(mut self, path: PathBuf) -> Self {
         self.cloudflared_path = path;
+        self
+    }
+
+    pub fn with_control_plane_http_proxy(mut self, proxy: Option<String>) -> Self {
+        self.control_plane_http_proxy = proxy;
         self
     }
 
@@ -166,6 +205,7 @@ pub(crate) trait TunnelEventSink: Send + Sync {
         &self,
         instance_id: Option<&str>,
         state: TunnelState,
+        readiness: Option<&TunnelReadinessEvidence>,
         error: Option<&TunnelProcessError>,
     );
 }
@@ -352,6 +392,8 @@ impl TunnelProcessManager {
                 control_plane_connected: true,
                 mcp_target_reachable: true,
                 health_check_passed: true,
+                control_plane_route: None,
+                control_plane_error: None,
             })
         } else {
             wait_for_ready(&process, launch.startup_timeout)
@@ -378,19 +420,21 @@ impl TunnelProcessManager {
                     "Tunnel lifecycle changed while waiting for readiness.",
                 ));
             }
-            inner.status.state = TunnelState::Ready;
+            let (state, error) = state_from_readiness(&readiness);
+            inner.status.state = state;
             inner.status.readiness = Some(readiness);
-            inner.status.last_error = None;
+            inner.status.last_error = error;
         }
+        let status = self.status()?;
         self.notify(
             Some(&process.instance.instance_id),
-            TunnelState::Ready,
-            None,
+            status.state,
+            status.last_error.as_ref(),
         );
         if !test_mode {
             spawn_readiness_watcher(self.inner.clone(), process);
         }
-        self.status()
+        Ok(status)
     }
 
     pub fn stop(&self) -> Result<TunnelStopResult, TunnelProcessError> {
@@ -708,7 +752,11 @@ fn configure_real_command(
     command
         .arg("run")
         .args(["--control-plane.tunnel-id", tunnel_id])
-        .args(["--control-plane.api-key", &api_key_reference])
+        .args(["--control-plane.api-key", &api_key_reference]);
+    if let Some(proxy) = launch.control_plane_http_proxy.as_deref() {
+        command.args(["--control-plane.http-proxy", proxy]);
+    }
+    command
         .args(["--mcp.server-url", &mcp_target])
         .args(["--cloudflared.path", &cloudflared])
         .args(["--health.listen-addr", "127.0.0.1:0"])
@@ -806,22 +854,33 @@ fn spawn_readiness_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunne
             let health_url = fs::read_to_string(&process.health_url_file)
                 .ok()
                 .map(|value| value.trim().to_owned());
-            let result = health_url.as_deref().and_then(|url| probe_ready(url).ok());
-            if let Some(evidence) = result {
+            let result = health_url
+                .as_deref()
+                .ok_or_else(|| {
+                    TunnelProcessError::readiness("Tunnel health URL discovery could not be read.")
+                })
+                .and_then(probe_ready);
+            if let Ok(evidence) = result {
                 failures = 0;
+                let (next_state, next_error) = state_from_readiness(&evidence);
                 if let Ok(mut inner) = inner.lock() {
                     if inner.process.as_ref().is_some_and(|active| {
                         active.instance.instance_id == process.instance.instance_id
-                    }) && inner.status.state == TunnelState::Degraded
-                    {
-                        inner.status.state = TunnelState::Ready;
+                    }) {
+                        let changed = inner.status.state != next_state
+                            || inner.status.last_error != next_error
+                            || inner.status.readiness.as_ref() != Some(&evidence);
+                        inner.status.state = next_state;
                         inner.status.readiness = Some(evidence);
-                        notify_inner(
-                            &inner,
-                            Some(&process.instance.instance_id),
-                            TunnelState::Ready,
-                            None,
-                        );
+                        inner.status.last_error = next_error.clone();
+                        if changed {
+                            notify_inner(
+                                &inner,
+                                Some(&process.instance.instance_id),
+                                next_state,
+                                next_error.as_ref(),
+                            );
+                        }
                     }
                 }
             } else {
@@ -847,6 +906,7 @@ fn spawn_readiness_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunne
                         );
                     } else {
                         inner.status.state = TunnelState::Degraded;
+                        inner.status.last_error = Some(error.clone());
                         notify_inner(
                             &inner,
                             Some(&process.instance.instance_id),
@@ -864,16 +924,118 @@ fn spawn_readiness_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunne
 }
 
 fn probe_ready(url: &str) -> Result<TunnelReadinessEvidence, TunnelProcessError> {
+    let (ready_status, ready_body) = health_get(url, "/readyz")?;
+    if ready_status != 200 {
+        return Err(TunnelProcessError::readiness(
+            "Tunnel /readyz did not report ready.",
+        ));
+    }
+    let lowercase = ready_body.to_ascii_lowercase().replace(' ', "");
+    for marker in [
+        "\"ready\":false",
+        "\"mcp_target_reachable\":false",
+        "\"healthy\":false",
+    ] {
+        if lowercase.contains(marker) {
+            return Err(TunnelProcessError::readiness(
+                "Tunnel /readyz reported an unhealthy local dependency.",
+            ));
+        }
+    }
+
+    let admin_status = health_get(url, "/api/status").and_then(|(status, body)| {
+        if status != 200 {
+            return Err(TunnelProcessError::readiness(
+                "Tunnel admin status endpoint did not return HTTP 200.",
+            ));
+        }
+        serde_json::from_str::<AdminStatus>(&body).map_err(|_| {
+            TunnelProcessError::readiness("Tunnel admin status response was malformed.")
+        })
+    });
+    let (route, metadata_error, mcp_target_reachable) = match admin_status {
+        Ok(status) => {
+            let route = status
+                .control_plane_route
+                .map(|route| TunnelControlPlaneRoute {
+                    route_mode: route.route_mode,
+                    proxy_source: route.proxy_source,
+                    proxy_url: route.proxy_url,
+                });
+            let mcp_ready = status
+                .channels
+                .iter()
+                .find(|channel| channel.name == "main")
+                .and_then(|channel| channel.probe_status.as_deref())
+                == Some("ok");
+            (route, status.tunnel_metadata_error, mcp_ready)
+        }
+        Err(error) => (None, Some(error.message), true),
+    };
+    if !mcp_target_reachable {
+        return Err(TunnelProcessError::readiness(
+            "Tunnel MCP target probe is not healthy.",
+        ));
+    }
+
+    let poll_succeeded = health_get(url, "/metrics")
+        .ok()
+        .filter(|(status, _)| *status == 200)
+        .is_some_and(|(_, body)| last_successful_poll(&body));
+    let control_plane_connected = poll_succeeded && metadata_error.is_none();
+    let control_plane_error = if control_plane_connected {
+        None
+    } else {
+        Some(
+            metadata_error
+                .unwrap_or_else(|| "Control-plane poll has not completed successfully yet.".into()),
+        )
+    };
+
+    Ok(TunnelReadinessEvidence {
+        control_plane_connected,
+        mcp_target_reachable,
+        health_check_passed: true,
+        control_plane_route: route,
+        control_plane_error,
+    })
+}
+
+fn state_from_readiness(
+    evidence: &TunnelReadinessEvidence,
+) -> (TunnelState, Option<TunnelProcessError>) {
+    if evidence.control_plane_connected {
+        return (TunnelState::Ready, None);
+    }
+    let message = evidence
+        .control_plane_error
+        .clone()
+        .unwrap_or_else(|| "Control-plane connection is unavailable.".into());
+    (
+        TunnelState::Degraded,
+        Some(TunnelProcessError::control_plane(message)),
+    )
+}
+
+fn last_successful_poll(metrics: &str) -> bool {
+    metrics.lines().any(|line| {
+        line.starts_with("commands_poll_last_successful_timestamp_seconds")
+            && line
+                .split_whitespace()
+                .last()
+                .and_then(|value| value.parse::<f64>().ok())
+                .is_some_and(|value| value > 0.0)
+    })
+}
+
+fn health_get(url: &str, path: &str) -> Result<(u16, String), TunnelProcessError> {
     let address = validate_health_url(url)?;
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(250))
         .map_err(|_| TunnelProcessError::readiness("Tunnel health endpoint is unreachable."))?;
     stream
         .set_read_timeout(Some(Duration::from_millis(500)))
         .ok();
-    let request = format!(
-        "GET /readyz HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-        address
-    );
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
     stream
         .write_all(request.as_bytes())
         .map_err(|_| TunnelProcessError::readiness("Tunnel readiness request failed."))?;
@@ -881,31 +1043,47 @@ fn probe_ready(url: &str) -> Result<TunnelReadinessEvidence, TunnelProcessError>
     stream.read_to_end(&mut response).map_err(|_| {
         TunnelProcessError::readiness("Tunnel readiness response could not be read.")
     })?;
-    let response = String::from_utf8_lossy(&response);
-    let status_line = response.lines().next().unwrap_or_default();
-    if !status_line.contains(" 200 ") {
-        return Err(TunnelProcessError::readiness(
-            "Tunnel /readyz did not report ready.",
-        ));
-    }
-    let lowercase = response.to_ascii_lowercase().replace(' ', "");
-    for marker in [
-        "\"ready\":false",
-        "\"control_plane_connected\":false",
-        "\"mcp_target_reachable\":false",
-        "\"healthy\":false",
-    ] {
-        if lowercase.contains(marker) {
-            return Err(TunnelProcessError::readiness(
-                "Tunnel /readyz reported an unhealthy dependency.",
-            ));
+    let separator = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| TunnelProcessError::readiness("Tunnel HTTP response was malformed."))?;
+    let headers = String::from_utf8_lossy(&response[..separator]);
+    let raw_body = &response[separator + 4..];
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| TunnelProcessError::readiness("Tunnel HTTP response was malformed."))?;
+    let body = if headers
+        .lines()
+        .any(|line| line.eq_ignore_ascii_case("Transfer-Encoding: chunked"))
+    {
+        decode_chunked(raw_body).ok_or_else(|| {
+            TunnelProcessError::readiness("Tunnel chunked HTTP response was malformed.")
+        })?
+    } else {
+        raw_body.to_vec()
+    };
+    Ok((status, String::from_utf8_lossy(&body).into_owned()))
+}
+
+fn decode_chunked(mut input: &[u8]) -> Option<Vec<u8>> {
+    let mut output = Vec::new();
+    loop {
+        let line_end = input.windows(2).position(|window| window == b"\r\n")?;
+        let size_text = std::str::from_utf8(&input[..line_end]).ok()?;
+        let size = usize::from_str_radix(size_text.split(';').next()?.trim(), 16).ok()?;
+        input = &input[line_end + 2..];
+        if size == 0 {
+            return Some(output);
         }
+        if input.len() < size + 2 || &input[size..size + 2] != b"\r\n" {
+            return None;
+        }
+        output.extend_from_slice(&input[..size]);
+        input = &input[size + 2..];
     }
-    Ok(TunnelReadinessEvidence {
-        control_plane_connected: true,
-        mcp_target_reachable: true,
-        health_check_passed: true,
-    })
 }
 
 fn validate_health_url(url: &str) -> Result<SocketAddr, TunnelProcessError> {
@@ -995,7 +1173,7 @@ fn notify_inner(
     error: Option<&TunnelProcessError>,
 ) {
     if let Some(observer) = &inner.observer {
-        observer.tunnel_event(instance_id, state, error);
+        observer.tunnel_event(instance_id, state, inner.status.readiness.as_ref(), error);
     }
 }
 
@@ -1118,6 +1296,19 @@ impl TunnelProcessError {
         Self {
             code: "TUNNEL_NOT_READY".into(),
             message: message.into(),
+        }
+    }
+
+    fn control_plane(message: impl Into<String>) -> Self {
+        let message = message.into();
+        let code = if message.contains("401") || message.contains("Unauthorized") {
+            "CONTROL_PLANE_UNAUTHORIZED"
+        } else {
+            "CONTROL_PLANE_UNAVAILABLE"
+        };
+        Self {
+            code: code.into(),
+            message,
         }
     }
 
@@ -1371,6 +1562,7 @@ fn timestamp() -> String {
 mod tests {
     use super::*;
     use std::ffi::OsString;
+    use std::net::TcpListener;
     use std::time::{Duration, Instant};
 
     fn cmd_path() -> PathBuf {
@@ -1414,6 +1606,49 @@ mod tests {
         }
     }
 
+    fn admin_server(metadata_error: Option<&str>, last_poll: f64) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let metadata_error = metadata_error.map(str::to_owned);
+        thread::spawn(move || {
+            for _ in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 2048];
+                let count = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..count]);
+                let path = request
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/");
+                let body = match path {
+                    "/readyz" => "ready".to_owned(),
+                    "/api/status" => serde_json::json!({
+                        "control_plane_route": {
+                            "route_mode": "proxy",
+                            "proxy_source": "control-plane.http-proxy",
+                            "proxy_url": "http://127.0.0.1:7897"
+                        },
+                        "tunnel_metadata_error": metadata_error,
+                        "channels": [{"name": "main", "probe_status": "ok"}]
+                    })
+                    .to_string(),
+                    "/metrics" => {
+                        format!("commands_poll_last_successful_timestamp_seconds{{}} {last_poll}\n")
+                    }
+                    _ => String::new(),
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        format!("http://{address}")
+    }
+
     #[test]
     fn start_creates_a_ready_owned_instance_with_readiness_evidence() {
         let manager = sleeping_manager();
@@ -1430,6 +1665,8 @@ mod tests {
                 control_plane_connected: true,
                 mcp_target_reachable: true,
                 health_check_passed: true,
+                control_plane_route: None,
+                control_plane_error: None,
             })
         );
         assert!(manager.stop().unwrap().accepted);
@@ -1515,10 +1752,113 @@ mod tests {
     }
 
     #[test]
+    fn real_command_scopes_configured_proxy_to_control_plane() {
+        let mut command = Command::new(cmd_path());
+        let health = std::env::temp_dir().join("harness-test-health-proxy.url");
+        let launch = launch()
+            .with_api_key("raw-api-key")
+            .with_control_plane_http_proxy(Some("http://127.0.0.1:7897".into()));
+        configure_real_command(
+            &mut command,
+            Path::new(r"C:\tunnel\cloudflared.exe"),
+            &launch,
+            &health,
+        )
+        .unwrap();
+        let args = command
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let proxy_index = args
+            .iter()
+            .position(|value| value == "--control-plane.http-proxy")
+            .unwrap();
+        assert_eq!(args[proxy_index + 1], "http://127.0.0.1:7897");
+        assert!(!args.iter().any(|value| value == "--http-proxy"));
+    }
+
+    #[test]
+    fn real_command_without_configured_proxy_preserves_environment_fallback() {
+        let mut command = Command::new(cmd_path());
+        let health = std::env::temp_dir().join("harness-test-health-no-proxy.url");
+        let launch = launch().with_api_key("raw-api-key");
+        configure_real_command(
+            &mut command,
+            Path::new(r"C:\tunnel\cloudflared.exe"),
+            &launch,
+            &health,
+        )
+        .unwrap();
+        let args = command
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(!args
+            .iter()
+            .any(|value| value == "--control-plane.http-proxy"));
+        assert!(!command
+            .get_envs()
+            .any(|(key, value)| key == "CONTROL_PLANE_HTTP_PROXY" && value.is_none()));
+    }
+
+    #[test]
     fn readiness_requires_loopback_health_and_http_200() {
         assert!(validate_health_url("http://127.0.0.1:39001").is_ok());
         assert!(validate_health_url("http://0.0.0.0:39001").is_err());
         assert!(validate_health_url("https://127.0.0.1:39001").is_err());
         assert!(probe_ready("http://127.0.0.1:1").is_err());
+    }
+
+    #[test]
+    fn poll_metric_requires_a_nonzero_success_timestamp() {
+        assert!(!last_successful_poll(
+            "commands_poll_last_successful_timestamp_seconds{} 0\n"
+        ));
+        assert!(last_successful_poll(
+            "commands_poll_last_successful_timestamp_seconds{} 1789923600\n"
+        ));
+    }
+
+    #[test]
+    fn chunked_metrics_are_decoded_before_readiness_parsing() {
+        let chunked = b"4\r\ntest\r\n3\r\ning\r\n0\r\n\r\n";
+        assert_eq!(decode_chunked(chunked).unwrap(), b"testing");
+        assert!(decode_chunked(b"invalid\r\n").is_none());
+    }
+
+    #[test]
+    fn control_plane_failure_is_degraded_and_unauthorized_is_actionable() {
+        let evidence = TunnelReadinessEvidence {
+            control_plane_connected: false,
+            mcp_target_reachable: true,
+            health_check_passed: true,
+            control_plane_route: Some(TunnelControlPlaneRoute {
+                route_mode: "proxy".into(),
+                proxy_source: "control-plane.http-proxy".into(),
+                proxy_url: Some("http://127.0.0.1:7897".into()),
+            }),
+            control_plane_error: Some("401 Unauthorized".into()),
+        };
+        let (state, error) = state_from_readiness(&evidence);
+        assert_eq!(state, TunnelState::Degraded);
+        assert_eq!(error.unwrap().code, "CONTROL_PLANE_UNAUTHORIZED");
+    }
+
+    #[test]
+    fn live_admin_evidence_distinguishes_unauthorized_from_connected() {
+        let degraded = probe_ready(&admin_server(Some("401 Unauthorized"), 0.0)).unwrap();
+        assert!(!degraded.control_plane_connected);
+        assert_eq!(
+            degraded.control_plane_route.as_ref().unwrap().route_mode,
+            "proxy"
+        );
+        assert_eq!(
+            state_from_readiness(&degraded).1.unwrap().code,
+            "CONTROL_PLANE_UNAUTHORIZED"
+        );
+
+        let ready = probe_ready(&admin_server(None, 1_789_923_600.0)).unwrap();
+        assert!(ready.control_plane_connected);
+        assert_eq!(state_from_readiness(&ready), (TunnelState::Ready, None));
     }
 }

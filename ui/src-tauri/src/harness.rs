@@ -3,7 +3,7 @@ use crate::{
     runtime::{RuntimeEventSink, RuntimeProcessPhase, RuntimeSupervisor, SupervisorError},
     tunnel::{
         resolve_tunnel, TunnelEventSink, TunnelLaunch, TunnelProcessError, TunnelProcessManager,
-        TunnelState,
+        TunnelReadinessEvidence, TunnelState,
     },
 };
 use harness_control_protocol::{AppConfig, SecurityMode, StartEligibility, StartEligibilityStatus};
@@ -51,6 +51,7 @@ pub struct HarnessStatus {
     pub active_session_id: Option<String>,
     pub config_revision: Option<String>,
     pub last_error: Option<HarnessErrorSummary>,
+    pub tunnel_readiness: Option<TunnelReadinessEvidence>,
 }
 
 struct HarnessInner {
@@ -273,6 +274,7 @@ impl HarnessController {
                 active_session_id: Some(session_id.clone()),
                 config_revision: Some(config.config_revision.get().to_string()),
                 last_error: None,
+                tunnel_readiness: None,
             };
             inner.runtime_generation = None;
             inner.tunnel_instance = None;
@@ -324,6 +326,7 @@ impl HarnessController {
         };
         let launch = TunnelLaunch::new(resolved.client_path, endpoint)
             .with_tunnel_id(config.tunnel.tunnel_id.clone())
+            .with_control_plane_http_proxy(config.tunnel.control_plane_http_proxy.clone())
             .with_cloudflared_path(resolved.cloudflared_path)
             .with_api_key(api_key);
         let tunnel_status = match self.tunnel.start(launch) {
@@ -345,6 +348,11 @@ impl HarnessController {
                 TunnelState::Failed => HarnessComponentStatus::Error,
                 _ => HarnessComponentStatus::Starting,
             };
+            inner.status.tunnel_readiness = tunnel_status.readiness.clone();
+            inner.status.last_error = tunnel_status
+                .last_error
+                .as_ref()
+                .map(error_summary_from_tunnel);
             inner.status.lifecycle = if inner.status.tunnel == HarnessComponentStatus::Ready {
                 HarnessLifecycle::Ready
             } else {
@@ -502,6 +510,7 @@ impl HarnessController {
         &self,
         instance_id: Option<&str>,
         state: TunnelState,
+        readiness: Option<&TunnelReadinessEvidence>,
         error: Option<&TunnelProcessError>,
     ) {
         let mut changed = false;
@@ -517,6 +526,7 @@ impl HarnessController {
                     {
                         inner.status.lifecycle = HarnessLifecycle::Ready;
                     }
+                    inner.status.last_error = None;
                 }
                 TunnelState::Degraded => {
                     inner.status.tunnel = HarnessComponentStatus::Degraded;
@@ -534,6 +544,7 @@ impl HarnessController {
                 TunnelState::Stopped => inner.status.tunnel = HarnessComponentStatus::Stopped,
                 TunnelState::Starting => inner.status.tunnel = HarnessComponentStatus::Starting,
             }
+            inner.status.tunnel_readiness = readiness.cloned();
             changed = true;
         }
         if changed {
@@ -559,9 +570,10 @@ impl TunnelEventSink for HarnessController {
         &self,
         instance_id: Option<&str>,
         state: TunnelState,
+        readiness: Option<&TunnelReadinessEvidence>,
         error: Option<&TunnelProcessError>,
     ) {
-        self.on_tunnel_event(instance_id, state, error);
+        self.on_tunnel_event(instance_id, state, readiness, error);
     }
 }
 
@@ -574,6 +586,7 @@ fn stopped_status() -> HarnessStatus {
         active_session_id: None,
         config_revision: None,
         last_error: None,
+        tunnel_readiness: None,
     }
 }
 
@@ -704,7 +717,12 @@ mod tests {
             inner.status.tunnel = HarnessComponentStatus::Ready;
         });
 
-        controller.on_tunnel_event(Some("stale-instance"), TunnelState::Failed, None);
+        controller.on_tunnel_event(
+            Some("stale-instance"),
+            TunnelState::Failed,
+            None,
+            None,
+        );
 
         assert_eq!(controller.status().lifecycle, HarnessLifecycle::Ready);
         assert_eq!(controller.status().tunnel, HarnessComponentStatus::Ready);
@@ -720,7 +738,12 @@ mod tests {
             inner.status.mcp = HarnessComponentStatus::Ready;
             inner.status.tunnel = HarnessComponentStatus::Starting;
         });
-        controller.on_tunnel_event(Some("active-instance"), TunnelState::Ready, None);
+        controller.on_tunnel_event(
+            Some("active-instance"),
+            TunnelState::Ready,
+            None,
+            None,
+        );
 
         assert_eq!(controller.status().lifecycle, HarnessLifecycle::Ready);
     }

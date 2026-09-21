@@ -8,6 +8,7 @@ export function OverviewPage() {
   const [message, setMessage] = useState("");
   const [actionError, setActionError] = useState("");
   const canStart = (data.overall === "stopped" || data.overall === "error") && Boolean(data.eligibility?.canStart);
+  const tunnelReadiness = data.harness?.tunnelReadiness;
   const run = async (fn: () => Promise<{ ok: boolean; error?: { message: string } }>) => {
     setActionError("");
     setMessage("");
@@ -23,10 +24,23 @@ export function OverviewPage() {
       </Card>
       {data.restartRequired && <div className="notice notice-warning"><strong>Restart Required</strong><span>Configuration has changed since the current Harness session started.</span></div>}{(data.overall === "stopped" || data.overall === "error") && data.eligibility && <div className={`notice ${data.eligibility.canStart ? "notice-success" : "notice-warning"}`}><strong>{data.eligibility.status}</strong><span>{data.eligibility.message}</span></div>}
       {actionError && <div className="notice notice-danger">{actionError}</div>}{message && <div className="notice notice-success">{message}</div>}
+      {tunnelReadiness && !tunnelReadiness.controlPlaneConnected && (
+        <div className="notice notice-warning">
+          <strong>{data.harness?.lastError?.code ?? "CONTROL_PLANE_UNAVAILABLE"}</strong>
+          <span>{tunnelReadiness.controlPlaneError ?? data.harness?.lastError?.message ?? "Control-plane polling has not succeeded."}</span>
+        </div>
+      )}
       <Card><SectionHeading eyebrow="Launcher component state" title="Harness services" />
         <div className="counter-list">{(["runtime", "tunnel", "mcp"] as const).map((component) =>
           <div key={component}><span>{component === "mcp" ? "MCP" : component === "runtime" ? "Runtime" : "Tunnel"}</span><StatusBadge>{data.components[component]}</StatusBadge></div>
         )}</div>
+        {tunnelReadiness?.controlPlaneRoute && (
+          <div className="local-facts">
+            <div><span>Control-plane route</span><code>{tunnelReadiness.controlPlaneRoute.routeMode}</code></div>
+            <div><span>Proxy source</span><code>{tunnelReadiness.controlPlaneRoute.proxySource || "none"}</code></div>
+            {tunnelReadiness.controlPlaneRoute.proxyUrl && <div><span>Proxy URL</span><code>{tunnelReadiness.controlPlaneRoute.proxyUrl}</code></div>}
+          </div>
+        )}
       </Card>
       <RuntimeOverview />
     </div>

@@ -12,6 +12,21 @@ const emptyConfig: AppConfig = {
   ui: {},
 };
 
+function validateControlPlaneProxy(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return "Enter a valid HTTP or HTTPS proxy URL.";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "Proxy URL must use http:// or https://.";
+  if (!parsed.hostname) return "Proxy URL must include a host.";
+  if (parsed.username || parsed.password) return "Proxy credentials are not supported.";
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) return "Proxy URL cannot include a path, query, or fragment.";
+  return "";
+}
 
 export function SettingsPage() {
   const data = useHarnessData();
@@ -22,6 +37,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [proxyError, setProxyError] = useState("");
   const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
@@ -58,9 +74,20 @@ export function SettingsPage() {
   const save = async () => {
     setError("");
     if (!form.workspace.rootPath.trim()) return setError("Choose a workspace folder.");
+    const nextProxy = form.tunnel.controlPlaneHttpProxy?.trim() ?? "";
+    const nextProxyError = validateControlPlaneProxy(nextProxy);
+    setProxyError(nextProxyError);
+    if (nextProxyError) return;
     setSaving(true);
     const result = await data.saveConfig(
-      { ...form, tunnel: { ...form.tunnel, tunnelId: form.tunnel.tunnelId.trim() } },
+      {
+        ...form,
+        tunnel: {
+          ...form.tunnel,
+          tunnelId: form.tunnel.tunnelId.trim(),
+          controlPlaneHttpProxy: nextProxy || undefined,
+        },
+      },
       apiKey.trim() || undefined,
     );
     setSaving(false);
@@ -141,6 +168,21 @@ export function SettingsPage() {
             <span>Tunnel ID (required)</span>
             <input value={form.tunnel.tunnelId} onChange={(event) => update({ tunnel: { ...form.tunnel, tunnelId: event.target.value } })} placeholder="Enter tunnel ID" />
           </label>
+          <label className="form-field">
+            <span>Control-plane HTTP proxy (optional)</span>
+            <input
+              value={form.tunnel.controlPlaneHttpProxy ?? ""}
+              onChange={(event) => {
+                setProxyError("");
+                update({ tunnel: { ...form.tunnel, controlPlaneHttpProxy: event.target.value || undefined } });
+              }}
+              placeholder="http://127.0.0.1:7897"
+              aria-invalid={Boolean(proxyError)}
+              aria-describedby={proxyError ? "control-plane-proxy-error" : undefined}
+            />
+            {proxyError && <span id="control-plane-proxy-error" className="settings-help danger-text">{proxyError}</span>}
+          </label>
+          <p className="settings-help">Only OpenAI control-plane traffic uses this proxy. Local MCP remains direct. Leave blank to allow the CONTROL_PLANE_HTTP_PROXY environment variable.</p>
           <div className="form-row">
             <label className="form-field grow">
               <span>Development Tunnel override (optional)</span>

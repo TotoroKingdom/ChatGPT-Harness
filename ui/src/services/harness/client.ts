@@ -27,6 +27,17 @@ export type HarnessStatus = {
   activeSessionId?: string | null;
   configRevision?: string | null;
   lastError?: { code: string; message: string } | null;
+  tunnelReadiness?: {
+    controlPlaneConnected: boolean;
+    mcpTargetReachable: boolean;
+    healthCheckPassed: boolean;
+    controlPlaneRoute?: {
+      routeMode: string;
+      proxySource: string;
+      proxyUrl?: string | null;
+    } | null;
+    controlPlaneError?: string | null;
+  } | null;
 };
 export type ConfigMetadata = { configDirectory: string; configFile: string };
 export type Unsubscribe = () => void;

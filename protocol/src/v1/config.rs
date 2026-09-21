@@ -25,6 +25,9 @@ pub struct WorkspaceConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TunnelConfig {
     pub tunnel_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub control_plane_http_proxy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tunnel_client_path: Option<String>,
