@@ -1,5 +1,8 @@
 # V2 Roadmap
 
+> **Status: COMPLETED / ACCEPTED — 2026-09-27**  
+> 本文件保留为 V2 的历史执行路线，不再代表当前待办。当前实现状态以 `wiki/**` 与源码为准；最终验收见 `wiki/ACCEPTANCE.md`。
+
 ## Goal
 
 完成 ChatGPT-Harness 第一条真正可用的产品链路：

@@ -1,8 +1,6 @@
 # ChatGPT-Harness Architecture
 
-> 本文描述当前源码中的架构边界与进程关系。
-> 它解释“谁负责什么、谁调用谁、哪些组件位于数据路径中”，但不作为未来开发计划。
-> 当前实现状态请看 [`IMPLEMENTATION-MATRIX.md`](./IMPLEMENTATION-MATRIX.md)。
+> 本文描述当前源码中的架构边界与进程关系。V2 已于 2026-09-27 完成外部产品链验收。
 
 ## 1. Architecture Summary
 
@@ -12,27 +10,29 @@ ChatGPT-Harness 由四个主要运行角色组成：
 React UI
    ↓
 Tauri Host
-   ↓
-Runtime
+   ├── Runtime process
+   └── Tunnel process
+
+ChatGPT
    ↕
 Tunnel
    ↕
-ChatGPT
+Runtime MCP
 ```
 
-但这张图只表达组件关系，不能理解为所有请求都会按这个顺序流动。
-
-项目实际上存在两个不同的通信平面。
+理解本项目的关键是区分 **Control Plane** 和 **MCP Data Plane**。
 
 ### Control Plane
 
 ```text
 React UI
-   ↓
-Tauri Host
-   ↓
+   ↓ Tauri IPC
+Tauri HarnessController
+   ↓ JSONL control RPC
 Runtime
 ```
+
+Tauri 负责本机配置、Secret、进程 lifecycle 和状态编排。
 
 ### MCP Data Plane
 
@@ -45,312 +45,155 @@ Runtime MCP
    ↓
 ExecutionPipeline
    ↓
-Workspace / Policy / Tools
+WorkspaceGuard
+   ↓
+PolicyEngine
+   ↓
+Tool Executor
 ```
 
-这是理解 ChatGPT-Harness 的核心。
-
----
+Tauri 不位于每一次 tool call 的数据路径中。
 
 ## 2. Process Boundaries
 
 ### React UI
 
-React UI 运行在 Tauri WebView 中，主要负责：
+React UI 运行在 Tauri WebView 中，负责：
 
-- 展示 Runtime / MCP / Tunnel 状态
-- 保存和读取用户配置
-- 选择 Workspace
-- 配置 Tunnel Client
-- 展示 Tools / Policies / Activity / Diagnostics
-- 发起 Start / Stop 等用户操作
+- 配置 Workspace、Tunnel ID 和连接设置。
+- 短暂接收 API Key 输入并提交给 Tauri。
+- 展示 Harness / Runtime / MCP / Tunnel 状态。
+- 发起 Start / Stop / Restart。
+- 展示 Tools、Policies、Activity 和 Diagnostics。
 
-React UI 不直接启动 Runtime，也不直接启动 Tunnel，而是通过 Tauri IPC 调用 Rust Host。
-
-```text
-React
-   ↓ invoke(...)
-Tauri Command
-```
+React 不直接 spawn Runtime 或 Tunnel，也不持久化 raw API key。
 
 ### Tauri Host
 
-Tauri Host 是桌面应用的本机 orchestration layer。
-
-它负责：
+Tauri 是本机 orchestration layer，主要拥有：
 
 ```text
+HarnessController
 ConfigStore
 SecretStore
 RuntimeSupervisor
 TunnelProcessManager
-Tauri Commands
-Event Bridge
+Tauri Commands / Events
 ```
 
-它拥有或管理：
-
-- 本机配置
-- API Key 等 Secret
-- Runtime child process
-- Tunnel child process
-- UI ↔ Runtime control RPC
-- Runtime lifecycle event → UI event
-
-Tauri 的关键定位是：
-
-> **Local lifecycle owner / orchestrator**
-
-而不是 MCP tool execution engine。
+`HarnessController` 是产品 lifecycle 的唯一 owner。
 
 ### Runtime
 
-Runtime 是独立 Rust child process，由 `RuntimeSupervisor` 启动并监管。
-
-Tauri 与 Runtime 之间通过 stdin/stdout 传输 JSONL control RPC。
-
-Runtime 内部拥有真正的执行能力：
+Runtime 是独立 Rust child process，内部拥有：
 
 ```text
 RuntimeCore
-├── Workspace
-├── WorkspaceGuard
+├── Workspace / WorkspaceGuard
 ├── ToolRegistry
 ├── PolicyEngine
 ├── ExecutionPipeline
-├── Audit
-├── Activity
+├── Audit / Activity
 ├── Diagnostics
 └── MCP Service
 ```
 
+Tauri 与 Runtime 使用 stdin/stdout JSONL control RPC。
+
 ### Runtime MCP
 
-MCP Server 不是独立进程。
-
-它运行在 Runtime process 内。当前 Runtime 初始化时会启动 MCP Streamable HTTP endpoint：
+MCP Server 运行在 Runtime process 内，不是单独 OS process：
 
 ```text
 Runtime Process
-├── Control Server
-│    └── stdin/stdout JSONL
-│
+├── Control Server (stdin/stdout JSONL)
 └── MCP HTTP Server
      └── 127.0.0.1:<ephemeral>/mcp
 ```
 
-MCP HTTP service 使用 Runtime 内部独立线程和 Tokio runtime，但仍属于同一个 OS process。
-
-因此正确理解是：
-
-```text
-Runtime
-   └── MCP
-```
-
-而不是：
-
-```text
-Runtime
-   ↓
-MCP Process
-```
+Runtime 创建并拥有 endpoint。Tauri 通过 `mcp.endpoint.get` 获取当前 active Runtime instance 的 endpoint，并只在内部用于 Tunnel launch。
 
 ### Tunnel
 
-Tunnel Client 是独立进程。
+Tunnel Client 是由 Tauri 管理的独立进程。`TunnelProcessManager` 负责 launch、readiness、watcher、graceful stop 和 forced cleanup。
 
-Tauri 当前已经拥有 `TunnelProcessManager`，其内部实现了：
+Windows 下每个 managed Tunnel session 使用独立 Job Object 管理 `tunnel-client.exe` 与其 `cloudflared.exe` descendants。
 
-- start
-- stop
-- restart
-- process ownership
-- instance id
-- exit watcher
-- graceful stop
-- forced-stop fallback
+## 3. Harness Lifecycle
 
-但它目前仍属于内部能力，没有进入正常 Harness lifecycle。
-
-所以当前真实启动链仍然是：
+### Start
 
 ```text
-Start Harness
-   ↓
-Runtime
-```
-
-而不是：
-
-```text
-Start Harness
-   ↓
-Runtime
-   ↓
-Tunnel
-```
-
----
-
-## 3. Control Plane
-
-Control Plane 用于管理 Runtime，而不是传输 ChatGPT 的 MCP tool calls。
-
-```text
-React UI
-   ↓
-Tauri Host
-   ↓
-Runtime Control Server
-```
-
-### UI → Tauri
-
-React 使用 Tauri `invoke(command, args)` 调用 Rust command。
-
-例如：
-
-```text
-runtime_start
-runtime_stop
-runtime_status
-runtime_tools_list
-runtime_get_diagnostics
-runtime_get_activity_snapshot
-```
-
-### Tauri → Runtime
-
-Tauri 的 `RuntimeSupervisor`：
-
-1. 启动 Runtime child process
-2. 保存 stdin/stdout handle
-3. 给 RPC request 分配 request id
-4. 写入一行 JSON
-5. 等待对应 response
-6. 处理 Runtime notification
-
-简化流程：
-
-```text
-Tauri
-  │
-  │ request
-  ↓
-Runtime stdin
-  │
-  │ JSONL RPC
-  ↓
-Runtime dispatch
-  │
-  │ response
-  ↓
-Runtime stdout
-  │
-  ↓
-Tauri
-```
-
----
-
-## 4. Runtime Initialization
-
-当前 Runtime 启动链路：
-
-```text
-UI
- ↓
-runtime_start
- ↓
-Tauri
- ↓
+harness_start_eligibility
+        ↓
+validate config / workspace / security / distribution / secret
+        ↓
+Harness = starting
+        ↓
 RuntimeSupervisor.start
- ↓
-spawn Runtime
- ↓
-initialize
- ↓
-RuntimeCore.initialize
- ↓
-start MCP HTTP
- ↓
-initialized
- ↓
-Runtime Ready
-```
-
-初始化成功意味着：
-
-- Runtime Core 已初始化
-- Workspace 已建立
-- ExecutionPipeline 已建立
-- MCP loopback endpoint 已绑定
-- Runtime 可以进入 Ready
-
-但它不意味着：
-
-```text
+        ↓
+Runtime Ready + MCP endpoint
+        ↓
+mcp.endpoint.get + loopback validation
+        ↓
+SecretStore.get
+        ↓
+TunnelProcessManager.start
+        ↓
+health discovery + /readyz
+        ↓
 Tunnel Ready
-ChatGPT Reachable
+        ↓
+Harness Ready
 ```
 
----
+`Harness Ready` 只在 Runtime、MCP、Tunnel 同时 Ready 且属于同一 active session 时成立。
 
-## 5. MCP Data Plane
-
-MCP Data Plane 是 ChatGPT 实际调用工具时应该走的链路。
-
-目标路径：
+### Stop
 
 ```text
-ChatGPT
-   ↕
-Tunnel
-   ↕
-Runtime MCP
-   ↓
-ExecutionPipeline
-   ↓
-WorkspaceGuard
-   ↓
-PolicyEngine
-   ↓
-Tool
-   ↓
-Audit / Activity
+Harness = stopping
+        ↓
+Tunnel / cloudflared cleanup
+        ↓
+Runtime cleanup
+        ↓
+session + endpoint clear
+        ↓
+Harness = stopped
 ```
 
-这里最重要的一点是：
+### Restart
 
-> **Tauri 不位于每一次 MCP tool call 的执行路径中。**
+`restart` 是完整 stop 后重新加载 config/secret，再执行完整 start；不会在旧 session 上做局部复用。
 
-Tauri 负责启动、停止和协调组件。
+## 4. State and Convergence
 
-真正的 MCP request 目标路径应该是：
+产品状态：
 
 ```text
-ChatGPT ⇄ Tunnel ⇄ Runtime MCP
+lifecycle: stopped | starting | ready | degraded | error | stopping
+runtime:   stopped | starting | ready | degraded | error | stopping
+mcp:       stopped | starting | ready | degraded | error | stopping
+tunnel:    stopped | starting | ready | degraded | error | stopping
 ```
 
-而不是：
+`HarnessController` 使用 operation lock 串行生命周期命令。
 
-```text
-ChatGPT ⇄ Tunnel ⇄ Tauri ⇄ Runtime
-```
+Runtime watcher 携带 Runtime generation；Tunnel watcher 携带 Tunnel instance id。旧 session 的 stale callback 不得改变新 session 状态。
 
----
+Runtime crash 会使 MCP/Harness 离开 Ready，并停止关联 Tunnel。Tunnel crash 会使 Harness 进入 Error；Runtime 可以保留用于诊断，直到显式 stop/restart。
 
-## 6. Tool Execution Path
+## 5. MCP Tool Execution
 
-当前 Runtime MCP 暴露：
+当前 Runtime MCP 暴露两个只读工具：
 
 ```text
 read_file
 glob
 ```
 
-一次 MCP tool call 会进入：
+调用链：
 
 ```text
 MCP request
@@ -362,371 +205,143 @@ MCP adapter
 McpExecutionContext
    ↓
 ExecutionPipeline
-```
-
-ExecutionPipeline 内部执行：
-
-```text
-Runtime readiness
    ↓
 Argument validation
    ↓
-Workspace validation
-   ↓
-Policy evaluation
-   ↓
-Tool execution
-   ↓
-Audit emission
-   ↓
-ActivityStore
-```
-
-因此 Workspace 与 Policy enforcement 位于 Runtime 内部，不依赖 UI 或 Tauri。
-
----
-
-## 7. Workspace Security Boundary
-
-Workspace 是 Runtime 的安全边界之一。
-
-工具不会直接接受任意系统路径然后执行。
-
-执行路径经过：
-
-```text
-Tool Request
-   ↓
 WorkspaceGuard
-   ↓
-Canonical Workspace Root
-   ↓
-Target Validation
-   ↓
-Tool Executor
-```
-
-当前 Workspace 实现负责处理：
-
-- root canonicalization
-- relative path resolution
-- workspace escape rejection
-- Windows 特殊路径形式
-- symlink / junction 相关边界
-
-所以安全判断的 source of truth 在：
-
-```text
-runtime/src/workspace/**
-```
-
-而不是 UI。
-
----
-
-## 8. Policy Boundary
-
-Policy evaluation 同样属于 Runtime。
-
-```text
-ExecutionPipeline
    ↓
 PolicyEngine
    ↓
-ALLOW / DENY / ASK
+ExecutionPermit
+   ↓
+Tool executor
+   ↓
+Audit / Activity
 ```
+
+Tool executor 不负责自己重建 Workspace 或 Policy 边界。
+
+## 6. Workspace and Policy Boundary
+
+`WorkspaceGuard` 是文件系统访问边界的 source of truth。它处理 canonical root、relative/absolute resolution、workspace escape rejection 以及 Windows 路径相关边界。
+
+`PolicyEngine` 在 Runtime 内执行 `ALLOW / DENY / ASK`。当前 V2 只读系统规则允许受控 Workspace read，并对非法/未知 policy context fail closed。
+
+`ASK` 状态模型存在，但完整 approval/resume workflow 不属于 V2。
+
+## 7. Secret Boundary
+
+Raw API key 的预期路径只有：
+
+```text
+Settings input
+   ↓
+Tauri command
+   ↓
+SecretStore
+   ↓
+Windows Credential Manager
+   ↓ controlled read during Tunnel launch
+child environment: HARNESS_TUNNEL_API_KEY
+```
+
+Raw secret 不应进入 AppConfig、Runtime config、Runtime、HarnessStatus、Activity、Diagnostics、普通日志或 Tunnel argv。
+
+## 8. Tunnel Readiness
+
+Tunnel process existence 不等于 Ready。
+
+Ready 需要 authoritative evidence，包括：
+
+- control-plane connection；
+- configured Runtime MCP target reachability；
+- tunnel-client `/readyz` readiness。
 
 因此：
 
 ```text
-PoliciesPage 显示什么
+PID exists
+≠ Tunnel Ready
+
+Runtime Ready
+≠ Harness Ready
 ```
-
-和：
-
-```text
-PolicyEngine 实际是否执行规则
-```
-
-不是同一个问题。
-
-当前 Runtime PolicyEngine 已参与 execution pipeline。
-
-UI policy listing 是否完整，应单独判断。
-
----
 
 ## 9. Activity and Observability
 
-当前项目中存在两类不同的 activity 数据。
+Lifecycle event 与 execution activity 是不同数据来源。
 
-### Lifecycle Activity
-
-来源：
-
-```text
-EventBus
-```
-
-主要描述 Runtime started/stopped 等 lifecycle event。
-
-路径：
-
-```text
-Runtime
- ↓ notification
-Tauri
- ↓ event
-UI
-```
-
-### Execution Activity
-
-来源：
+Execution activity 由：
 
 ```text
 ExecutionPipeline
- ↓
+   ↓
 Audit
- ↓
+   ↓
 ActivityStore
+   ↓
+control-read / UI Activity
 ```
 
-UI 当前通过 snapshot 读取：
+Lifecycle status 由 Tauri/Harness event bridge 更新。UI 应展示真实 HarnessStatus，而不是从 Runtime readiness 推断 Tunnel 状态。
+
+## 10. Distribution
+
+当前 distribution 包含：
 
 ```text
-ActivityPage
- ↓
-control.activity.snapshot
- ↓
-ActivityStore
+chatgpt-harness-ui.exe
+runtime/chatgpt-harness-runtime.exe
+tunnel/tunnel-client.exe
+tunnel/cloudflared.exe
+distribution.json
 ```
 
-因此当前不能把：
+仓库同时保留 NSIS 与 portable Windows 分发路径。安装/便携版都必须从打包资源解析 Runtime/Tunnel，而不能依赖开发机 PATH。
 
-```text
-activity.event
-```
-
-和：
-
-```text
-tool execution audit
-```
-
-理解为同一条 live stream。
-
----
-
-## 10. Current Architecture
-
-当前真实产品链路：
-
-```text
-┌───────────────────────────────┐
-│       Tauri Desktop App       │
-│                               │
-│  React UI                     │
-│      │                        │
-│      ↓                        │
-│  Tauri Host                   │
-│      │                        │
-│      │ spawn + JSONL RPC      │
-└──────┼────────────────────────┘
-       ↓
-┌───────────────────────────────┐
-│        Runtime Process        │
-│                               │
-│  Control Server               │
-│                               │
-│  RuntimeCore                  │
-│      │                        │
-│      └── MCP HTTP             │
-│          127.0.0.1:<port>/mcp │
-└───────────────────────────────┘
-
-             X
-             │
-             │ not wired
-             ↓
-
-       Tunnel Process
-
-             X
-             │
-             ↓
-
-          ChatGPT
-```
-
-当前的关键断点：
-
-```text
-Runtime MCP endpoint
-        ↓
-     [missing]
-        ↓
-Tunnel launch configuration
-        ↓
-Tunnel
-        ↓
-ChatGPT
-```
-
----
-
-## 11. Target Architecture
-
-目标架构：
-
-```text
-                        ┌──────────────┐
-                        │   ChatGPT    │
-                        └──────┬───────┘
-                               ↕
-                        ┌──────┴───────┐
-                        │    Tunnel    │
-                        └──────┬───────┘
-                               ↕
-┌──────────────────────────────┼────────────────────┐
-│ Runtime Process              │                    │
-│                              ↓                    │
-│                        MCP HTTP Server             │
-│                              │                    │
-│                              ↓                    │
-│                       ExecutionPipeline            │
-│                         │     │     │              │
-│                         ↓     ↓     ↓              │
-│                    Workspace Policy Tools          │
-│                              │                    │
-│                              ↓                    │
-│                       Activity / Audit             │
-└───────────────────────────────────────────────────┘
-
-
-┌───────────────────────────────────────────────────┐
-│ Tauri Desktop App                                 │
-│                                                   │
-│ React UI                                          │
-│    ↓                                              │
-│ Tauri Host                                        │
-│    ├── Runtime lifecycle                          │
-│    ├── Tunnel lifecycle                           │
-│    ├── Config                                     │
-│    ├── Secrets                                    │
-│    └── Observability                              │
-└───────────────────────────────────────────────────┘
-```
-
-Tauri 对 Runtime 和 Tunnel 做 orchestration：
-
-```text
-Start Harness
-    ↓
-Start Runtime
-    ↓
-Runtime Ready
-    ↓
-Obtain MCP Endpoint
-    ↓
-Start Tunnel
-    ↓
-Tunnel Ready
-    ↓
-Harness Ready
-```
-
-停止顺序：
-
-```text
-Stop Harness
-    ↓
-Stop Tunnel
-    ↓
-Stop Runtime
-```
-
----
-
-## 12. Ownership Model
+## 11. Ownership Model
 
 | Component | Owner | Responsibility |
 | --- | --- | --- |
 | React UI | Tauri App | User interaction and presentation |
-| ConfigStore | Tauri Host | Local configuration |
+| Harness lifecycle | HarnessController | Product-level state and ordering |
+| ConfigStore | Tauri Host | Local non-secret config |
 | SecretStore | Tauri Host | Local credentials |
-| Runtime process | RuntimeSupervisor | Runtime lifecycle |
-| Tunnel process | TunnelProcessManager | Tunnel lifecycle |
+| Runtime process | RuntimeSupervisor | Runtime child lifecycle |
+| Tunnel process | TunnelProcessManager | Tunnel tree lifecycle/readiness |
+| MCP HTTP | Runtime | Local MCP transport |
 | Workspace | Runtime | Filesystem boundary |
-| Tools | Runtime | Capability implementation |
 | Policy | Runtime | Execution authorization |
-| ExecutionPipeline | Runtime | Safe execution |
-| MCP HTTP | Runtime | MCP transport |
+| Tools | Runtime | Capability implementation |
 | Audit / Activity | Runtime | Execution observability |
 
----
+## 12. Source-of-Truth Locations
 
-## 13. Source-of-Truth Locations
-
-| Architecture Question | Source |
+| Question | Source |
 | --- | --- |
 | Control protocol | `protocol/src/**` |
 | Runtime control server | `runtime/src/server.rs` |
-| Runtime core ownership | `runtime/src/state.rs` |
+| Runtime core | `runtime/src/state.rs` |
 | Runtime MCP lifecycle | `runtime/src/mcp/runtime.rs` |
-| MCP HTTP transport | `runtime/src/mcp/http.rs` |
-| Tool execution | `runtime/src/execution/pipeline.rs` |
+| MCP HTTP | `runtime/src/mcp/http.rs` |
+| Execution | `runtime/src/execution/pipeline.rs` |
 | Workspace boundary | `runtime/src/workspace/**` |
 | Policy | `runtime/src/policy/**` |
-| Tauri app setup | `ui/src-tauri/src/lib.rs` |
+| Harness lifecycle | `ui/src-tauri/src/harness.rs` |
 | Runtime supervision | `ui/src-tauri/src/runtime/**` |
 | Tunnel lifecycle | `ui/src-tauri/src/tunnel/**` |
-| Tauri commands | `ui/src-tauri/src/commands/**` |
-| React → Tauri adapter | `ui/src/services/harness/local-client.ts` |
+| Secret storage | `ui/src-tauri/src/secrets/**` |
+| React adapter | `ui/src/services/harness/local-client.ts` |
 | UI orchestration | `ui/src/app/providers/HarnessDataProvider.tsx` |
 
----
-
-## 14. Architecture Rules of Thumb
-
-When reading or modifying the codebase, keep these rules in mind:
+## 13. Architecture Invariants
 
 ```text
-Tauri manages processes.
-Runtime executes tools.
-
-UI displays state.
-Runtime owns execution truth.
-
-Control Plane manages Runtime.
-MCP Data Plane carries tool calls.
-
-Runtime Ready
-≠ Tunnel Ready
-
-MCP endpoint bound
-≠ ChatGPT reachable
-
-Tunnel manager exists
-≠ Tunnel orchestration exists
+Tauri manages processes; Runtime executes tools.
+UI displays state; Runtime owns execution truth.
+Control Plane manages lifecycle; MCP Data Plane carries tool calls.
+Runtime creates MCP endpoint; Tauri does not guess it.
+Tunnel owns external connectivity; Runtime MCP stays loopback.
+Raw API keys do not cross into Runtime.
+Harness Ready requires Runtime + MCP + Tunnel readiness.
 ```
-
----
-
-## 15. Related Documents
-
-For repository and call-chain details:
-
-- [`CODEBASE-MAP.md`](./CODEBASE-MAP.md)
-
-For implementation status:
-
-- [`IMPLEMENTATION-MATRIX.md`](./IMPLEMENTATION-MATRIX.md)
-
-For Wiki entry point:
-
-- [`README.md`](./README.md)
-
-For future development direction:
-
-- [`../docs-codex/ROADMAP.md`](../docs-codex/ROADMAP.md)

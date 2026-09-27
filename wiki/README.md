@@ -1,70 +1,10 @@
 # ChatGPT-Harness Wiki
 
-> 本 Wiki 描述 **当前代码事实**。  
-> 当前实现状态以源码、manifest、测试与构建脚本为准；`docs-codex/**` 是未来开发计划，`docs/archive/**` 是历史资料，均不能反推当前实现。
+> 本 Wiki 只描述 **当前实现事实**。V2 已于 **2026-09-27** 完成最终验收。
 
-## 1. Project Overview
+## 1. Current Status
 
-ChatGPT-Harness 是一个本机运行的 MCP Harness。
-
-它的目标产品链路是：
-
-```text
-ChatGPT
-   ↕
-Tunnel
-   ↕
-Runtime MCP
-   ↕
-Tools / Policy / Execution
-```
-
-Tauri Desktop App 负责本机配置、Secret、Runtime/Tunnel 生命周期和状态展示。
-
-当前项目采用 Rust + Tauri + React：
-
-```text
-React UI
-   ↓ Tauri IPC
-Tauri Host
-   ↓ stdin/stdout JSON-RPC
-Runtime
-   ├── MCP HTTP
-   ├── Workspace
-   ├── Tools
-   ├── Policy
-   ├── Execution
-   └── Activity / Diagnostics
-```
-
-## 2. Architecture at a Glance
-
-项目中存在两条不同的通信链路。
-
-### Control Plane
-
-用于桌面 UI 控制和观察 Runtime：
-
-```text
-React UI
-   ↓ Tauri invoke / events
-Tauri Host
-   ↓ stdin/stdout JSON-RPC
-Runtime
-```
-
-Tauri Host 是 Runtime child process 的生命周期 owner，并负责：
-
-- 本机配置保存
-- Secret 保存
-- Runtime discovery
-- Runtime start / stop / status
-- Control RPC 转发
-- Runtime event bridge
-
-### MCP Data Plane
-
-目标 MCP 数据流是：
+ChatGPT-Harness 当前已经完成第一条真实产品链：
 
 ```text
 ChatGPT
@@ -77,347 +17,141 @@ ExecutionPipeline
    ↓
 WorkspaceGuard
    ↓
-Policy
+PolicyEngine
    ↓
-Tools
+read_file / glob
+   ↓
+Audit / Activity
 ```
 
-Tauri 不位于每一次 MCP tool call 的数据链路中。
+V2 的 Connect、Orchestrate、Validate 三个阶段已经收口。真实外部 ChatGPT caller 已能够通过 Harness 调用受控 Workspace 中的只读工具。
 
-Tauri 的职责是启动、停止和协调 Runtime 与 Tunnel。
+当前状态不再是“Runtime MCP 本地可用但 Tunnel 未接入”。
 
-## 3. Current Implementation State
+## 2. Runtime Roles
 
-当前已经实现的主要能力：
+项目有两个通信平面。
 
-| Capability | Current State |
+### Control Plane
+
+```text
+React UI
+   ↓ invoke / events
+Tauri HarnessController
+   ├── RuntimeSupervisor
+   ├── TunnelProcessManager
+   ├── ConfigStore
+   └── SecretStore
+```
+
+Tauri 是本机 lifecycle owner / orchestrator。
+
+### MCP Data Plane
+
+```text
+ChatGPT
+   ↕
+Tunnel
+   ↕
+Runtime MCP
+   ↓
+ExecutionPipeline
+   ↓
+Workspace / Policy / Tools
+```
+
+Tauri 不代理每一次 MCP tool call。
+
+## 3. Current Product Capabilities
+
+| Capability | State |
 | --- | --- |
 | Runtime lifecycle | Implemented |
-| Workspace initialization | Implemented |
+| Runtime MCP endpoint handoff | Implemented |
 | Workspace/path security | Implemented |
-| `read_file` | Implemented inside Runtime MCP |
-| `glob` | Implemented inside Runtime MCP |
-| Policy evaluation | Implemented |
-| Execution pipeline | Implemented |
-| Execution activity snapshot | Implemented |
-| Runtime diagnostics | Implemented |
-| Config persistence | Implemented |
+| Policy + ExecutionPipeline | Implemented |
+| `read_file` / `glob` | Implemented and externally accepted |
 | Secret storage | Implemented |
-| Runtime MCP HTTP endpoint | Implemented / Internal |
-| Tunnel process manager | Implemented / Internal |
-| Tunnel orchestration | Not Implemented |
-| External ChatGPT reachability | Not Implemented |
-| Approval resume workflow | Not Implemented |
+| Tunnel launch/readiness | Implemented |
+| Harness orchestration | Implemented |
+| Runtime/Tunnel crash convergence | Implemented |
+| Activity / diagnostics | Implemented |
+| NSIS distribution | Implemented |
+| Portable distribution | Implemented |
+| External ChatGPT E2E | Accepted |
+| Approval resume workflow | Not implemented; post-V2 |
+| Write / Shell / DB / Git-write tools | Intentionally outside V2 |
 
-The important distinction is:
+## 4. Documentation Map
 
-```text
-Runtime MCP works locally
-        ≠
-ChatGPT can already reach Runtime MCP
-```
+### [`ARCHITECTURE.md`](./ARCHITECTURE.md)
 
-The Runtime currently starts an MCP Streamable HTTP endpoint on a loopback ephemeral port.
+当前架构事实：进程边界、Control Plane、MCP Data Plane、Harness lifecycle、安全边界和 ownership。
 
-However, its endpoint URL is not yet surfaced through the product control path, and the Tunnel is not wired into the normal Harness lifecycle.
+### [`MCP-AND-TUNNEL.md`](./MCP-AND-TUNNEL.md)
 
-## 4. Current Product Boundary
+当前 Runtime MCP endpoint handoff、Tunnel launch contract、readiness、Secret boundary 和 failure semantics。
 
-The normal product startup path currently reaches:
+### [`CODEBASE-MAP.md`](./CODEBASE-MAP.md)
 
-```text
-UI
- ↓
-Tauri
- ↓
-Runtime
- ↓
-Runtime MCP
-```
+源码目录职责、关键调用链和 source-of-truth 位置。
 
-It does **not** yet continue through:
+### [`IMPLEMENTATION-MATRIX.md`](./IMPLEMENTATION-MATRIX.md)
 
-```text
-Runtime MCP
- ↕
-Tunnel
- ↕
-ChatGPT
-```
+功能是否真的实现，以及属于 automated verification 还是 manual external acceptance。
 
-`TunnelProcessManager` already contains process lifecycle logic, but it is currently an internal implementation:
+### [`ACCEPTANCE.md`](./ACCEPTANCE.md)
+
+V2 最终验收记录和后续版本边界。
+
+## 5. Documentation Classes
 
 ```text
-TunnelProcessManager
-├── start
-├── stop
-├── restart
-├── process ownership
-├── instance_id
-├── exit watcher
-└── forced-stop fallback
-```
-
-What is still missing is product orchestration:
-
-```text
-Runtime MCP endpoint
+Current source / tests / manifests
         ↓
-Tauri
+wiki/**                    current implementation facts
         ↓
-Tunnel launch arguments / credentials
+docs-codex/**              completed V2 planning/execution records
         ↓
-Tunnel Ready
-        ↓
-ChatGPT
+docs/archive/**            older historical material
 ```
 
-## 5. Current Tools
+`docs-codex/**` 不再代表“下一步一定要做什么”；V2 已完成，它们现在用于保留设计与执行过程。
 
-The Runtime currently exposes two read-only MCP tools:
+`docs/archive/**` 只用于历史追溯。
+
+## 6. Source-of-Truth Rules
+
+当文档和代码不一致时：
+
+1. 当前源码、测试、manifest 优先。
+2. `wiki/**` 用来解释当前实现。
+3. `docs-codex/**` 只提供 V2 的计划/执行背景。
+4. `docs/archive/**` 不参与当前状态判断。
+
+不要因为某个 class、DTO、mock 或旧 roadmap 存在，就推断产品链仍未完成或某项能力已经存在。
+
+## 7. Current Scope
+
+V2 freeze 后保持最小、只读、安全产品链：
 
 ```text
 read_file
 glob
 ```
 
-Tool calls pass through the Runtime execution pipeline:
+下一阶段如果扩展高权限能力，应先完成可恢复的 Approval workflow：
 
 ```text
-MCP request
+Policy = ASK
    ↓
-ExecutionPipeline
+Pending approval
    ↓
-Argument validation
+User allow / deny
    ↓
-WorkspaceGuard
+Resume the original request
    ↓
-PolicyEngine
-   ↓
-Tool executor
-   ↓
-Audit / Activity
+Execute or reject
 ```
 
-Higher-risk capabilities such as Bash, database access, write-file operations and Git write operations are intentionally outside the current product-completion path.
-
-## 6. Repository Map
-
-```text
-ChatGPT-Harness/
-├── protocol/
-│   └── Shared control protocol models, schemas and generated types
-│
-├── runtime/
-│   └── Runtime process, MCP server, tools, policy and execution
-│
-├── ui/
-│   ├── src/
-│   │   └── React UI
-│   └── src-tauri/
-│       └── Tauri host, config, secrets and process supervision
-│
-├── tunnel-client-v0.0.13-windows-amd64/
-│   └── Tunnel client payload currently present in the repository
-│
-├── wiki/
-│   └── Current code-derived documentation
-│
-├── docs-codex/
-│   └── Forward-looking development plans
-│
-└── docs/archive/
-    └── Historical documentation
-```
-
-## 7. Documentation Guide
-
-### Start here
-
-This file is the entry point for rebuilding project context.
-
-Use it to answer:
-
-- What is ChatGPT-Harness?
-- What are the main process boundaries?
-- What works today?
-- Where is the current product chain broken?
-- Which document should I read next?
-
-### `CODEBASE-MAP.md`
-
-Read:
-
-[`CODEBASE-MAP.md`](./CODEBASE-MAP.md)
-
-Use it when you need to understand:
-
-- repository structure
-- process architecture
-- control flow
-- important call chains
-- subsystem ownership
-- source-of-truth code locations
-- protocol/fixture drift
-- test reality
-- interpretation traps
-
-This is the detailed code archaeology reference.
-
-### `IMPLEMENTATION-MATRIX.md`
-
-Read:
-
-[`IMPLEMENTATION-MATRIX.md`](./IMPLEMENTATION-MATRIX.md)
-
-Use it when you need to answer:
-
-> Is this capability actually implemented?
-
-It distinguishes:
-
-- `Implemented`
-- `Implemented / Internal`
-- `Partially Integrated`
-- `Stub / Placeholder`
-- `Not Implemented`
-- `Not Applicable`
-- `Unclear`
-
-Do not infer product completion merely because a class, command, DTO or test exists.
-
-### `docs-codex/ROADMAP.md`
-
-Read:
-
-[`../docs-codex/ROADMAP.md`](../docs-codex/ROADMAP.md)
-
-This is **future development direction**, not evidence of current implementation.
-
-The current V2 path is:
-
-```text
-Connect
-   ↓
-Orchestrate
-   ↓
-Validate
-```
-
-The V2 goal is to complete the first real external product chain:
-
-```text
-ChatGPT
-   ↕
-Tunnel
-   ↕
-Runtime MCP
-   ↕
-Tools / Policy / Execution
-```
-
-### `docs/archive/**`
-
-Historical documentation is preserved under:
-
-```text
-docs/archive/
-```
-
-Do not use archived documents to determine current implementation status unless historical context is explicitly required.
-
-## 8. Source-of-Truth Rule
-
-When documentation and code disagree, use this priority:
-
-```text
-Current source code / tests / manifests
-        ↓
-wiki/
-        ↓
-docs-codex/
-        ↓
-docs/archive/
-```
-
-Interpretation:
-
-- **Source code** tells us what exists now.
-- **Wiki** explains the current source-derived architecture and status.
-- **docs-codex** describes what should be built next.
-- **archive** records historical decisions and previous designs.
-
-If current code evidence is insufficient, mark the fact as `Unclear` rather than filling the gap from old documentation.
-
-## 9. Important Interpretation Traps
-
-Avoid these assumptions:
-
-```text
-TunnelProcessManager exists
-≠ Tunnel product integration is complete
-
-Runtime MCP endpoint is Ready
-≠ ChatGPT can reach it
-
-MCP status is shown as Ready in UI
-≠ external reachability is proven
-
-Approval DTOs exist
-≠ approval/resume workflow exists
-
-Protocol fixtures pass tests
-≠ Runtime wire output exactly matches those fixtures
-
-MockClient supports a state
-≠ the real production adapter supports it
-```
-
-## 10. Current Development Focus
-
-The current development priority is not adding more tools.
-
-The immediate goal is to complete the missing external connection:
-
-```text
-Runtime MCP
-   ↕
-Tunnel
-   ↕
-ChatGPT
-```
-
-Then unify lifecycle orchestration:
-
-```text
-Start Harness
-    ↓
-Runtime Ready
-    ↓
-Tunnel Ready
-    ↓
-Harness Ready
-```
-
-And shutdown:
-
-```text
-Stop Harness
-    ↓
-Tunnel Stop
-    ↓
-Runtime Stop
-```
-
-Only after this chain is validated end-to-end should the project expand into higher-permission capabilities.
-
----
-
-For detailed current implementation facts, continue with:
-
-1. [`CODEBASE-MAP.md`](./CODEBASE-MAP.md)
-2. [`IMPLEMENTATION-MATRIX.md`](./IMPLEMENTATION-MATRIX.md)
-
-For future development direction, see:
-
-- [`../docs-codex/ROADMAP.md`](../docs-codex/ROADMAP.md)
+在这条链完成前，不建议直接加入 `write_file`、Git write、Shell 或数据库执行。
