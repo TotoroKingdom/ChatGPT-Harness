@@ -5,7 +5,7 @@ mod pipeline;
 mod state;
 
 pub(crate) use context::{RequestContext, SecurityContext};
-pub(crate) use executor::ToolExecutor;
+pub(crate) use executor::{ToolExecutor, WorkspaceTarget};
 #[cfg(test)]
 pub(crate) use pipeline::ExecutionHook;
 pub(crate) use pipeline::PipelineEvent;

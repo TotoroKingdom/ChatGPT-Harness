@@ -4,8 +4,8 @@ use crate::execution::{ExecutionError, ExecutionPipeline, SecurityContext};
 use crate::mcp::{McpContextError, McpExecutionContext, McpService};
 use crate::policy::PolicyEngine;
 use crate::tools::{
-    EffectiveTool, EffectiveToolCatalog, GlobOutput, GlobRequest, ReadFileOutput, ReadFileRequest,
-    ToolRegistry,
+    EditOutput, EditRequest, EffectiveTool, EffectiveToolCatalog, GlobOutput, GlobRequest,
+    ReadFileOutput, ReadFileRequest, ToolRegistry, WriteOutput, WriteRequest,
 };
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
@@ -101,6 +101,26 @@ impl RuntimeCore {
     #[allow(dead_code)]
     /// Typed internal calls use the same readiness, boundary and policy gates as MCP.
     pub(crate) fn glob(&self, request: &GlobRequest) -> Result<GlobOutput, ExecutionError> {
+        self.execution_pipeline
+            .as_ref()
+            .ok_or(ExecutionError::RuntimeNotInitialized)?
+            .execute(|| Ok(request.clone()))
+            .result
+    }
+
+    /// Typed internal calls use the same readiness, boundary and policy gates as MCP.
+    #[allow(dead_code)]
+    pub(crate) fn write(&self, request: &WriteRequest) -> Result<WriteOutput, ExecutionError> {
+        self.execution_pipeline
+            .as_ref()
+            .ok_or(ExecutionError::RuntimeNotInitialized)?
+            .execute(|| Ok(request.clone()))
+            .result
+    }
+
+    /// Typed internal calls use the same readiness, boundary and policy gates as MCP.
+    #[allow(dead_code)]
+    pub(crate) fn edit(&self, request: &EditRequest) -> Result<EditOutput, ExecutionError> {
         self.execution_pipeline
             .as_ref()
             .ok_or(ExecutionError::RuntimeNotInitialized)?
@@ -354,7 +374,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob"]
+            ["read_file", "glob", "write", "edit"]
         );
         assert!(effective.iter().all(|tool| {
             tool.availability == crate::tools::ToolAvailability::Available
@@ -387,6 +407,52 @@ mod tests {
             .expect("glob workspace");
         assert_eq!(output.matches[0].path, "main.rs");
     }
+
+    #[test]
+    fn write_and_edit_use_the_same_initialized_pipeline_as_mcp() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+
+        assert!(matches!(
+            core.write(&WriteRequest::new("file.txt", "created")),
+            Err(ExecutionError::RuntimeNotInitialized)
+        ));
+        assert!(matches!(
+            core.edit(&EditRequest::new("file.txt", "created", "edited")),
+            Err(ExecutionError::RuntimeNotInitialized)
+        ));
+
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let write = core.write(&WriteRequest::new("nested/file.txt", "created"));
+        assert!(matches!(
+            write,
+            Err(ExecutionError::Write(crate::tools::WriteError::Workspace(
+                WorkspaceError::TargetNotFound { .. }
+            )))
+        ));
+
+        fs::create_dir_all(workspace.root.join("nested")).expect("parent");
+        let write = core
+            .write(&WriteRequest::new("nested/file.txt", "created"))
+            .expect("write through pipeline");
+        assert_eq!(write.normalized_path, PathBuf::from("nested/file.txt"));
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("nested/file.txt")).unwrap(),
+            "created"
+        );
+
+        let edit = core
+            .edit(&EditRequest::new("nested/file.txt", "created", "edited"))
+            .expect("edit through pipeline");
+        assert_eq!(edit.replacements, 1);
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("nested/file.txt")).unwrap(),
+            "edited"
+        );
+    }
+
     #[test]
     fn read_file_uses_the_initialized_snapshot_limit_and_is_unavailable_after_failed_init() {
         let workspace = TestWorkspace::new();

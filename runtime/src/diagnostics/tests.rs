@@ -70,7 +70,7 @@ fn snapshot_exists_before_runtime_state_and_does_not_claim_ready() {
         snapshot.security.execution_pipeline,
         PipelineState::NotInitialized
     );
-    assert_eq!(snapshot.tools.declared_count, 2);
+    assert_eq!(snapshot.tools.declared_count, 4);
     assert_eq!(snapshot.tools.effective_count, 0);
     assert!(snapshot
         .tools
@@ -105,7 +105,7 @@ fn initialization_ack_stop_and_rollback_follow_owned_lifecycle() {
     let ready = core.diagnostics();
     assert_eq!(ready.runtime.readiness, RuntimeReadiness::Ready);
     assert_eq!(ready.security.execution_pipeline, PipelineState::Ready);
-    assert_eq!(ready.tools.effective_count, 2);
+    assert_eq!(ready.tools.effective_count, 4);
     core.stop().expect("stop");
     let stopped = core.diagnostics();
     assert_eq!(stopped.runtime.lifecycle, RuntimeLifecycle::Stopping);
@@ -342,11 +342,13 @@ fn v1_json_shape_is_frozen_and_local_readiness_never_establishes_tunnel_readines
                 "executionPipeline": "ready"
             },
             "tools": {
-                "declaredCount": 2,
-                "effectiveCount": 2,
+                "declaredCount": 4,
+                "effectiveCount": 4,
                 "items": [
                     {"name":"read_file", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow"},
-                    {"name":"glob", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow"}
+                    {"name":"glob", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow"},
+                    {"name":"write", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow"},
+                    {"name":"edit", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow"}
                 ]
             },
             "requests": {"observation":"not_instrumented", "activeCount":null},

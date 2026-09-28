@@ -1,5 +1,8 @@
 use super::path_resolver::PathResolver;
+use super::workspace::validate_requested_path_form;
 use super::{Workspace, WorkspaceError};
+use std::fs;
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8,6 +11,17 @@ pub struct ApprovedPath {
 }
 
 impl ApprovedPath {
+    pub fn as_path(&self) -> &Path {
+        &self.canonical_path
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApprovedWriteTarget {
+    canonical_path: PathBuf,
+}
+
+impl ApprovedWriteTarget {
     pub fn as_path(&self) -> &Path {
         &self.canonical_path
     }
@@ -41,6 +55,75 @@ impl WorkspaceGuard {
         }
     }
 
+    /// Approves an existing or missing regular-file target without weakening
+    /// `approve`'s existing-target-only contract. A missing target is safe
+    /// only when its already-existing canonical parent remains in the
+    /// workspace and its final component is a single normal path component.
+    pub fn approve_write_target(
+        &self,
+        requested_path: impl AsRef<Path>,
+    ) -> Result<ApprovedWriteTarget, WorkspaceError> {
+        let requested_path = requested_path.as_ref();
+        validate_requested_path_form(requested_path)?;
+        let candidate = if requested_path.is_absolute() {
+            requested_path.to_path_buf()
+        } else {
+            self.workspace.canonical_root().join(requested_path)
+        };
+
+        match fs::symlink_metadata(&candidate) {
+            Ok(_) => {
+                let canonical_target = fs::canonicalize(&candidate)
+                    .map_err(|error| workspace_io_error(candidate.clone(), error))?;
+                if is_within_workspace(self.workspace.canonical_root(), &canonical_target) {
+                    Ok(ApprovedWriteTarget {
+                        canonical_path: canonical_target,
+                    })
+                } else {
+                    Err(WorkspaceError::WorkspaceEscape {
+                        workspace_root: self.workspace.canonical_root().to_path_buf(),
+                        resolved_path: canonical_target,
+                    })
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let final_component = candidate
+                    .file_name()
+                    .map(std::ffi::OsStr::to_owned)
+                    .filter(|component| is_safe_final_component(component))
+                    .ok_or_else(|| WorkspaceError::UnsupportedPathForm {
+                        path: requested_path.to_path_buf(),
+                    })?;
+                let parent =
+                    candidate
+                        .parent()
+                        .ok_or_else(|| WorkspaceError::UnsupportedPathForm {
+                            path: requested_path.to_path_buf(),
+                        })?;
+                let canonical_parent = fs::canonicalize(parent)
+                    .map_err(|error| workspace_io_error(parent.to_path_buf(), error))?;
+                if !fs::metadata(&canonical_parent)
+                    .map_err(|error| workspace_io_error(canonical_parent.clone(), error))?
+                    .is_dir()
+                {
+                    return Err(WorkspaceError::TargetNotFound {
+                        path: parent.to_path_buf(),
+                    });
+                }
+                if !is_within_workspace(self.workspace.canonical_root(), &canonical_parent) {
+                    return Err(WorkspaceError::WorkspaceEscape {
+                        workspace_root: self.workspace.canonical_root().to_path_buf(),
+                        resolved_path: canonical_parent,
+                    });
+                }
+                Ok(ApprovedWriteTarget {
+                    canonical_path: canonical_parent.join(final_component),
+                })
+            }
+            Err(error) => Err(workspace_io_error(candidate, error)),
+        }
+    }
+
     pub fn resolve(
         &self,
         requested_path: impl AsRef<Path>,
@@ -56,7 +139,21 @@ impl WorkspaceGuard {
         requested_path: impl AsRef<Path>,
         approved: &ApprovedPath,
     ) -> PathBuf {
-        let requested_path = requested_path.as_ref();
+        self.logical_relative(requested_path.as_ref(), approved.as_path())
+    }
+
+    /// Returns a normalized workspace-relative logical path for a write
+    /// target. This is representation only; authorization remains in the
+    /// preceding `approve_write_target` call.
+    pub fn logical_relative_write_path(
+        &self,
+        requested_path: impl AsRef<Path>,
+        approved: &ApprovedWriteTarget,
+    ) -> PathBuf {
+        self.logical_relative(requested_path.as_ref(), approved.as_path())
+    }
+
+    fn logical_relative(&self, requested_path: &Path, approved_path: &Path) -> PathBuf {
         if !requested_path.is_absolute() {
             return normalize_relative(requested_path);
         }
@@ -65,11 +162,24 @@ impl WorkspaceGuard {
             return normalize_relative(relative);
         }
 
-        approved
-            .as_path()
+        approved_path
             .strip_prefix(self.workspace.canonical_root())
             .map(normalize_relative)
             .unwrap_or_default()
+    }
+}
+
+fn is_safe_final_component(component: &std::ffi::OsStr) -> bool {
+    let mut components = Path::new(component).components();
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+}
+
+fn workspace_io_error(path: PathBuf, error: io::Error) -> WorkspaceError {
+    match error.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => {
+            WorkspaceError::TargetNotFound { path }
+        }
+        kind => WorkspaceError::CanonicalizationFailure { path, kind },
     }
 }
 
@@ -214,6 +324,69 @@ mod tests {
     }
 
     #[test]
+    fn missing_write_target_uses_the_canonical_existing_parent() {
+        let test_workspace = TestWorkspace::new();
+        fs::create_dir_all(test_workspace.root.join("src")).expect("src directory");
+        let workspace = workspace_for(&test_workspace);
+        let guard = WorkspaceGuard::new(&workspace);
+
+        let approved = guard
+            .approve_write_target("src/new.txt")
+            .expect("missing target with existing parent");
+        assert_eq!(
+            approved.as_path(),
+            fs::canonicalize(&test_workspace.root)
+                .unwrap()
+                .join("src")
+                .join("new.txt")
+        );
+        assert_eq!(
+            guard.logical_relative_write_path("src/./new.txt", &approved),
+            PathBuf::from("src/new.txt")
+        );
+    }
+
+    #[test]
+    fn existing_write_target_is_approved_and_missing_parent_is_rejected() {
+        let test_workspace = TestWorkspace::new();
+        TestWorkspace::write(&test_workspace.root.join("existing.txt"), "existing");
+        let workspace = workspace_for(&test_workspace);
+        let guard = WorkspaceGuard::new(&workspace);
+
+        assert!(guard.approve_write_target("existing.txt").is_ok());
+        assert!(matches!(
+            guard.approve_write_target("missing/new.txt"),
+            Err(WorkspaceError::TargetNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn write_target_rejects_relative_absolute_and_sibling_prefix_escapes() {
+        let test_workspace = TestWorkspace::new();
+        let outside_file = test_workspace.outside.join("outside.txt");
+        TestWorkspace::write(&outside_file, "outside");
+        let sibling = test_workspace.root.parent().unwrap().join(format!(
+            "{}-evil",
+            test_workspace.root.file_name().unwrap().to_string_lossy()
+        ));
+        fs::create_dir_all(&sibling).expect("sibling directory");
+        let workspace = workspace_for(&test_workspace);
+        let guard = WorkspaceGuard::new(&workspace);
+
+        for path in [
+            PathBuf::from("../outside/new.txt"),
+            outside_file.clone(),
+            sibling.join("new.txt"),
+        ] {
+            assert!(matches!(
+                guard.approve_write_target(path),
+                Err(WorkspaceError::WorkspaceEscape { .. })
+            ));
+        }
+        let _ = fs::remove_dir_all(sibling);
+    }
+
+    #[test]
     fn absolute_file_inside_workspace_is_allowed() {
         let test_workspace = TestWorkspace::new();
         let file = test_workspace.root.join("README.md");
@@ -298,6 +471,19 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn existing_approval_remains_missing_target_fail_closed() {
+        let test_workspace = TestWorkspace::new();
+        let workspace = workspace_for(&test_workspace);
+        let guard = WorkspaceGuard::new(&workspace);
+
+        assert!(matches!(
+            guard.approve("new.txt"),
+            Err(WorkspaceError::TargetNotFound { .. })
+        ));
+        assert!(guard.approve_write_target("new.txt").is_ok());
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_special_path_forms_are_rejected_before_resolution() {
@@ -311,7 +497,11 @@ mod tests {
             PathBuf::from(r"\\.\PhysicalDrive0"),
         ] {
             assert!(matches!(
-                guard.approve(path),
+                guard.approve(&path),
+                Err(WorkspaceError::UnsupportedPathForm { .. })
+            ));
+            assert!(matches!(
+                guard.approve_write_target(&path),
                 Err(WorkspaceError::UnsupportedPathForm { .. })
             ));
         }
@@ -326,7 +516,11 @@ mod tests {
 
         for path in [PathBuf::from(r"\foo"), PathBuf::from(r"\project\file")] {
             assert!(matches!(
-                guard.approve(path),
+                guard.approve(&path),
+                Err(WorkspaceError::UnsupportedPathForm { .. })
+            ));
+            assert!(matches!(
+                guard.approve_write_target(&path),
                 Err(WorkspaceError::UnsupportedPathForm { .. })
             ));
         }
@@ -374,6 +568,34 @@ mod tests {
         assert!(guard.approve(inside_link.join("inside.txt")).is_ok());
         assert!(matches!(
             guard.approve(outside_link.join("outside.txt")),
+            Err(WorkspaceError::WorkspaceEscape { .. })
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn write_target_directory_symlinks_cannot_escape() {
+        use std::os::windows::fs::symlink_dir;
+
+        let test_workspace = TestWorkspace::new();
+        let inside_target = test_workspace.root.join("inside-target");
+        let outside_target = test_workspace.outside.join("outside-target");
+        fs::create_dir_all(&inside_target).expect("inside target");
+        fs::create_dir_all(&outside_target).expect("outside target");
+        let inside_link = test_workspace.root.join("inside-link");
+        let outside_link = test_workspace.root.join("outside-link");
+        if symlink_dir(&inside_target, &inside_link).is_err()
+            || symlink_dir(&outside_target, &outside_link).is_err()
+        {
+            eprintln!("SKIP write-target symlink test: directory symlink creation is unavailable");
+            return;
+        }
+        let workspace = workspace_for(&test_workspace);
+        let guard = WorkspaceGuard::new(&workspace);
+
+        assert!(guard.approve_write_target("inside-link/new.txt").is_ok());
+        assert!(matches!(
+            guard.approve_write_target("outside-link/new.txt"),
             Err(WorkspaceError::WorkspaceEscape { .. })
         ));
     }

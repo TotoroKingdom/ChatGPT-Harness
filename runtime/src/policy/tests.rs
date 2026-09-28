@@ -298,6 +298,42 @@ fn normal_glob_in_active_workspace_is_allowed() {
 }
 
 #[test]
+fn workspace_write_is_allowed_in_active_workspace_in_both_supported_modes() {
+    let engine = PolicyEngine::new(PolicyEngine::system_rules());
+    let registry = ToolRegistry::normal_mode();
+    for mode in [SecurityMode::Normal, SecurityMode::DeveloperTest] {
+        for tool in ["write", "edit"] {
+            let result = engine.evaluate(
+                &PolicyContext::new(tool, mode.clone(), "active_workspace"),
+                &registry,
+            );
+            assert_eq!(result.decision, PolicyDecision::Allow, "{tool} / {mode:?}");
+        }
+    }
+}
+
+#[test]
+fn workspace_write_is_denied_for_invalid_context_or_unknown_capability() {
+    let engine = PolicyEngine::new(PolicyEngine::system_rules());
+    let registry = ToolRegistry::normal_mode();
+    for (tool, scope, reason) in [
+        ("write", "unknown", PolicyEvaluationReason::InvalidContext),
+        (
+            "unknown_write",
+            "active_workspace",
+            PolicyEvaluationReason::UnsupportedCapability,
+        ),
+    ] {
+        let result = engine.evaluate(
+            &PolicyContext::new(tool, SecurityMode::Normal, scope),
+            &registry,
+        );
+        assert_eq!(result.decision, PolicyDecision::Deny, "{tool}");
+        assert_eq!(result.reason, reason, "{tool}");
+    }
+}
+
+#[test]
 fn outside_workspace_is_denied_for_every_registered_tool_in_both_modes() {
     let registry = ToolRegistry::normal_mode();
     let mut rules = PolicyEngine::system_rules();

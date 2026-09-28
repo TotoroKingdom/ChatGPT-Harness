@@ -402,7 +402,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http_transport_exposes_only_read_tools_and_preserves_workspace_security() {
+    async fn http_transport_exposes_available_tools_and_preserves_workspace_security() {
         let workspace = TestWorkspace::new();
         workspace.write("README.md", "zero\none\ntwo\n");
         workspace.write("src/main.rs", "fn main() {}\n");
@@ -464,7 +464,7 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().expect("tool name"))
             .collect::<Vec<_>>();
-        assert_eq!(names, ["read_file", "glob"]);
+        assert_eq!(names, ["read_file", "glob", "write", "edit"]);
 
         let read = mcp_post(
             address,

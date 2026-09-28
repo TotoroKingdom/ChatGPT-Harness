@@ -125,7 +125,7 @@ mod tests {
         )
     }
     #[test]
-    fn allow_exposes_both_declared_tools() {
+    fn allow_exposes_all_declared_tools() {
         assert!(catalog(vec![rule("allow", PolicyDecision::Allow)], true)
             .iter()
             .all(|t| t.availability == ToolAvailability::Available));
@@ -197,6 +197,27 @@ mod tests {
 
         assert_eq!(value["availability"], "available");
         assert_eq!(value["declaredCapability"], "workspace_read");
+    }
+
+    #[test]
+    fn write_tools_keep_the_workspace_write_capability_in_the_effective_catalog() {
+        let tools = EffectiveToolCatalog::compute(
+            &ToolRegistry::normal_mode(),
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::Normal,
+            true,
+        );
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["read_file", "glob", "write", "edit"]
+        );
+        assert!(tools[2..].iter().all(|tool| {
+            tool.availability == ToolAvailability::Available
+                && tool.declared_capability == Some(ToolCapability::WorkspaceWrite)
+        }));
     }
 
     #[test]

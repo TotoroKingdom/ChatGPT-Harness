@@ -15,6 +15,7 @@ pub struct ToolRegistry {
 #[serde(rename_all = "snake_case")]
 pub enum ToolCapability {
     WorkspaceRead,
+    WorkspaceWrite,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +75,34 @@ impl ToolRegistry {
                         risk_level: RiskLevel::Low,
                     },
                 },
+                RegisteredTool {
+                    capability: ToolCapability::WorkspaceWrite,
+                    descriptor: ToolDescriptor {
+                        name: "write".into(),
+                        description: "Write a workspace file.".into(),
+                        implemented: true,
+                        enabled: true,
+                        exposed: true,
+                        effective_policy: PolicyDecision::Allow,
+                        scope: WORKSPACE_SCOPE.into(),
+                        readiness: ToolReadiness::Ready,
+                        risk_level: RiskLevel::Medium,
+                    },
+                },
+                RegisteredTool {
+                    capability: ToolCapability::WorkspaceWrite,
+                    descriptor: ToolDescriptor {
+                        name: "edit".into(),
+                        description: "Edit a workspace text file.".into(),
+                        implemented: true,
+                        enabled: true,
+                        exposed: true,
+                        effective_policy: PolicyDecision::Allow,
+                        scope: WORKSPACE_SCOPE.into(),
+                        readiness: ToolReadiness::Ready,
+                        risk_level: RiskLevel::Medium,
+                    },
+                },
             ],
         }
     }
@@ -117,7 +146,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normal_mode_registry_contains_only_the_v1_tools() {
+    fn normal_mode_registry_contains_the_stable_m0_tool_order() {
         let registry = ToolRegistry::normal_mode();
 
         assert_eq!(
@@ -126,17 +155,9 @@ mod tests {
                 .iter()
                 .map(|descriptor| descriptor.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob"]
+            ["read_file", "glob", "write", "edit"]
         );
-        let forbidden = [
-            "bash",
-            "tree",
-            "list_files",
-            "git",
-            "database",
-            "write",
-            "edit",
-        ];
+        let forbidden = ["bash", "tree", "list_files", "git", "database"];
         assert!(!registry
             .list()
             .iter()
@@ -152,10 +173,12 @@ mod tests {
     }
 
     #[test]
-    fn normal_mode_descriptors_report_read_file_and_glob_as_ready() {
+    fn normal_mode_descriptors_report_read_and_write_tools_as_ready() {
         let descriptors = ToolRegistry::normal_mode().list();
         let read_file = &descriptors[0];
         let glob = &descriptors[1];
+        let write = &descriptors[2];
+        let edit = &descriptors[3];
 
         assert!(read_file.implemented);
         assert!(read_file.enabled);
@@ -172,16 +195,36 @@ mod tests {
         assert_eq!(glob.scope, WORKSPACE_SCOPE);
         assert_eq!(glob.readiness, ToolReadiness::Ready);
         assert_eq!(glob.risk_level, RiskLevel::Low);
+
+        for descriptor in [write, edit] {
+            assert!(descriptor.implemented);
+            assert!(descriptor.enabled);
+            assert!(descriptor.exposed);
+            assert_eq!(descriptor.effective_policy, PolicyDecision::Allow);
+            assert_eq!(descriptor.scope, WORKSPACE_SCOPE);
+            assert_eq!(descriptor.readiness, ToolReadiness::Ready);
+            assert_eq!(descriptor.risk_level, RiskLevel::Medium);
+        }
     }
     #[test]
     fn capability_comes_from_the_same_registered_entry() {
         let registry = ToolRegistry::normal_mode();
-        for descriptor in registry.list() {
-            assert_eq!(
-                registry.capability(&descriptor.name),
-                Some(ToolCapability::WorkspaceRead)
-            );
-        }
+        assert_eq!(
+            registry.capability("read_file"),
+            Some(ToolCapability::WorkspaceRead)
+        );
+        assert_eq!(
+            registry.capability("glob"),
+            Some(ToolCapability::WorkspaceRead)
+        );
+        assert_eq!(
+            registry.capability("write"),
+            Some(ToolCapability::WorkspaceWrite)
+        );
+        assert_eq!(
+            registry.capability("edit"),
+            Some(ToolCapability::WorkspaceWrite)
+        );
         assert_eq!(registry.capability("unknown"), None);
         assert_eq!(registry.capability("bash"), None);
     }

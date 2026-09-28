@@ -87,15 +87,15 @@ impl PolicyEngine {
         Self { rules }
     }
 
-    /// Minimum fixed V1 rules; developer/test shell and approval are not implemented.
+    /// Minimum fixed workspace rules; developer/test shell and approval are not implemented.
     pub(crate) fn system_rules() -> Vec<PolicyRule> {
         vec![
             PolicyRule {
                 id: "system-read-workspace".into(),
-                name: "Allow workspace reads".into(),
+                name: "Allow workspace capabilities".into(),
                 decision: PolicyDecision::Allow,
                 scope: "active_workspace".into(),
-                reason: "Read-only default capability.".into(),
+                reason: "Workspace capability baseline.".into(),
                 source: PolicySource::System,
                 editable: false,
                 enabled: true,
@@ -143,7 +143,7 @@ impl PolicyEngine {
         match (&context.security_mode, capability, scope) {
             (
                 SecurityMode::Normal | SecurityMode::DeveloperTest,
-                ToolCapability::WorkspaceRead,
+                ToolCapability::WorkspaceRead | ToolCapability::WorkspaceWrite,
                 PolicyScope::ActiveWorkspace | PolicyScope::OutsideActiveWorkspace,
             ) => {}
             // Merely switching modes cannot turn a read request into a test capability.

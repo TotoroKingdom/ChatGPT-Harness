@@ -3,7 +3,9 @@ use super::*;
 use crate::audit::{AuditEventType, AuditLifecycleState, AuditOutcome, WorkspaceValidation};
 use crate::mcp::{McpExecutionContext, McpService};
 use crate::policy::{PolicyEngine, PolicyEvaluationReason};
-use crate::tools::{GlobRequest, ReadFileError, ToolRegistry};
+use crate::tools::{
+    EditError, EditRequest, GlobRequest, ReadFileError, ToolRegistry, WriteError, WriteRequest,
+};
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{PolicyDecision, PolicyRule, PolicySource, SecurityMode};
 use serde_json::json;
@@ -211,8 +213,8 @@ impl ToolExecutor for Spy {
     fn validate(&self) -> Result<(), ExecutionError> {
         Ok(())
     }
-    fn workspace_target(&self) -> &Path {
-        &self.path
+    fn workspace_target(&self) -> WorkspaceTarget<'_> {
+        WorkspaceTarget::ExistingPath(&self.path)
     }
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::ReadFile(ReadFileError::Workspace(error))
@@ -350,6 +352,89 @@ fn workspace_denial_precedes_even_allow_policy_and_never_enters_executor() {
         assert!(!fixture.recorder.has(PipelineEvent::PolicyDecision));
         assert!(!fixture.recorder.has(PipelineEvent::ExecutionStarted));
     }
+}
+
+struct ReplaceTargetWithOutsideLink {
+    target: PathBuf,
+    outside: PathBuf,
+    linked: Arc<AtomicBool>,
+}
+
+impl ExecutionHook for ReplaceTargetWithOutsideLink {
+    fn on_event(&self, _: &RequestContext, event: PipelineEvent) {
+        if event != PipelineEvent::PolicyDecision {
+            return;
+        }
+        let _ = fs::remove_file(&self.target);
+        if link_file(&self.outside, &self.target) {
+            self.linked.store(true, Ordering::Release);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn link_file(target: &Path, link: &Path) -> bool {
+    std::os::unix::fs::symlink(target, link).is_ok()
+}
+
+#[cfg(windows)]
+fn link_file(target: &Path, link: &Path) -> bool {
+    std::os::windows::fs::symlink_file(target, link).is_ok()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn link_file(_: &Path, _: &Path) -> bool {
+    false
+}
+
+#[test]
+fn write_and_edit_revalidate_targets_after_policy_before_mutation() {
+    let fixture = Fixture::new();
+    let outside = fixture.base.join("outside-target.txt");
+    fs::write(&outside, "outside").expect("outside fixture");
+
+    let write_target = fixture.root.join("write-target.txt");
+    fs::write(&write_target, "inside").expect("write fixture");
+    let write_linked = Arc::new(AtomicBool::new(false));
+    let write_report = fixture
+        .pipeline(PolicyEngine::system_rules())
+        .with_hook(Arc::new(ReplaceTargetWithOutsideLink {
+            target: write_target.clone(),
+            outside: outside.clone(),
+            linked: write_linked.clone(),
+        }))
+        .execute(|| Ok(WriteRequest::new("write-target.txt", "blocked")));
+    if !write_linked.load(Ordering::Acquire) {
+        eprintln!("SKIP revalidation symlink test: file symlink creation is unavailable");
+        return;
+    }
+    assert!(matches!(
+        write_report.result,
+        Err(ExecutionError::Write(WriteError::Workspace(
+            WorkspaceError::WorkspaceEscape { .. }
+        )))
+    ));
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+
+    let edit_target = fixture.root.join("edit-target.txt");
+    fs::write(&edit_target, "inside").expect("edit fixture");
+    let edit_linked = Arc::new(AtomicBool::new(false));
+    let edit_report = fixture
+        .pipeline(PolicyEngine::system_rules())
+        .with_hook(Arc::new(ReplaceTargetWithOutsideLink {
+            target: edit_target,
+            outside: outside.clone(),
+            linked: edit_linked.clone(),
+        }))
+        .execute(|| Ok(EditRequest::new("edit-target.txt", "inside", "blocked")));
+    assert!(edit_linked.load(Ordering::Acquire));
+    assert!(matches!(
+        edit_report.result,
+        Err(ExecutionError::Edit(EditError::Workspace(
+            WorkspaceError::WorkspaceEscape { .. }
+        )))
+    ));
+    assert_eq!(fs::read_to_string(outside).unwrap(), "outside");
 }
 
 #[test]
@@ -693,7 +778,7 @@ fn mcp_tools_list_exposes_only_available_effective_tools() {
             .iter()
             .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>(),
-        ["read_file", "glob"]
+        ["read_file", "glob", "write", "edit"]
     );
 
     fixture.ready.store(false, Ordering::Release);
@@ -712,7 +797,7 @@ fn mcp_tools_list_exposes_only_available_effective_tools() {
             .iter()
             .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>(),
-        ["glob"]
+        ["glob", "write", "edit"]
     );
 
     let disabled_read_file = McpService::new(McpExecutionContext::new(Arc::new(
@@ -727,6 +812,6 @@ fn mcp_tools_list_exposes_only_available_effective_tools() {
             .iter()
             .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>(),
-        ["glob"]
+        ["glob", "write", "edit"]
     );
 }

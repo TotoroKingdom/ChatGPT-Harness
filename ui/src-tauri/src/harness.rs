@@ -717,12 +717,7 @@ mod tests {
             inner.status.tunnel = HarnessComponentStatus::Ready;
         });
 
-        controller.on_tunnel_event(
-            Some("stale-instance"),
-            TunnelState::Failed,
-            None,
-            None,
-        );
+        controller.on_tunnel_event(Some("stale-instance"), TunnelState::Failed, None, None);
 
         assert_eq!(controller.status().lifecycle, HarnessLifecycle::Ready);
         assert_eq!(controller.status().tunnel, HarnessComponentStatus::Ready);
@@ -738,12 +733,7 @@ mod tests {
             inner.status.mcp = HarnessComponentStatus::Ready;
             inner.status.tunnel = HarnessComponentStatus::Starting;
         });
-        controller.on_tunnel_event(
-            Some("active-instance"),
-            TunnelState::Ready,
-            None,
-            None,
-        );
+        controller.on_tunnel_event(Some("active-instance"), TunnelState::Ready, None, None);
 
         assert_eq!(controller.status().lifecycle, HarnessLifecycle::Ready);
     }

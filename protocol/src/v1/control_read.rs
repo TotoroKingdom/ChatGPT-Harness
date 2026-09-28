@@ -58,6 +58,7 @@ impl ActivitySnapshotParams {
 #[serde(rename_all = "snake_case")]
 pub enum ToolCapability {
     WorkspaceRead,
+    WorkspaceWrite,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,5 +1,5 @@
 use crate::execution::ExecutionError;
-use crate::tools::{GlobError, ReadFileError};
+use crate::tools::{EditError, GlobError, ReadFileError, WriteError};
 use crate::workspace::WorkspaceError;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::json;
@@ -15,6 +15,8 @@ pub(crate) enum McpErrorCategory {
     ReadLimitExceeded,
     InvalidPattern,
     InvalidBasePath,
+    EditMatchNotFound,
+    EditMatchNotUnique,
     IoFailure,
     RuntimeNotInitialized,
     RuntimeNotReady,
@@ -35,6 +37,8 @@ impl McpErrorCategory {
             Self::ReadLimitExceeded => "READ_LIMIT_EXCEEDED",
             Self::InvalidPattern => "INVALID_PATTERN",
             Self::InvalidBasePath => "INVALID_BASE_PATH",
+            Self::EditMatchNotFound => "EDIT_MATCH_NOT_FOUND",
+            Self::EditMatchNotUnique => "EDIT_MATCH_NOT_UNIQUE",
             Self::IoFailure => "IO_FAILURE",
             Self::RuntimeNotInitialized => "RUNTIME_NOT_INITIALIZED",
             Self::RuntimeNotReady => "RUNTIME_NOT_READY",
@@ -55,7 +59,9 @@ impl McpErrorCategory {
             Self::ReadLimitExceeded => "Requested file line exceeds the configured read limit.",
             Self::InvalidPattern => "Glob pattern is invalid.",
             Self::InvalidBasePath => "Glob base path is invalid.",
-            Self::IoFailure => "The runtime could not read the requested workspace target.",
+            Self::EditMatchNotFound => "The requested edit text was not found.",
+            Self::EditMatchNotUnique => "The requested edit text was not unique.",
+            Self::IoFailure => "The runtime could not access the requested workspace target.",
             Self::RuntimeNotInitialized => "Runtime is not initialized.",
             Self::RuntimeNotReady => "Runtime is waiting for the initialized acknowledgement.",
             Self::PolicyDenied => "Tool request was blocked by policy.",
@@ -71,6 +77,8 @@ pub(crate) fn execution_error(error: &ExecutionError) -> CallToolResult {
     match error {
         ExecutionError::ReadFile(error) => read_file_error(error),
         ExecutionError::Glob(error) => glob_error(error),
+        ExecutionError::Write(error) => write_error(error),
+        ExecutionError::Edit(error) => edit_error(error),
         ExecutionError::RuntimeNotInitialized => {
             error_result(McpErrorCategory::RuntimeNotInitialized)
         }
@@ -104,6 +112,29 @@ pub(crate) fn glob_error(error: &GlobError) -> CallToolResult {
         GlobError::Workspace(error) => workspace_error_category(error),
         GlobError::TargetNotDirectory { .. } => McpErrorCategory::TargetNotDirectory,
         GlobError::IoFailure { .. } => McpErrorCategory::IoFailure,
+    };
+    error_result(category)
+}
+
+pub(crate) fn write_error(error: &WriteError) -> CallToolResult {
+    let category = match error {
+        WriteError::Workspace(error) => workspace_error_category(error),
+        WriteError::TargetNotFile { .. } => McpErrorCategory::TargetNotFile,
+        WriteError::IoFailure { .. } => McpErrorCategory::IoFailure,
+        WriteError::InvalidArguments { .. } => McpErrorCategory::InvalidArguments,
+    };
+    error_result(category)
+}
+
+pub(crate) fn edit_error(error: &EditError) -> CallToolResult {
+    let category = match error {
+        EditError::Workspace(error) => workspace_error_category(error),
+        EditError::TargetNotFile { .. } => McpErrorCategory::TargetNotFile,
+        EditError::UnsupportedContent { .. } => McpErrorCategory::UnsupportedContent,
+        EditError::MatchNotFound { .. } => McpErrorCategory::EditMatchNotFound,
+        EditError::MatchNotUnique { .. } => McpErrorCategory::EditMatchNotUnique,
+        EditError::IoFailure { .. } => McpErrorCategory::IoFailure,
+        EditError::InvalidArguments { .. } => McpErrorCategory::InvalidArguments,
     };
     error_result(category)
 }

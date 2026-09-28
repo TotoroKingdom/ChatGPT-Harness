@@ -1,4 +1,6 @@
-use super::{RequestContext, RequestState, SecurityContext, ToolExecutor, TransitionError};
+use super::{
+    RequestContext, RequestState, SecurityContext, ToolExecutor, TransitionError, WorkspaceTarget,
+};
 use crate::audit::{AuditEvent, AuditSink};
 use crate::policy::PolicyEngine;
 use crate::tools::{EffectiveTool, EffectiveToolCatalog, GlobError, ReadFileError, ToolRegistry};
@@ -20,6 +22,8 @@ pub(crate) enum ExecutionError {
     InvalidTransition(TransitionError),
     ReadFile(ReadFileError),
     Glob(GlobError),
+    Write(crate::tools::WriteError),
+    Edit(crate::tools::EditError),
 }
 
 /// No public constructor or Clone/Default. Only this module grants execution.
@@ -168,7 +172,11 @@ impl ExecutionPipeline {
         let executor = prepare()?;
         executor.validate()?;
         self.transition(context, RequestState::WorkspaceValidating)?;
-        match self.guard.approve(executor.workspace_target()) {
+        let workspace_validation = match executor.workspace_target() {
+            WorkspaceTarget::ExistingPath(path) => self.guard.approve(path).map(|_| ()),
+            WorkspaceTarget::WriteTarget(path) => self.guard.approve_write_target(path).map(|_| ()),
+        };
+        match workspace_validation {
             Ok(_) => {
                 context.workspace_validated();
                 self.emit(

@@ -1,5 +1,5 @@
 use crate::mcp::context::McpExecutionContext;
-use crate::mcp::{glob, read_file};
+use crate::mcp::{edit, glob, read_file, write};
 use crate::tools::{EffectiveTool, ToolAvailability};
 use rmcp::handler::server::common::schema_for_input;
 use rmcp::handler::server::ServerHandler;
@@ -13,6 +13,8 @@ use serde_json::Value;
 
 const READ_FILE: &str = "read_file";
 const GLOB: &str = "glob";
+const WRITE: &str = "write";
+const EDIT: &str = "edit";
 
 #[derive(Clone)]
 pub struct McpService {
@@ -50,6 +52,8 @@ impl McpService {
         match name {
             READ_FILE => Ok(read_file::execute(&self.context, arguments)),
             GLOB => Ok(glob::execute(&self.context, arguments)),
+            WRITE => Ok(write::execute(&self.context, arguments)),
+            EDIT => Ok(edit::execute(&self.context, arguments)),
             _ => Err(McpProtocolError::UnknownTool),
         }
     }
@@ -100,6 +104,8 @@ fn tool_from_effective(tool: EffectiveTool) -> Option<Tool> {
     match tool.name.as_str() {
         READ_FILE => Some(read_file_tool_with_metadata(&tool.name, &tool.description)),
         GLOB => Some(glob_tool_with_metadata(&tool.name, &tool.description)),
+        WRITE => Some(write_tool_with_metadata(&tool.name, &tool.description)),
+        EDIT => Some(edit_tool_with_metadata(&tool.name, &tool.description)),
         _ => None,
     }
 }
@@ -121,6 +127,34 @@ fn glob_tool_with_metadata(name: &str, description: &str) -> Tool {
         schema_for_input::<glob::GlobArguments>().expect("glob MCP schema is statically valid"),
     )
     .with_annotations(ToolAnnotations::new().read_only(true).destructive(false))
+}
+
+fn write_tool_with_metadata(name: &str, description: &str) -> Tool {
+    Tool::new(
+        name.to_owned(),
+        description.to_owned(),
+        schema_for_input::<write::WriteArguments>().expect("write MCP schema is statically valid"),
+    )
+    .with_annotations(
+        ToolAnnotations::new()
+            .read_only(false)
+            .destructive(true)
+            .open_world(false),
+    )
+}
+
+fn edit_tool_with_metadata(name: &str, description: &str) -> Tool {
+    Tool::new(
+        name.to_owned(),
+        description.to_owned(),
+        schema_for_input::<edit::EditArguments>().expect("edit MCP schema is statically valid"),
+    )
+    .with_annotations(
+        ToolAnnotations::new()
+            .read_only(false)
+            .destructive(true)
+            .open_world(false),
+    )
 }
 
 #[cfg(test)]
@@ -232,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn ready_catalog_exposes_read_tools_and_excludes_non_v1_tools() {
+    fn ready_catalog_exposes_read_write_tools_and_excludes_unsupported_tools() {
         let workspace = TestWorkspace::new();
         let service = workspace.service();
         let names = service
@@ -240,7 +274,7 @@ mod tests {
             .into_iter()
             .map(|tool| tool.name.into_owned())
             .collect::<Vec<_>>();
-        assert_eq!(names, [READ_FILE, GLOB]);
+        assert_eq!(names, [READ_FILE, GLOB, WRITE, EDIT]);
         for forbidden in [
             "bash",
             "tree",
@@ -248,8 +282,6 @@ mod tests {
             "find_files",
             "git",
             "database",
-            "write",
-            "edit",
             "runtime.status",
             "diagnostics.run",
         ] {
@@ -374,5 +406,196 @@ mod tests {
             workspace.service().call_tool("unknown_tool", json!({})),
             Err(McpProtocolError::UnknownTool)
         ));
+    }
+
+    #[test]
+    fn write_and_edit_builders_expose_the_declared_schema_and_mutation_annotations() {
+        let workspace = TestWorkspace::new();
+        let service = workspace.service();
+        for (name, required) in [
+            (WRITE, ["path", "content"].as_slice()),
+            (EDIT, ["path", "oldText", "newText"].as_slice()),
+        ] {
+            let tool = service.get_tool(name).expect("write/edit tool");
+            let schema = serde_json::to_value(tool.input_schema.as_ref()).unwrap();
+            let properties = schema["properties"].as_object().expect("properties");
+            for field in required {
+                assert!(properties.contains_key(*field), "{name} missing {field}");
+            }
+            assert_eq!(schema["additionalProperties"], false);
+            let annotations = tool.annotations.expect("annotations");
+            assert_eq!(annotations.read_only_hint, Some(false));
+            assert_eq!(annotations.destructive_hint, Some(true));
+            assert_eq!(annotations.open_world_hint, Some(false));
+        }
+    }
+
+    #[test]
+    fn write_and_edit_route_through_structured_success_results() {
+        let workspace = TestWorkspace::new();
+        workspace.write("src/placeholder.txt", "placeholder");
+        let service = workspace.service();
+
+        let write = call(
+            &service,
+            WRITE,
+            json!({ "path": "src/generated.txt", "content": "hello from ChatGPT" }),
+        );
+        assert_eq!(write.is_error, Some(false));
+        assert_eq!(
+            write.structured_content.as_ref().unwrap(),
+            &json!({
+                "normalizedPath": "src/generated.txt",
+                "bytesWritten": "hello from ChatGPT".len(),
+                "created": true,
+                "overwritten": false,
+            })
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("src/generated.txt")).unwrap(),
+            "hello from ChatGPT"
+        );
+
+        let edit = call(
+            &service,
+            EDIT,
+            json!({
+                "path": "src/generated.txt",
+                "oldText": "hello from ChatGPT",
+                "newText": "hello from V3"
+            }),
+        );
+        assert_eq!(edit.is_error, Some(false));
+        assert_eq!(
+            edit.structured_content.as_ref().unwrap()["normalizedPath"],
+            "src/generated.txt"
+        );
+        assert_eq!(edit.structured_content.as_ref().unwrap()["replacements"], 1);
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("src/generated.txt")).unwrap(),
+            "hello from V3"
+        );
+    }
+
+    #[test]
+    fn write_and_edit_failures_are_sanitized_and_deterministic() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "one two one");
+        let outside = workspace.outside.join("secret.txt");
+        fs::write(&outside, "outside secret").expect("outside fixture");
+        let service = workspace.service();
+
+        for arguments in [
+            json!({ "path": "file.txt" }),
+            json!({ "path": "file.txt", "content": "x", "extra": true }),
+        ] {
+            assert_eq!(
+                error_code(&call(&service, WRITE, arguments)),
+                "INVALID_ARGUMENTS"
+            );
+        }
+        let outside_result = call(
+            &service,
+            WRITE,
+            json!({ "path": outside.to_string_lossy(), "content": "blocked" }),
+        );
+        assert_eq!(error_code(&outside_result), "WORKSPACE_VIOLATION");
+        assert!(!serde_json::to_string(&outside_result)
+            .unwrap()
+            .contains(&*outside.to_string_lossy()));
+
+        let no_match = call(
+            &service,
+            EDIT,
+            json!({ "path": "file.txt", "oldText": "missing", "newText": "new" }),
+        );
+        assert_eq!(error_code(&no_match), "EDIT_MATCH_NOT_FOUND");
+        let non_unique = call(
+            &service,
+            EDIT,
+            json!({ "path": "file.txt", "oldText": "one", "newText": "new" }),
+        );
+        assert_eq!(error_code(&non_unique), "EDIT_MATCH_NOT_UNIQUE");
+        let empty_old = call(
+            &service,
+            EDIT,
+            json!({ "path": "file.txt", "oldText": "", "newText": "new" }),
+        );
+        assert_eq!(error_code(&empty_old), "INVALID_ARGUMENTS");
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("file.txt")).unwrap(),
+            "one two one"
+        );
+    }
+
+    #[test]
+    fn write_and_edit_use_existing_audit_lifecycle_and_boundary_rejection_has_no_start() {
+        use crate::audit::AuditEventType;
+        use crate::state::RuntimeCore;
+
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+
+        let success = call(
+            &service,
+            WRITE,
+            json!({ "path": "created.txt", "content": "created" }),
+        );
+        assert_eq!(success.is_error, Some(false));
+        let entries = core.activity_snapshot(20);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.event_type)
+                .collect::<Vec<_>>(),
+            [
+                AuditEventType::RequestReceived,
+                AuditEventType::WorkspaceValidated,
+                AuditEventType::PolicyEvaluated,
+                AuditEventType::ExecutionStarted,
+                AuditEventType::ExecutionCompleted,
+            ]
+        );
+        assert!(entries
+            .iter()
+            .all(|entry| entry.tool_name.as_deref() == Some(WRITE)));
+
+        let outside = workspace.outside.join("outside.txt");
+        fs::write(&outside, "outside").expect("outside fixture");
+        let rejected = call(
+            &service,
+            EDIT,
+            json!({
+                "path": outside.to_string_lossy(),
+                "oldText": "outside",
+                "newText": "blocked"
+            }),
+        );
+        assert_eq!(error_code(&rejected), "WORKSPACE_VIOLATION");
+        let entries = core.activity_snapshot(20);
+        let rejected_entries = &entries[5..];
+        assert_eq!(
+            rejected_entries
+                .iter()
+                .map(|entry| entry.event_type)
+                .collect::<Vec<_>>(),
+            [
+                AuditEventType::RequestReceived,
+                AuditEventType::WorkspaceValidated,
+            ]
+        );
+        assert!(rejected_entries
+            .iter()
+            .all(|entry| entry.tool_name.as_deref() == Some(EDIT)));
+        assert!(!rejected_entries
+            .iter()
+            .any(|entry| entry.event_type == AuditEventType::ExecutionStarted));
+        assert!(!serde_json::to_string(&entries)
+            .unwrap()
+            .contains(&*workspace.root.to_string_lossy()));
     }
 }
