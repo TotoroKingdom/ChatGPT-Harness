@@ -45,7 +45,7 @@ ACCEPTED / FROZEN
 ### Development rules
 
 1. 必须先读取当前源码、Tests、Manifests 和 `wiki/**`，再设计或执行 V3 Task。
-2. `docs-codex/v3/**` 是开发目标，不是当前实现事实。
+2. `docs-codex/**` 是开发目标，不是当前实现事实。
 3. 不得为了满足 V3 文档而假设尚未实现的接口、模块或能力已经存在。
 4. 每个 Task 必须包含对应 Unit Test 或明确的自动化验证。
 5. Unit Test 不单独创建测试计划，直接属于 Task 的完成标准。
