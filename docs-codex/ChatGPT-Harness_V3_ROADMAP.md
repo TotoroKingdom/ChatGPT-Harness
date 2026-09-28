@@ -177,10 +177,20 @@ write/edit 的正常路径、错误路径和 Workspace 边界均有自动化测�
 - Runtime 的有效工具目录不再提供该工具
 - MCP `tools/list` 不再暴露该工具
 - Runtime 必须拒绝 stale / cached 的旧调用
-- 支持工具列表变化通知时应发送通知
-- UI 显示真实 Runtime effective state
+- Tool 配置通过下一 Runtime generation 生效
+- V3 不要求同一 Runtime generation 内实现 `tools/list_changed`
+- UI 显示真实 Runtime effective state，并明确 Restart Required
 
 不要求 ChatGPT 当前会话在没有 Refresh 的情况下瞬时更新其客户端缓存。
+
+## Exit Criteria
+
+1. 每个 configurable Tool 的 desired ON/OFF 状态可以持久化。
+2. Harness 运行中修改 Tool 配置后，当前 Runtime effective state 不被伪装为已变更，并明确显示 Restart Required。
+3. Restart 后 Runtime effective state 与 saved desired state 一致。
+4. OFF Tool 不出现在新的 Runtime generation 的 MCP `tools/list`。
+5. stale / cached `tools/call` 被 Runtime 拒绝。
+6. enabled / disabled / stale-call 路径有自动化验证。
 
 ---
 
@@ -212,10 +222,19 @@ DENY > ASK > ALLOW
 
 - System Rules 不可被用户关闭或覆盖
 - User Rules 可创建、编辑、启用、禁用、删除
-- 无匹配规则时 fail closed
-- 非法 Policy 配置 fail closed
+- 无匹配显式 User Rule 时使用 Tool Default
+- 非法 / 无法编译的 Policy 配置 fail closed
 - 每次判定保留 matched rule evidence
 - Policy UI 展示 effective decision，而非仅展示配置值
+
+## Exit Criteria
+
+1. System Guardrails 保持 Runtime-owned、只读且不可由 User Policy 覆盖。
+2. User Rules 支持创建、编辑、启用、禁用、删除并可持久化。
+3. 存在匹配 User Rules 时按 `DENY > ASK > ALLOW` 得到确定结果。
+4. 无匹配显式 User Rule 时使用对应 Tool Default。
+5. 任一 enabled invalid rule 使 Policy snapshot fail closed，不允许跳过坏规则寻找 ALLOW。
+6. Runtime 输出 effective decision、matched rule IDs 和 decision reason，UI 不自行重算。
 
 ---
 
@@ -258,6 +277,15 @@ User Decision
 ```
 
 审批不能绕过 WorkspaceGuard 或 System Guardrails。
+
+## Exit Criteria
+
+1. `ASK` 请求保持原 request identity 并进入 Pending，而不是立即丢弃请求。
+2. Allow once 只恢复当前精确请求；Deny 后请求不执行。
+3. Allow for session 只创建当前 Runtime generation 内、范围不宽于审批展示范围的 grant。
+4. Runtime stop / crash 会取消 pending approvals 和 session grants。
+5. Approval 无法绕过 WorkspaceGuard、System Guardrails 或显式 DENY。
+6. Approval request / resolution 与执行结果具有关联 evidence。
 
 ---
 
@@ -325,6 +353,15 @@ ALLOW + DENY → DENY
 
 无法可靠分类的高风险 Shell 表达式默认进入 ASK。
 
+## Exit Criteria
+
+1. Normal Mode 不暴露 `bash`；Developer/Test Mode 也只有在 enabled、executable ready、Runtime ready 且 Policy 非 DENY 时才具备暴露资格。
+2. Git Bash 支持 auto-detect、manual override 和明确的 unavailable/remediation 状态。
+3. 可可靠分析的 command / compound command 产生 deterministic policy facts，并按最高 severity 决策。
+4. 无法可靠分类的高风险表达式进入 ASK，而不是 ALLOW。
+5. timeout、output、command length、concurrency 和 cancellation limits 被 Runtime enforcement。
+6. timeout / cancellation / Runtime shutdown 能终止本次 invocation 拥有的 process tree，并留下 Activity/Audit evidence。
+
 ---
 
 # M6 — Chinese / English UI
@@ -353,6 +390,14 @@ ALLOW + DENY → DENY
 
 只翻译用户可见文案。
 
+## Exit Criteria
+
+1. 首次启动在无 saved language 时跟随 OS language，不支持的语言 fallback English。
+2. Settings 可在简体中文 / English 间即时切换，不要求 Runtime restart。
+3. language choice 本地持久化并在应用重启后保持。
+4. V3 主要用户可见页面、状态、提示和错误解释均使用 i18n resource。
+5. MCP tool name、protocol field、Runtime machine identifier 和 Policy internal ID 保持未翻译。
+
 ---
 
 # M7 — Migration, Evidence & UX Hardening
@@ -364,6 +409,8 @@ ALLOW + DENY → DENY
 ## Scope
 
 ### Config Migration
+
+产品升级场景是 `ChatGPT-Harness V2 → V3`；持久化 AppConfig 的实际 schema migration 是 `schemaVersion v1 → v2`。两者不得混用。
 
 V2 配置必须无损迁移至 V3：
 
@@ -398,6 +445,15 @@ Activity / Audit 至少保留：
 - 可执行的 remediation
 - Policy 错误不得静默降级为 Allow
 - 工具状态、Policy 状态与 Runtime effective state 保持一致
+
+## Exit Criteria
+
+1. `schemaVersion v1 → v2` migration 自动完成并保留 Workspace、Tunnel、API Key reference、Proxy/Tunnel settings 和 Security Mode。
+2. migration failure 不覆盖原配置、不明文化 SecretStore secret，并给出可诊断错误。
+3. Activity/Audit 能关联 Tool、sanitized arguments、Policy decision、matched rule IDs、Approval ID、execution result 和 duration。
+4. Disabled / Denied / Ask / Unavailable / execution failure 等状态在 UI 中可区分，并提供适用的 remediation。
+5. desired config 与 Runtime effective state / configRevision 不一致时 UI 明确显示 Restart Required，不把 desired state 冒充为 effective state。
+6. migration、evidence 和关键 UX 状态具备自动化回归验证。
 
 ---
 
