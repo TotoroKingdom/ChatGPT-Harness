@@ -1,60 +1,91 @@
 # IMPLEMENTATION MATRIX
 
-> 判定基准：当前源码与自动化验证结果。`E2E` 只有在真实外部 caller 能走完整链路时才算通过；本表不把 mock 或本地 Runtime HTTP 测试冒充 ChatGPT E2E。
+~~~yaml
+V2 — Read-only Harness
+Status: ACCEPTED / FROZEN
+~~~
 
-| Capability | Core | Protocol | Tauri | UI | Automated | Current evidence |
+判定基准是当前源码、Tests、Manifests 和构建脚本。外部 ChatGPT E2E 已完成 **manual acceptance（人工验收）**；它不是自动化测试列的 PASS，也不把 mock、进程存在或本地 Runtime HTTP 测试冒充真实外部调用。
+
+| Capability | Core | Protocol | Tauri | UI | Automated evidence | Acceptance status |
 | --- | --- | --- | --- | --- | --- | --- |
-| Runtime lifecycle | Implemented | Implemented | Implemented | Implemented | PASS | `RuntimeSupervisor`、Runtime JSONL lifecycle、stop timeout、crash watcher |
-| Runtime MCP endpoint handoff | Implemented | Implemented | Implemented | Internal only | PASS | `mcp.endpoint.get`、loopback/path validation、generation-bound storage、stop/crash clear |
-| WorkspaceGuard / Policy / Execution | Implemented | Not Applicable | Not Applicable | Not Applicable | PASS | Runtime MCP `read_file`/`glob` 继续经过既有 ExecutionPipeline |
-| SecretStore controlled read | Not Applicable | Reference implemented | Implemented | Transient input only | PASS | Windows Credential Manager + MemorySecretStore `get`; no frontend get command |
-| API key boundary | Not Applicable | SecretReference only | Implemented | Implemented | PASS | config stores locator only；argv 使用 `env:HARNESS_TUNNEL_API_KEY`；raw key 不进状态/日志 |
-| Tunnel distribution resolution | Not Applicable | Manifest metadata | Implemented | Override is dev-only | PASS | installed layout canonicalization、manifest schema 2、client/companion checks |
-| Tunnel launch | Not Applicable | Not Applicable | Implemented | Harness action | PASS | verified 0.0.13 flags、MCP URL、Tunnel ID、health URL file |
-| Tunnel readiness | Not Applicable | Not Applicable | Implemented | Real state consumed | PASS | discovery、loopback health、`/readyz`、control-plane/MCP/readiness evidence、loss monitor |
-| Windows process-tree ownership | Not Applicable | Not Applicable | Implemented | Not Applicable | PASS | per-session Job Object、kill-on-close、graceful then forced tree cleanup code/tests |
-| Harness eligibility | Not Applicable | Implemented statuses | Implemented | Rendered remediation | PASS | workspace/security/runtime/Tunnel/API key/distribution/conflict checks |
-| Harness orchestration | Not Applicable | HarnessStatus payload | Implemented | Start/Stop/Restart | PASS | serialized controller、rollback、ordering、session/generation stale suppression |
-| Runtime crash convergence | Implemented | Not Applicable | Implemented | Event-driven state | PASS | Runtime watcher invalidates MCP/Harness and stops associated Tunnel |
-| Tunnel crash convergence | Not Applicable | Not Applicable | Implemented | Event-driven state | PASS | Tunnel watcher changes Harness to Error; explicit restart required |
-| Real UI state | Not Applicable | HarnessStatus | Implemented | Implemented | PASS | Provider uses `harness_status`/`harness:status`; no Tunnel=stopped or MCP=Runtime projection |
-| `read_file` / `glob` execution | Implemented | Not Applicable | Not Applicable | Activity view | PASS locally | Runtime MCP and security tests pass; external ChatGPT path requires credentials |
-| Distribution staging | Not Applicable | Manifest | Implemented | Build scripts | PASS | staging copies UI, Runtime, Tunnel, cloudflared, metadata, licenses/notices/SBOM |
-| NSIS bundle verification | Not Applicable | Manifest | Implemented | Build script | PASS | `npm run bundle:windows` generated and verified NSIS installer |
-| Development external E2E | Implemented | Implemented | Implemented | Implemented | NOT RUN | requires real Tunnel ID/API Key and ChatGPT connector access |
-| Installed external E2E | Implemented | Implemented | Implemented | Implemented | NOT RUN | bundle payload passed; clean installed ChatGPT flow still needs external credentials/access |
+| Runtime lifecycle | Implemented | Implemented | Implemented | Implemented | PASS | V2 accepted |
+| Runtime MCP endpoint handoff | Implemented | Implemented | Implemented | Internal only | PASS | V2 accepted |
+| WorkspaceGuard / Policy / Execution | Implemented | Not Applicable | Not Applicable | Not Applicable | PASS | V2 accepted |
+| SecretStore controlled read | Not Applicable | Reference implemented | Implemented | Transient input only | PASS | V2 accepted |
+| API key boundary | Not Applicable | SecretReference only | Implemented | Implemented | PASS | V2 accepted |
+| Tunnel distribution resolution | Not Applicable | Manifest metadata | Implemented | Dev override only | PASS | V2 accepted |
+| Tunnel launch | Not Applicable | Not Applicable | Implemented | Harness action | PASS | V2 accepted |
+| Tunnel readiness | Not Applicable | Not Applicable | Implemented | Real state consumed | PASS | V2 accepted |
+| Windows process-tree ownership | Not Applicable | Not Applicable | Implemented | Not Applicable | PASS | V2 accepted |
+| Harness eligibility | Not Applicable | Implemented statuses | Implemented | Remediation rendered | PASS | V2 accepted |
+| Harness orchestration | Not Applicable | HarnessStatus payload | Implemented | Start / Stop / Restart | PASS | V2 accepted |
+| Runtime crash convergence | Implemented | Not Applicable | Implemented | Event-driven state | PASS | V2 accepted |
+| Tunnel crash convergence | Not Applicable | Not Applicable | Implemented | Event-driven state | PASS | V2 accepted |
+| Real UI state | Not Applicable | HarnessStatus | Implemented | Implemented | PASS | V2 accepted |
+| read_file / glob execution | Implemented | Not Applicable | Not Applicable | Activity view | PASS locally | External path manually accepted |
+| Distribution staging | Not Applicable | Manifest | Implemented | Build scripts | PASS | V2 accepted |
+| NSIS bundle verification | Not Applicable | Manifest | Implemented | Build script | PASS | V2 accepted |
+| Development external E2E | Implemented | Implemented | Implemented | Implemented | Not an automated test | MANUAL ACCEPTANCE |
+| Installed external E2E | Implemented | Implemented | Implemented | Implemented | Not an automated test | MANUAL ACCEPTANCE |
+| Approval resume workflow | Out of V2 scope | DTOs only | Not applicable | Not applicable | Not implemented | V3 Phase 3 planned |
+| write_file / edit_file / bash | Out of V2 scope | Not applicable | Not applicable | Not applicable | Not implemented | V3 planned |
 
-## Automated Gates
+## Automated validation boundary
 
-All repository gates passed in the final run:
+自动化验证只声明已实际执行的本地门禁与组件覆盖，例如：
 
-```text
+~~~text
 cargo fmt --all -- --check
 cargo check --workspace
 cargo test --workspace
-  Runtime: 155 passed
-  Tauri: 48 passed
-  Protocol: 9 passed
+cd ui
 npm test
-  5 files / 77 tests passed
 npm run build
 npm run distribution:stage
 npm run bundle:windows
-```
+~~~
 
-## External Acceptance Boundary
+这些门禁证明代码、contract、Runtime/Tauri/UI 测试和分发校验的相应覆盖；它们不自动证明当前 ChatGPT connector、真实 Tunnel credential 或人工外部连接。
 
-The code now provides the complete production path:
+## V2 acceptance boundary
 
-```text
-Harness config
-→ Runtime endpoint handoff
-→ secure Tunnel launch
-→ authoritative Tunnel readiness
-→ ChatGPT connector
-→ read_file / glob
-→ WorkspaceGuard / Policy / Execution
-→ Activity
-```
+人工验收覆盖：
 
-The first five steps and all local automated evidence are implemented. The last external steps cannot be honestly marked PASS in this run because no real Tunnel credentials or ChatGPT connector session were supplied. A future acceptance run must prove both development and installed flows, then verify all owned Runtime/Tunnel/cloudflared processes exit after Stop.
+~~~text
+Configure Workspace / Tunnel ID / API Key
+        ↓
+Start Harness
+        ↓
+Runtime = ready
+MCP = ready
+Tunnel = ready
+Harness = ready
+        ↓
+ChatGPT discovers tools
+        ↓
+ChatGPT calls read_file / glob
+        ↓
+WorkspaceGuard + Policy + Execution
+        ↓
+Activity appears in UI
+        ↓
+Stop Harness
+        ↓
+Tunnel and Runtime exit
+~~~
+
+人工验收仍然标记为 manual acceptance；不要将其改写成 automated PASS。
+
+## Source-of-truth locations
+
+| Question | Source |
+| --- | --- |
+| Runtime / MCP | runtime/src/** |
+| Control protocol | protocol/src/** |
+| Runtime supervision / endpoint handoff | ui/src-tauri/src/runtime/** |
+| Tunnel launch / readiness / cleanup | ui/src-tauri/src/tunnel/** |
+| Harness lifecycle | ui/src-tauri/src/harness.rs, ui/src-tauri/src/commands/** |
+| React state adapter | ui/src/services/harness/**, ui/src/app/providers/** |
+| V2 acceptance record | wiki/V2-ACCEPTANCE.md |
+| V3 roadmap | docs-codex/v3/ROADMAP.md |
