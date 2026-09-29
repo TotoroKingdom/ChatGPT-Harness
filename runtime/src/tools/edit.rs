@@ -1,3 +1,8 @@
+#[cfg(test)]
+use super::atomic_file::AtomicFault;
+use super::atomic_file::{
+    atomic_mutate, AtomicCommitMode, AtomicMutationError, AtomicMutationOptions, AtomicPhase,
+};
 use crate::workspace::{WorkspaceError, WorkspaceGuard};
 use std::fmt;
 use std::fs;
@@ -37,12 +42,34 @@ pub struct EditOutput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditError {
     Workspace(WorkspaceError),
-    TargetNotFile { path: PathBuf },
-    UnsupportedContent { path: PathBuf },
-    MatchNotFound { path: PathBuf },
-    MatchNotUnique { path: PathBuf, matches: u64 },
-    IoFailure { path: PathBuf, kind: io::ErrorKind },
-    InvalidArguments { message: String },
+    TargetNotFile {
+        path: PathBuf,
+    },
+    UnsupportedContent {
+        path: PathBuf,
+    },
+    MatchNotFound {
+        path: PathBuf,
+    },
+    MatchNotUnique {
+        path: PathBuf,
+        matches: u64,
+    },
+    TargetChanged {
+        path: PathBuf,
+    },
+    IoFailure {
+        path: PathBuf,
+        kind: io::ErrorKind,
+    },
+    AtomicFailure {
+        path: PathBuf,
+        phase: AtomicPhase,
+        kind: io::ErrorKind,
+    },
+    InvalidArguments {
+        message: String,
+    },
 }
 
 impl fmt::Display for EditError {
@@ -63,9 +90,17 @@ impl fmt::Display for EditError {
                 "edit text matched {matches} times in {}; exactly one match is required",
                 path.display()
             ),
+            Self::TargetChanged { path } => {
+                write!(formatter, "target changed during edit: {}", path.display())
+            }
             Self::IoFailure { path, kind } => {
                 write!(formatter, "I/O failure for {} ({kind:?})", path.display())
             }
+            Self::AtomicFailure { path, phase, kind } => write!(
+                formatter,
+                "atomic {phase:?} failure for {} ({kind:?})",
+                path.display()
+            ),
             Self::InvalidArguments { message } => {
                 write!(formatter, "invalid edit arguments: {message}")
             }
@@ -82,12 +117,35 @@ impl std::error::Error for EditError {
     }
 }
 
-/// Executes a deterministic exact single-match replacement after revalidating
-/// the existing target. Atomic replacement remains outside M0.
+/// Executes a deterministic exact single-match replacement through the shared
+/// atomic mutation path.
 pub(crate) fn execute_edit(
+    permit: &crate::execution::ExecutionPermit,
+    workspace_guard: &WorkspaceGuard,
+    request: &EditRequest,
+) -> Result<EditOutput, EditError> {
+    execute_edit_with_options(
+        permit,
+        workspace_guard,
+        request,
+        AtomicMutationOptions::default(),
+    )
+}
+
+fn execute_edit_with_options(
     _permit: &crate::execution::ExecutionPermit,
     workspace_guard: &WorkspaceGuard,
     request: &EditRequest,
+    options: AtomicMutationOptions,
+) -> Result<EditOutput, EditError> {
+    execute_edit_inner(workspace_guard, request, options, None)
+}
+
+fn execute_edit_inner(
+    workspace_guard: &WorkspaceGuard,
+    request: &EditRequest,
+    options: AtomicMutationOptions,
+    mut before_revalidation: Option<&mut dyn FnMut()>,
 ) -> Result<EditOutput, EditError> {
     if request.path.as_os_str().is_empty() {
         return Err(EditError::InvalidArguments {
@@ -112,13 +170,14 @@ pub(crate) fn execute_edit(
         return Err(EditError::TargetNotFile { path: target_path });
     }
 
-    let original = fs::read(&target_path).map_err(|error| EditError::IoFailure {
+    let original_bytes = fs::read(&target_path).map_err(|error| EditError::IoFailure {
         path: target_path.clone(),
         kind: error.kind(),
     })?;
-    let original = String::from_utf8(original).map_err(|_| EditError::UnsupportedContent {
-        path: target_path.clone(),
-    })?;
+    let original =
+        String::from_utf8(original_bytes.clone()).map_err(|_| EditError::UnsupportedContent {
+            path: target_path.clone(),
+        })?;
     let matches = original.match_indices(&request.old_text).count() as u64;
     match matches {
         0 => return Err(EditError::MatchNotFound { path: target_path }),
@@ -132,16 +191,96 @@ pub(crate) fn execute_edit(
     }
 
     let replacement = original.replacen(&request.old_text, &request.new_text, 1);
-    fs::write(&target_path, replacement.as_bytes()).map_err(|error| EditError::IoFailure {
-        path: target_path,
-        kind: error.kind(),
-    })?;
+    let target_for_revalidation = target_path.clone();
+    let requested_path = request.path.clone();
+    atomic_mutate(
+        &target_path,
+        replacement.as_bytes(),
+        AtomicCommitMode::ReplaceExisting,
+        || {
+            if let Some(hook) = before_revalidation.as_mut() {
+                hook();
+            }
+            revalidate_edit_target(
+                workspace_guard,
+                &requested_path,
+                &target_for_revalidation,
+                &original_bytes,
+            )
+        },
+        options,
+    )
+    .map_err(|error| map_atomic_error(error, target_path.clone()))?;
 
     Ok(EditOutput {
         normalized_path,
         replacements: 1,
-        bytes_written: replacement.len() as u64,
+        bytes_written: replacement.as_bytes().len() as u64,
     })
+}
+
+fn revalidate_edit_target(
+    workspace_guard: &WorkspaceGuard,
+    requested_path: &std::path::Path,
+    target_path: &std::path::Path,
+    original_bytes: &[u8],
+) -> Result<(), EditError> {
+    let approved = match workspace_guard.approve(requested_path) {
+        Ok(approved) => approved,
+        Err(WorkspaceError::TargetNotFound { .. }) => {
+            return Err(EditError::TargetChanged {
+                path: target_path.to_path_buf(),
+            })
+        }
+        Err(error) => return Err(EditError::Workspace(error)),
+    };
+    if approved.as_path() != target_path {
+        return Err(EditError::TargetChanged {
+            path: target_path.to_path_buf(),
+        });
+    }
+
+    let metadata = match fs::metadata(target_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(EditError::TargetChanged {
+                path: target_path.to_path_buf(),
+            })
+        }
+        Err(error) => {
+            return Err(EditError::IoFailure {
+                path: target_path.to_path_buf(),
+                kind: error.kind(),
+            })
+        }
+    };
+    if !metadata.is_file() {
+        return Err(EditError::TargetChanged {
+            path: target_path.to_path_buf(),
+        });
+    }
+
+    let current_bytes = fs::read(target_path).map_err(|error| EditError::IoFailure {
+        path: target_path.to_path_buf(),
+        kind: error.kind(),
+    })?;
+    if current_bytes != original_bytes {
+        return Err(EditError::TargetChanged {
+            path: target_path.to_path_buf(),
+        });
+    }
+    Ok(())
+}
+
+fn map_atomic_error(error: AtomicMutationError<EditError>, path: PathBuf) -> EditError {
+    match error {
+        AtomicMutationError::Revalidation { error, .. } => error,
+        AtomicMutationError::Io { error, .. } => EditError::AtomicFailure {
+            path,
+            phase: error.phase,
+            kind: error.kind,
+        },
+    }
 }
 
 #[cfg(test)]
@@ -184,6 +323,32 @@ mod tests {
                 request,
             )
         }
+
+        fn execute_with_options(
+            &self,
+            request: &EditRequest,
+            options: AtomicMutationOptions,
+        ) -> Result<EditOutput, EditError> {
+            execute_edit_with_options(
+                &ExecutionPermit::for_executor_test(),
+                &self.guard(),
+                request,
+                options,
+            )
+        }
+
+        fn execute_with_hook(
+            &self,
+            request: &EditRequest,
+            hook: &mut dyn FnMut(),
+        ) -> Result<EditOutput, EditError> {
+            execute_edit_inner(
+                &self.guard(),
+                request,
+                AtomicMutationOptions::default(),
+                Some(hook),
+            )
+        }
     }
 
     impl Drop for TestWorkspace {
@@ -212,6 +377,113 @@ mod tests {
         assert_eq!(output.normalized_path, PathBuf::from("file.txt"));
         assert_eq!(output.replacements, 1);
         assert_eq!(output.bytes_written, "hello from V3\n".len() as u64);
+    }
+
+    #[test]
+    fn edit_uses_utf8_byte_length_for_multibyte_replacement() {
+        let workspace = TestWorkspace::new();
+        fs::write(workspace.root.join("file.txt"), "hello").expect("fixture");
+
+        let output = workspace
+            .execute(&EditRequest::new("file.txt", "hello", "你好"))
+            .expect("edit file");
+
+        assert_eq!(output.bytes_written, 6);
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("file.txt")).unwrap(),
+            "你好"
+        );
+    }
+
+    #[test]
+    fn edit_can_grow_shrink_or_empty_the_replacement() {
+        for (input, old, new, expected) in [
+            ("a b c", "b", "much longer", "a much longer c"),
+            ("a much longer c", "much longer", "b", "a b c"),
+            ("a b c", "b", "", "a  c"),
+        ] {
+            let workspace = TestWorkspace::new();
+            fs::write(workspace.root.join("file.txt"), input).expect("fixture");
+            workspace
+                .execute(&EditRequest::new("file.txt", old, new))
+                .expect("edit file");
+            assert_eq!(
+                fs::read_to_string(workspace.root.join("file.txt")).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_target_change_is_rejected_without_clobbering_actor_content() {
+        let workspace = TestWorkspace::new();
+        let target = workspace.root.join("file.txt");
+        fs::write(&target, "before").expect("fixture");
+        let mut hook = || fs::write(&target, "actor content").expect("actor write");
+
+        let result = workspace.execute_with_hook(
+            &EditRequest::new("file.txt", "before", "agent content"),
+            &mut hook,
+        );
+
+        assert!(matches!(result, Err(EditError::TargetChanged { .. })));
+        assert_eq!(fs::read_to_string(target).unwrap(), "actor content");
+    }
+
+    #[test]
+    fn atomic_faults_preserve_edit_target_and_leave_no_temp() {
+        for fault in [
+            AtomicFault::TempWrite,
+            AtomicFault::TempFlush,
+            AtomicFault::Commit,
+        ] {
+            let workspace = TestWorkspace::new();
+            let target = workspace.root.join("file.txt");
+            fs::write(&target, "old").expect("fixture");
+            let result = workspace.execute_with_options(
+                &EditRequest::new("file.txt", "old", "new"),
+                AtomicMutationOptions::with_fault(fault),
+            );
+            assert!(matches!(result, Err(EditError::AtomicFailure { .. })));
+            assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+            assert_eq!(fs::read_dir(&workspace.root).unwrap().count(), 1);
+        }
+    }
+
+    #[test]
+    fn target_deleted_after_prepare_is_fail_closed() {
+        let workspace = TestWorkspace::new();
+        let target = workspace.root.join("file.txt");
+        fs::write(&target, "old").expect("fixture");
+        let mut hook = || fs::remove_file(&target).expect("actor delete");
+
+        let result =
+            workspace.execute_with_hook(&EditRequest::new("file.txt", "old", "new"), &mut hook);
+
+        assert!(matches!(result, Err(EditError::TargetChanged { .. })));
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn target_replaced_after_prepare_is_not_silently_overwritten() {
+        let workspace = TestWorkspace::new();
+        let target = workspace.root.join("file.txt");
+        fs::write(&target, "old").expect("fixture");
+        let mut hook = || {
+            fs::remove_file(&target).expect("actor delete");
+            fs::write(&target, "replacement actor content").expect("actor replacement");
+        };
+
+        let result = workspace.execute_with_hook(
+            &EditRequest::new("file.txt", "old", "agent content"),
+            &mut hook,
+        );
+
+        assert!(matches!(result, Err(EditError::TargetChanged { .. })));
+        assert_eq!(
+            fs::read_to_string(target).unwrap(),
+            "replacement actor content"
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use super::*;
-use crate::audit::WorkspaceValidation;
+use crate::audit::{AuditFailureCategory, WorkspaceValidation};
 use crate::state::RuntimeCore;
 use crate::tools::{GlobRequest, ReadFileRequest};
 use harness_control_protocol::{
@@ -20,6 +20,7 @@ fn event(id: u128) -> AuditEvent {
         policy_decision: None,
         matched_rule_ids: vec![],
         outcome: AuditOutcome::InProgress,
+        failure_category: None,
     }
 }
 
@@ -65,6 +66,21 @@ fn projects_every_event_category_and_preserves_audit_evidence() {
             Some(decision)
         );
     }
+}
+
+#[test]
+fn failure_categories_are_projected_without_free_text() {
+    let mut source = event(3);
+    source.event_type = AuditEventType::ExecutionFailed;
+    source.outcome = AuditOutcome::Failed;
+    source.failure_category = Some(AuditFailureCategory::TargetChanged);
+
+    let entry = ActivityEntry::from_audit(&source, &ToolRegistry::normal_mode());
+    assert_eq!(entry.failure_category, source.failure_category);
+    assert_eq!(
+        serde_json::to_value(entry).unwrap()["failureCategory"],
+        "target_changed"
+    );
 }
 
 #[test]

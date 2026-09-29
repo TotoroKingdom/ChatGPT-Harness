@@ -1,5 +1,6 @@
 use super::state::RequestLifecycle;
 use super::{RequestState, TransitionError};
+use crate::audit::AuditFailureCategory;
 use crate::policy::{PolicyContext, PolicyEvaluation};
 use harness_control_protocol::SecurityMode;
 use uuid::Uuid;
@@ -21,6 +22,7 @@ pub(crate) struct RequestContext {
     pub(crate) security: SecurityContext,
     pub(crate) policy: PolicyContext<'static>,
     pub(crate) policy_evaluation: Option<PolicyEvaluation>,
+    pub(crate) failure_category: Option<AuditFailureCategory>,
     lifecycle: RequestLifecycle,
 }
 
@@ -32,6 +34,7 @@ impl RequestContext {
             policy: PolicyContext::new(tool_name, security.mode.clone(), ""),
             security,
             policy_evaluation: None,
+            failure_category: None,
             lifecycle: RequestLifecycle::new(),
         }
     }
@@ -46,6 +49,10 @@ impl RequestContext {
             self.security.mode.clone(),
             "active_workspace",
         );
+    }
+
+    pub(super) fn mark_failure_category(&mut self, category: AuditFailureCategory) {
+        self.failure_category = Some(category);
     }
 
     pub(super) fn transition(&mut self, next: RequestState) -> Result<(), TransitionError> {

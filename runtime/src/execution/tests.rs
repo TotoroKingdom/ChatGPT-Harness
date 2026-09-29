@@ -1,10 +1,13 @@
 use super::state::RequestLifecycle;
 use super::*;
-use crate::audit::{AuditEventType, AuditLifecycleState, AuditOutcome, WorkspaceValidation};
+use crate::audit::{
+    AuditEventType, AuditFailureCategory, AuditLifecycleState, AuditOutcome, WorkspaceValidation,
+};
 use crate::mcp::{McpExecutionContext, McpService};
 use crate::policy::{PolicyEngine, PolicyEvaluationReason};
 use crate::tools::{
-    EditError, EditRequest, GlobRequest, ReadFileError, ToolRegistry, WriteError, WriteRequest,
+    AtomicPhase, EditError, EditRequest, GlobRequest, ReadFileError, ToolRegistry, WriteError,
+    WriteRequest,
 };
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{PolicyDecision, PolicyRule, PolicySource, SecurityMode};
@@ -206,6 +209,37 @@ struct Spy {
     path: PathBuf,
     calls: Arc<AtomicUsize>,
     fail: bool,
+}
+
+struct FailingEdit {
+    path: PathBuf,
+    error: EditError,
+}
+
+impl ToolExecutor for FailingEdit {
+    type Output = ();
+    const TOOL_NAME: &'static str = "edit";
+
+    fn validate(&self) -> Result<(), ExecutionError> {
+        Ok(())
+    }
+
+    fn workspace_target(&self) -> WorkspaceTarget<'_> {
+        WorkspaceTarget::ExistingPath(&self.path)
+    }
+
+    fn workspace_error(error: WorkspaceError) -> ExecutionError {
+        ExecutionError::Edit(EditError::Workspace(error))
+    }
+
+    fn execute(
+        &self,
+        _permit: &ExecutionPermit,
+        _guard: &WorkspaceGuard,
+        _limit: u32,
+    ) -> Result<Self::Output, ExecutionError> {
+        Err(ExecutionError::Edit(self.error.clone()))
+    }
 }
 impl ToolExecutor for Spy {
     type Output = ();
@@ -454,6 +488,47 @@ fn executor_failure_is_failed_not_policy_denied() {
         PolicyDecision::Allow
     );
     assert!(fixture.recorder.has(PipelineEvent::ExecutionStarted));
+    assert_eq!(
+        report.audit_events.last().unwrap().failure_category,
+        Some(AuditFailureCategory::IoFailure)
+    );
+}
+
+#[test]
+fn audit_evidence_distinguishes_target_change_and_atomic_failure() {
+    for (error, expected) in [
+        (
+            EditError::TargetChanged {
+                path: PathBuf::from("secret.txt"),
+            },
+            AuditFailureCategory::TargetChanged,
+        ),
+        (
+            EditError::AtomicFailure {
+                path: PathBuf::from("secret.txt"),
+                phase: AtomicPhase::Commit,
+                kind: std::io::ErrorKind::PermissionDenied,
+            },
+            AuditFailureCategory::AtomicFailure,
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let report = fixture.pipeline(PolicyEngine::system_rules()).execute(|| {
+            Ok(FailingEdit {
+                path: PathBuf::from("sample.txt"),
+                error,
+            })
+        });
+        let failure = report
+            .audit_events
+            .iter()
+            .find(|event| event.event_type == AuditEventType::ExecutionFailed)
+            .expect("execution failure audit event");
+        assert_eq!(failure.failure_category, Some(expected));
+        let serialized = serde_json::to_string(failure).unwrap();
+        assert!(!serialized.contains("secret.txt"));
+        assert!(!serialized.contains("PermissionDenied"));
+    }
 }
 
 #[test]

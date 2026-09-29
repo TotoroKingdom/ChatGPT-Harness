@@ -1,9 +1,12 @@
 use super::{
     RequestContext, RequestState, SecurityContext, ToolExecutor, TransitionError, WorkspaceTarget,
 };
-use crate::audit::{AuditEvent, AuditSink};
+use crate::audit::{AuditEvent, AuditFailureCategory, AuditSink};
 use crate::policy::PolicyEngine;
-use crate::tools::{EffectiveTool, EffectiveToolCatalog, GlobError, ReadFileError, ToolRegistry};
+use crate::tools::{
+    EditError, EffectiveTool, EffectiveToolCatalog, GlobError, ReadFileError, ToolRegistry,
+    WriteError,
+};
 use crate::workspace::WorkspaceGuard;
 use harness_control_protocol::PolicyDecision;
 use std::sync::{
@@ -186,6 +189,7 @@ impl ExecutionPipeline {
                 );
             }
             Err(error) => {
+                context.mark_failure_category(AuditFailureCategory::WorkspaceViolation);
                 self.emit(
                     context,
                     PipelineEvent::WorkspaceValidated { passed: false },
@@ -222,6 +226,7 @@ impl ExecutionPipeline {
                         Ok(output)
                     }
                     Err(error) => {
+                        context.mark_failure_category(audit_failure_category(&error));
                         self.transition(context, RequestState::Failed)?;
                         self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
                         Err(error)
@@ -266,5 +271,33 @@ impl ExecutionPipeline {
         self.hook
             .on_event(context, PipelineEvent::StateChanged { from, to });
         Ok(())
+    }
+}
+
+fn audit_failure_category(error: &ExecutionError) -> AuditFailureCategory {
+    match error {
+        ExecutionError::ReadFile(ReadFileError::Workspace(_))
+        | ExecutionError::Glob(GlobError::Workspace(_))
+        | ExecutionError::Write(WriteError::Workspace(_))
+        | ExecutionError::Edit(EditError::Workspace(_)) => AuditFailureCategory::WorkspaceViolation,
+        ExecutionError::Write(WriteError::TargetChanged { .. })
+        | ExecutionError::Edit(EditError::TargetChanged { .. }) => {
+            AuditFailureCategory::TargetChanged
+        }
+        ExecutionError::Write(WriteError::AtomicFailure { .. })
+        | ExecutionError::Edit(EditError::AtomicFailure { .. }) => {
+            AuditFailureCategory::AtomicFailure
+        }
+        ExecutionError::ReadFile(ReadFileError::IoFailure { .. })
+        | ExecutionError::Glob(GlobError::IoFailure { .. })
+        | ExecutionError::Write(WriteError::IoFailure { .. })
+        | ExecutionError::Edit(EditError::IoFailure { .. }) => AuditFailureCategory::IoFailure,
+        ExecutionError::InvalidArguments
+        | ExecutionError::ReadFile(ReadFileError::InvalidArguments { .. })
+        | ExecutionError::Write(WriteError::InvalidArguments { .. })
+        | ExecutionError::Edit(EditError::InvalidArguments { .. }) => {
+            AuditFailureCategory::InvalidArguments
+        }
+        _ => AuditFailureCategory::ExecutionFailed,
     }
 }

@@ -67,10 +67,24 @@ pub(crate) enum AuditOutcome {
     ApprovalRequired,
 }
 
+/// Sanitized failure categories for operational evidence. These categories
+/// intentionally contain no paths, OS messages, payloads, or temp names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AuditFailureCategory {
+    TargetChanged,
+    AtomicFailure,
+    IoFailure,
+    WorkspaceViolation,
+    InvalidArguments,
+    ExecutionFailed,
+}
+
 /// Structured, serde-serializable audit evidence for one pipeline observation.
 ///
 /// `workspace_id` is a logical identifier only; it is never a filesystem path.
-/// There is intentionally no arguments, payload, error, or result field.
+/// There are intentionally no arguments, payload, raw error, or result fields;
+/// only a bounded failure category may be retained.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AuditEvent {
@@ -86,6 +100,8 @@ pub(crate) struct AuditEvent {
     pub(crate) policy_decision: Option<PolicyDecision>,
     pub(crate) matched_rule_ids: Vec<String>,
     pub(crate) outcome: AuditOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) failure_category: Option<AuditFailureCategory>,
 }
 
 impl AuditEvent {
@@ -162,6 +178,11 @@ impl AuditEvent {
                 .map(|item| item.matched_rule_ids.clone())
                 .unwrap_or_default(),
             outcome,
+            failure_category: match event {
+                PipelineEvent::WorkspaceValidated { passed: false }
+                | PipelineEvent::ExecutionFailed => context.failure_category,
+                _ => None,
+            },
         })
     }
 }

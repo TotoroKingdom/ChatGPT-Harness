@@ -9,7 +9,8 @@ mod event;
 mod redaction;
 
 pub(crate) use event::{
-    AuditEvent, AuditEventType, AuditLifecycleState, AuditOutcome, WorkspaceValidation,
+    AuditEvent, AuditEventType, AuditFailureCategory, AuditLifecycleState, AuditOutcome,
+    WorkspaceValidation,
 };
 pub(crate) use redaction::redact_value;
 

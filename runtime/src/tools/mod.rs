@@ -1,11 +1,15 @@
 #![allow(dead_code)]
 
+mod atomic_file;
 mod edit;
 mod effective;
 mod glob;
 mod read_file;
 mod registry;
 mod write;
+
+#[cfg(test)]
+pub(crate) use atomic_file::AtomicPhase;
 
 pub use edit::{EditError, EditOutput, EditRequest};
 #[allow(unused_imports)]

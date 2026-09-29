@@ -17,6 +17,7 @@ pub(crate) enum McpErrorCategory {
     InvalidBasePath,
     EditMatchNotFound,
     EditMatchNotUnique,
+    TargetChanged,
     IoFailure,
     RuntimeNotInitialized,
     RuntimeNotReady,
@@ -39,6 +40,7 @@ impl McpErrorCategory {
             Self::InvalidBasePath => "INVALID_BASE_PATH",
             Self::EditMatchNotFound => "EDIT_MATCH_NOT_FOUND",
             Self::EditMatchNotUnique => "EDIT_MATCH_NOT_UNIQUE",
+            Self::TargetChanged => "TARGET_CHANGED",
             Self::IoFailure => "IO_FAILURE",
             Self::RuntimeNotInitialized => "RUNTIME_NOT_INITIALIZED",
             Self::RuntimeNotReady => "RUNTIME_NOT_READY",
@@ -61,6 +63,7 @@ impl McpErrorCategory {
             Self::InvalidBasePath => "Glob base path is invalid.",
             Self::EditMatchNotFound => "The requested edit text was not found.",
             Self::EditMatchNotUnique => "The requested edit text was not unique.",
+            Self::TargetChanged => "The workspace target changed during the operation.",
             Self::IoFailure => "The runtime could not access the requested workspace target.",
             Self::RuntimeNotInitialized => "Runtime is not initialized.",
             Self::RuntimeNotReady => "Runtime is waiting for the initialized acknowledgement.",
@@ -120,7 +123,11 @@ pub(crate) fn write_error(error: &WriteError) -> CallToolResult {
     let category = match error {
         WriteError::Workspace(error) => workspace_error_category(error),
         WriteError::TargetNotFile { .. } => McpErrorCategory::TargetNotFile,
-        WriteError::IoFailure { .. } => McpErrorCategory::IoFailure,
+        WriteError::UnsupportedContent { .. } => McpErrorCategory::UnsupportedContent,
+        WriteError::TargetChanged { .. } => McpErrorCategory::TargetChanged,
+        WriteError::IoFailure { .. } | WriteError::AtomicFailure { .. } => {
+            McpErrorCategory::IoFailure
+        }
         WriteError::InvalidArguments { .. } => McpErrorCategory::InvalidArguments,
     };
     error_result(category)
@@ -133,7 +140,10 @@ pub(crate) fn edit_error(error: &EditError) -> CallToolResult {
         EditError::UnsupportedContent { .. } => McpErrorCategory::UnsupportedContent,
         EditError::MatchNotFound { .. } => McpErrorCategory::EditMatchNotFound,
         EditError::MatchNotUnique { .. } => McpErrorCategory::EditMatchNotUnique,
-        EditError::IoFailure { .. } => McpErrorCategory::IoFailure,
+        EditError::TargetChanged { .. } => McpErrorCategory::TargetChanged,
+        EditError::IoFailure { .. } | EditError::AtomicFailure { .. } => {
+            McpErrorCategory::IoFailure
+        }
         EditError::InvalidArguments { .. } => McpErrorCategory::InvalidArguments,
     };
     error_result(category)
@@ -160,4 +170,39 @@ fn error_result(category: McpErrorCategory) -> CallToolResult {
     }));
     result.content.push(ContentBlock::text(message));
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::{AtomicPhase, EditError, WriteError};
+    use std::path::PathBuf;
+
+    #[test]
+    fn m1_mutation_errors_are_stable_and_do_not_echo_paths_or_os_details() {
+        let secret_path = PathBuf::from(r"C:\workspace\SECRET.txt");
+        let target_changed = write_error(&WriteError::TargetChanged {
+            path: secret_path.clone(),
+        });
+        assert_eq!(
+            target_changed.structured_content.as_ref().unwrap()["code"],
+            "TARGET_CHANGED"
+        );
+        assert!(!serde_json::to_string(&target_changed)
+            .unwrap()
+            .contains("SECRET.txt"));
+
+        let atomic_failure = edit_error(&EditError::AtomicFailure {
+            path: secret_path,
+            phase: AtomicPhase::Commit,
+            kind: std::io::ErrorKind::PermissionDenied,
+        });
+        assert_eq!(
+            atomic_failure.structured_content.as_ref().unwrap()["code"],
+            "IO_FAILURE"
+        );
+        assert!(!serde_json::to_string(&atomic_failure)
+            .unwrap()
+            .contains("PermissionDenied"));
+    }
 }

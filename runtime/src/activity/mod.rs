@@ -1,7 +1,9 @@
 //! Runtime-owned bounded observations of existing audit emission.
 //! No execution, policy, persistence, transport, or UI authority lives here.
 
-use crate::audit::{AuditEvent, AuditEventType, AuditLifecycleState, AuditOutcome, AuditSink};
+use crate::audit::{
+    AuditEvent, AuditEventType, AuditFailureCategory, AuditLifecycleState, AuditOutcome, AuditSink,
+};
 use crate::tools::ToolRegistry;
 use harness_control_protocol::PolicyDecision;
 use serde::Serialize;
@@ -38,6 +40,8 @@ pub(crate) struct ActivityEntry {
     /// None means policy was not evaluated, never an implicit ALLOW.
     pub(crate) decision_summary: Option<PolicyDecision>,
     pub(crate) outcome_summary: AuditOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) failure_category: Option<AuditFailureCategory>,
 }
 
 impl ActivityEntry {
@@ -75,6 +79,7 @@ impl ActivityEntry {
             tool_name,
             decision_summary: event.policy_decision.clone(),
             outcome_summary: event.outcome,
+            failure_category: event.failure_category,
         }
     }
 }
