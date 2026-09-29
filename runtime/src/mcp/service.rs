@@ -266,6 +266,33 @@ mod tests {
     }
 
     #[test]
+    fn write_is_not_executable_before_runtime_acknowledgement() {
+        use crate::audit::AuditEventType;
+
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        let service = core.mcp_service().expect("MCP service");
+
+        let result = call(
+            &service,
+            WRITE,
+            json!({ "path": "not-ready.txt", "content": "blocked" }),
+        );
+        assert_eq!(error_code(&result), "RUNTIME_NOT_READY");
+        assert!(!workspace.root.join("not-ready.txt").exists());
+
+        let activity = core.activity_snapshot(20);
+        assert!(!activity.iter().any(|entry| {
+            matches!(
+                entry.event_type,
+                AuditEventType::ExecutionStarted | AuditEventType::ExecutionCompleted
+            )
+        }));
+    }
+
+    #[test]
     fn ready_catalog_exposes_read_write_tools_and_excludes_unsupported_tools() {
         let workspace = TestWorkspace::new();
         let service = workspace.service();
@@ -478,6 +505,32 @@ mod tests {
     }
 
     #[test]
+    fn write_overwrite_routes_through_mcp_and_reports_structured_flags() {
+        let workspace = TestWorkspace::new();
+        workspace.write("existing.txt", "old content");
+        let result = call(
+            &workspace.service(),
+            WRITE,
+            json!({ "path": "existing.txt", "content": "new content" }),
+        );
+
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(
+            result.structured_content.as_ref().unwrap(),
+            &json!({
+                "normalizedPath": "existing.txt",
+                "bytesWritten": "new content".len(),
+                "created": false,
+                "overwritten": true,
+            })
+        );
+        assert_eq!(
+            fs::read(workspace.root.join("existing.txt")).unwrap(),
+            b"new content"
+        );
+    }
+
+    #[test]
     fn write_and_edit_failures_are_sanitized_and_deterministic() {
         let workspace = TestWorkspace::new();
         workspace.write("file.txt", "one two one");
@@ -526,6 +579,185 @@ mod tests {
             fs::read_to_string(workspace.root.join("file.txt")).unwrap(),
             "one two one"
         );
+    }
+
+    #[test]
+    fn mcp_write_boundary_rejections_preserve_filesystem_and_audit_boundary() {
+        use crate::audit::AuditEventType;
+
+        let workspace = TestWorkspace::new();
+        let outside = workspace.outside.join("outside.txt");
+        fs::write(&outside, b"outside before").expect("outside fixture");
+        let outside_before = fs::read(&outside).expect("outside bytes");
+        let mut core = RuntimeCore::new();
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+
+        for path in [
+            Value::String("../outside/escape.txt".into()),
+            Value::String(outside.to_string_lossy().into_owned()),
+        ] {
+            let before = core.activity_snapshot(100).len();
+            let result = call(
+                &service,
+                WRITE,
+                json!({ "path": path, "content": "blocked" }),
+            );
+            assert_eq!(error_code(&result), "WORKSPACE_VIOLATION");
+            assert!(!serde_json::to_string(&result)
+                .unwrap()
+                .contains(&*outside.to_string_lossy()));
+            let entries = core.activity_snapshot(100);
+            let request_entries = &entries[before..];
+            assert_eq!(
+                request_entries
+                    .iter()
+                    .map(|entry| entry.event_type)
+                    .collect::<Vec<_>>(),
+                [
+                    AuditEventType::RequestReceived,
+                    AuditEventType::WorkspaceValidated,
+                ]
+            );
+            assert!(request_entries.iter().all(|entry| {
+                !matches!(
+                    entry.event_type,
+                    AuditEventType::ExecutionStarted | AuditEventType::ExecutionCompleted
+                )
+            }));
+        }
+
+        let before = core.activity_snapshot(100).len();
+        let result = call(
+            &service,
+            WRITE,
+            json!({
+                "path": "missing-parent/file.txt",
+                "content": "blocked"
+            }),
+        );
+        assert_eq!(error_code(&result), "TARGET_NOT_FOUND");
+        assert!(!workspace.root.join("missing-parent").exists());
+        let entries = core.activity_snapshot(100);
+        assert_eq!(
+            entries[before..]
+                .iter()
+                .map(|entry| entry.event_type)
+                .collect::<Vec<_>>(),
+            [
+                AuditEventType::RequestReceived,
+                AuditEventType::WorkspaceValidated,
+            ]
+        );
+        assert_eq!(fs::read(&outside).unwrap(), outside_before);
+    }
+
+    #[test]
+    fn mcp_malformed_mutations_and_unsupported_edit_content_do_not_mutate() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "old content");
+        workspace.write("invalid.bin", [0xff, 0xfe]);
+        let before = fs::read(workspace.root.join("file.txt")).expect("file bytes");
+        let service = workspace.service();
+
+        let malformed = [
+            (WRITE, json!({ "content": "x" })),
+            (WRITE, json!({ "path": "file.txt" })),
+            (WRITE, json!({ "path": 3, "content": "x" })),
+            (WRITE, json!({ "path": "file.txt", "content": 3 })),
+            (
+                WRITE,
+                json!({ "path": "file.txt", "content": "x", "unknown": true }),
+            ),
+            (EDIT, json!({ "path": "file.txt", "oldText": "old" })),
+            (EDIT, json!({ "path": "file.txt", "newText": "new" })),
+            (
+                EDIT,
+                json!({ "path": 3, "oldText": "old", "newText": "new" }),
+            ),
+            (
+                EDIT,
+                json!({ "path": "file.txt", "oldText": 3, "newText": "new" }),
+            ),
+            (
+                EDIT,
+                json!({ "path": "file.txt", "oldText": "old", "newText": 3 }),
+            ),
+            (
+                EDIT,
+                json!({ "path": "file.txt", "oldText": "old", "newText": "new", "unknown": true }),
+            ),
+            (
+                EDIT,
+                json!({ "path": "file.txt", "oldText": "", "newText": "new" }),
+            ),
+        ];
+        for (tool, arguments) in malformed {
+            assert_eq!(
+                error_code(&call(&service, tool, arguments)),
+                "INVALID_ARGUMENTS"
+            );
+        }
+        assert_eq!(fs::read(workspace.root.join("file.txt")).unwrap(), before);
+
+        let invalid_utf8_before = fs::read(workspace.root.join("invalid.bin")).unwrap();
+        let result = call(
+            &service,
+            EDIT,
+            json!({
+                "path": "invalid.bin",
+                "oldText": "old",
+                "newText": "new"
+            }),
+        );
+        assert_eq!(error_code(&result), "UNSUPPORTED_CONTENT");
+        assert!(!serde_json::to_string(&result)
+            .unwrap()
+            .contains("invalid.bin"));
+        assert_eq!(
+            fs::read(workspace.root.join("invalid.bin")).unwrap(),
+            invalid_utf8_before
+        );
+    }
+
+    #[test]
+    fn mutation_audit_projection_excludes_raw_write_and_edit_payloads() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(config_for(&workspace.root))
+            .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let marker = "M0_SECRET_SENTINEL_DO_NOT_AUDIT";
+        let replacement = "M0_SECRET_REPLACEMENT_DO_NOT_AUDIT";
+
+        let write = call(
+            &service,
+            WRITE,
+            json!({ "path": "audit.txt", "content": marker }),
+        );
+        assert_eq!(write.is_error, Some(false));
+        let edit = call(
+            &service,
+            EDIT,
+            json!({
+                "path": "audit.txt",
+                "oldText": marker,
+                "newText": replacement
+            }),
+        );
+        assert_eq!(edit.is_error, Some(false));
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("audit.txt")).unwrap(),
+            replacement
+        );
+
+        let activity = serde_json::to_string(&core.activity_snapshot(100)).unwrap();
+        assert!(!activity.contains(marker));
+        assert!(!activity.contains(replacement));
+        assert!(!activity.contains(&*workspace.root.to_string_lossy()));
     }
 
     #[test]
