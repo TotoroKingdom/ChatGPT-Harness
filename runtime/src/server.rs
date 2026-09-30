@@ -282,6 +282,7 @@ fn handle_request<W: Write>(
                 Ok(value) => value,
                 Err(error) => return write_invalid_params(output, id, error),
             };
+            core.drain_activity_events();
             if let Some(event) = core.stop() {
                 if *subscribed {
                     write_event(output, &event)?;
@@ -327,6 +328,7 @@ fn handle_request<W: Write>(
                 Ok(value) => value,
                 Err(error) => return write_invalid_params(output, id, error),
             };
+            core.drain_activity_events();
             let bus = core.events.as_ref().expect("event bus exists");
             write_result(
                 output,
@@ -343,6 +345,7 @@ fn handle_request<W: Write>(
                 Ok(value) => value,
                 Err(error) => return write_invalid_params(output, id, error),
             };
+            core.drain_activity_events();
             *subscribed = true;
             let bus = core.events.as_ref().expect("event bus exists");
             let replay = bus.after(params.after_sequence, None);

@@ -1,5 +1,5 @@
 use crate::activity::{ActivityEntry, ActivityStore};
-use crate::events::EventBus;
+use crate::events::{ActivityEventInput, EventBus};
 use crate::execution::{ExecutionError, ExecutionPipeline, SecurityContext};
 use crate::mcp::{McpContextError, McpExecutionContext, McpService};
 use crate::policy::PolicyEngine;
@@ -14,6 +14,7 @@ use harness_control_protocol::{
 };
 use std::sync::{
     atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver},
     Arc,
 };
 
@@ -31,6 +32,7 @@ pub struct RuntimeCore {
     pub phase: Phase,
     pub config: Option<RuntimeConfigSnapshot>,
     pub events: Option<EventBus>,
+    activity_event_receiver: Option<Receiver<ActivityEventInput>>,
     workspace_guard: Option<Arc<WorkspaceGuard>>,
     mcp_readiness: Arc<AtomicBool>,
     tool_registry: Arc<ToolRegistry>,
@@ -49,6 +51,7 @@ impl RuntimeCore {
             phase: Phase::WaitingInitialize,
             config: None,
             events: None,
+            activity_event_receiver: None,
             workspace_guard: None,
             mcp_readiness: Arc::new(AtomicBool::new(false)),
             activity: Arc::new(ActivityStore::new(Arc::clone(&tool_registry))),
@@ -63,6 +66,7 @@ impl RuntimeCore {
         let workspace = Workspace::new(&config.workspace.root_path)?;
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
         let events = EventBus::from_limits(&config.runtime_limits);
+        let (activity_event_sender, activity_event_receiver) = mpsc::channel();
 
         let pipeline = ExecutionPipeline::new(
             Arc::clone(&workspace_guard),
@@ -76,8 +80,10 @@ impl RuntimeCore {
             Arc::clone(&self.mcp_readiness),
         )
         .with_audit_sink(self.activity.clone());
+        let pipeline = pipeline.with_activity_event_sender(activity_event_sender);
         self.execution_pipeline = Some(Arc::new(pipeline));
         self.events = Some(events);
+        self.activity_event_receiver = Some(activity_event_receiver);
         self.config = Some(config);
         self.workspace_guard = Some(workspace_guard);
         self.phase = Phase::InitializedPendingAck;
@@ -93,6 +99,7 @@ impl RuntimeCore {
         self.phase = Phase::WaitingInitialize;
         self.config = None;
         self.events = None;
+        self.activity_event_receiver = None;
         self.workspace_guard = None;
         self.execution_pipeline = None;
         self.last_error = None;
@@ -233,6 +240,24 @@ impl RuntimeCore {
             .as_mut()
             .expect("event bus exists after initialize")
             .publish(event_type, summary, metadata, request_id)
+    }
+
+    /// Materializes activity messages emitted by the HTTP execution thread
+    /// into the control-owned EventBus before a control read or stop.
+    pub fn drain_activity_events(&mut self) {
+        let pending = self
+            .activity_event_receiver
+            .as_ref()
+            .map(|receiver| receiver.try_iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for event in pending {
+            self.publish(
+                event.event_type,
+                event.summary,
+                event.metadata,
+                event.request_id,
+            );
+        }
     }
 
     /// Safe observation only. This does not replace RuntimeState or authorize requests.

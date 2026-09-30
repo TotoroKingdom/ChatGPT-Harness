@@ -1,5 +1,91 @@
+use crate::audit::{AuditEvent, AuditEventType as InternalAuditEventType};
 use harness_control_protocol::{ActivityEvent, ActivityEventType, DecimalU64, RuntimeLimits};
 use std::collections::VecDeque;
+use std::sync::mpsc::Sender;
+
+/// Sanitized activity evidence emitted by the execution pipeline and
+/// materialized by the control thread's EventBus.
+///
+/// MCP requests execute on the dedicated HTTP thread, while the control
+/// protocol owns the mutable EventBus. Keeping this message intentionally
+/// smaller than the internal audit event preserves the existing exposure
+/// boundary: no paths, payloads, temporary names, or raw OS errors cross it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ActivityEventInput {
+    pub(crate) event_type: ActivityEventType,
+    pub(crate) summary: &'static str,
+    pub(crate) metadata: Vec<(String, String)>,
+    pub(crate) request_id: Option<String>,
+}
+
+impl ActivityEventInput {
+    pub(crate) fn from_audit(event: &AuditEvent) -> Option<Self> {
+        let event_type = match event.event_type {
+            InternalAuditEventType::RequestReceived => ActivityEventType::ToolRequested,
+            InternalAuditEventType::WorkspaceValidated => {
+                if event.workspace_validation == crate::audit::WorkspaceValidation::Failed {
+                    ActivityEventType::WorkspaceViolation
+                } else {
+                    return None;
+                }
+            }
+            InternalAuditEventType::PolicyEvaluated => ActivityEventType::PolicyEvaluated,
+            InternalAuditEventType::ExecutionStarted => ActivityEventType::ExecutionStarted,
+            InternalAuditEventType::ExecutionCompleted => ActivityEventType::ExecutionCompleted,
+            InternalAuditEventType::ExecutionFailed => ActivityEventType::ExecutionFailed,
+            InternalAuditEventType::RequestDenied => ActivityEventType::ExecutionFailed,
+            InternalAuditEventType::ApprovalRequired => ActivityEventType::ApprovalRequested,
+        };
+
+        let mut metadata = vec![("tool".into(), event.tool_name.clone())];
+        if let Some(category) = event.failure_category {
+            metadata.push((
+                "failureCategory".into(),
+                failure_category_name(category).into(),
+            ));
+        }
+
+        let summary = activity_summary(event_type.clone());
+        Some(Self {
+            event_type,
+            summary,
+            metadata,
+            request_id: Some(event.request_id.to_string()),
+        })
+    }
+}
+
+/// Clones the sender held by an initialized execution pipeline.
+pub(crate) type ActivityEventSender = Sender<ActivityEventInput>;
+
+fn activity_summary(event_type: ActivityEventType) -> &'static str {
+    match event_type {
+        ActivityEventType::ToolRequested => "Tool request received.",
+        ActivityEventType::WorkspaceViolation => "Workspace boundary rejected the request.",
+        ActivityEventType::PolicyEvaluated => "Tool policy evaluated.",
+        ActivityEventType::ExecutionStarted => "Tool execution started.",
+        ActivityEventType::ExecutionCompleted => "Tool execution completed.",
+        ActivityEventType::ExecutionFailed => "Tool execution failed.",
+        ActivityEventType::ApprovalRequested => "Tool approval requested.",
+        ActivityEventType::RuntimeStarted
+        | ActivityEventType::RuntimeStopped
+        | ActivityEventType::ValidationFailed
+        | ActivityEventType::ApprovalResolved
+        | ActivityEventType::ExecutionTimedOut
+        | ActivityEventType::ExecutionCancelled => "Runtime activity observed.",
+    }
+}
+
+fn failure_category_name(category: crate::audit::AuditFailureCategory) -> &'static str {
+    match category {
+        crate::audit::AuditFailureCategory::TargetChanged => "target_changed",
+        crate::audit::AuditFailureCategory::AtomicFailure => "atomic_failure",
+        crate::audit::AuditFailureCategory::IoFailure => "io_failure",
+        crate::audit::AuditFailureCategory::WorkspaceViolation => "workspace_violation",
+        crate::audit::AuditFailureCategory::InvalidArguments => "invalid_arguments",
+        crate::audit::AuditFailureCategory::ExecutionFailed => "execution_failed",
+    }
+}
 
 #[derive(Debug)]
 pub struct EventBus {

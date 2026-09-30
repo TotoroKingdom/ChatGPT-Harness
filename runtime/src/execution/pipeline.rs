@@ -2,6 +2,7 @@ use super::{
     RequestContext, RequestState, SecurityContext, ToolExecutor, TransitionError, WorkspaceTarget,
 };
 use crate::audit::{AuditEvent, AuditFailureCategory, AuditSink};
+use crate::events::{ActivityEventInput, ActivityEventSender};
 use crate::policy::PolicyEngine;
 use crate::tools::{
     EditError, EffectiveTool, EffectiveToolCatalog, GlobError, ReadFileError, ToolRegistry,
@@ -88,6 +89,7 @@ pub(crate) struct ExecutionPipeline {
     readiness: Arc<AtomicBool>,
     hook: Arc<dyn ExecutionHook>,
     audit_sink: Option<Arc<dyn AuditSink>>,
+    activity_event_sender: Option<ActivityEventSender>,
 }
 
 impl ExecutionPipeline {
@@ -108,12 +110,21 @@ impl ExecutionPipeline {
             readiness,
             hook: Arc::new(NoopHook),
             audit_sink: None,
+            activity_event_sender: None,
         }
     }
 
     /// Observes the existing audit emission; does not add lifecycle events.
     pub(crate) fn with_audit_sink(mut self, sink: Arc<dyn AuditSink>) -> Self {
         self.audit_sink = Some(sink);
+        self
+    }
+
+    /// Projects only sanitized lifecycle evidence to the control EventBus.
+    /// The sender is owned by the process-local RuntimeCore and does not add
+    /// a new control or MCP surface.
+    pub(crate) fn with_activity_event_sender(mut self, sender: ActivityEventSender) -> Self {
+        self.activity_event_sender = Some(sender);
         self
     }
 
@@ -246,6 +257,11 @@ impl ExecutionPipeline {
         if let Some(audit_event) = AuditEvent::from_pipeline_event(context, event) {
             if let Some(sink) = &self.audit_sink {
                 sink.on_audit_event(&audit_event);
+            }
+            if let Some(sender) = &self.activity_event_sender {
+                if let Some(input) = ActivityEventInput::from_audit(&audit_event) {
+                    let _ = sender.send(input);
+                }
             }
             audit_events.push(audit_event);
         }
