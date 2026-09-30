@@ -1,19 +1,43 @@
 # M1 Integration Test Plan — Write/Edit Production Hardening
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: DRAFT / READY FOR AUTOMATED EXECUTION  
 > Milestone: M1 — Write/Edit Production Hardening  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`  
 > Baseline: M0 — ACCEPTED / FROZEN  
-> Scope: Runtime + MCP local integration; validates production hardening, not External ChatGPT capability discovery.
+> Owner: Coding Agent  
+> Scope: code-level / component-combination verification inside the Runtime package. No human interaction is required.
 
-## 1. Objective
+## 1. Responsibility Boundary
 
-验证 T1–T4 组合后，`write` / `edit` 已从 M0 的非原子 mutation 升级为正式的 atomic text-file mutation path，并且没有破坏 M0 已冻结的 Runtime enforcement chain。
-
-Integration 必须同时验证：
+M1 verification is divided into four layers:
 
 ```text
-MCP request
+Unit Tests           → Coding Agent
+Integration Tests    → Coding Agent
+Local Black-box E2E  → Coding Agent
+Manual Acceptance    → Human Reviewer
+```
+
+This document owns the **Integration** layer only.
+
+Integration may use Runtime-internal deterministic test seams where required to prove failure safety, TOCTOU behavior or fault phases. It may instantiate Runtime components in-process when the test is specifically validating component composition.
+
+Integration does **not** need to:
+
+- operate External ChatGPT;
+- operate a browser;
+- click Harness UI;
+- start the Tunnel client;
+- prove the full packaged/near-final Runtime process boundary.
+
+Those responsibilities are split between `E2E_TEST_PLAN.md` and `MANUAL_ACCEPTANCE_CHECKLIST.md`.
+
+## 2. Objective
+
+Verify that T1–T4 compose into the production M1 write/edit semantics without weakening the M0 Runtime enforcement chain:
+
+```text
+MCP adapter / Runtime integration surface
 → ExecutionPipeline
 → WorkspaceGuard
 → Policy
@@ -24,39 +48,41 @@ MCP request
 → filesystem result
 ```
 
-重点不是再次证明“工具能调用”，而是证明：
+Integration must prove:
 
-- success 只产生完整最终文件。
-- staging / flush / commit failure 不破坏旧文件。
-- failed create 不留下正式 partial target。
-- concurrent edit 不静默覆盖其它 actor 修改。
-- UTF-8 text boundary 生效。
-- M0 write/edit/read/glob contract 无回归。
+- atomic create / overwrite / edit behavior;
+- staging / flush / commit failure safety;
+- failed create leaves no named partial target;
+- concurrent edit does not silently overwrite another actor;
+- UTF-8 text boundary;
+- Workspace / symlink / junction boundary revalidation;
+- stable MCP error mapping and audit sanitization;
+- M0 write/edit/read/glob regression compatibility.
 
-## 2. Entry Criteria
+## 3. Entry Criteria
 
-执行本计划前必须满足：
+The Coding Agent may start Integration when:
 
-- T1–T4 开发完成。
-- Windows existing-target atomic replace 自动化测试已存在。
-- atomic fault injection unit tests 已存在。
-- `cargo fmt --all -- --check` PASS。
-- `cargo check --workspace` PASS。
-- `cargo test --workspace` PASS。
-- `git diff --check` PASS。
-- Runtime 可使用临时 Workspace 初始化并进入 Ready。
+- T1–T4 implementation is complete;
+- task-local Unit Tests pass;
+- deterministic atomic fault injection tests exist;
+- Windows existing-target atomic replacement has an automated test path;
+- `cargo fmt --all -- --check` passes;
+- `cargo check --workspace` passes;
+- `cargo test --workspace` passes before dedicated Integration execution;
+- `git diff --check` passes.
 
-若开发任务未完成，状态为：
+If implementation is incomplete:
 
 ```text
 BLOCKED_BY_IMPLEMENTATION
 ```
 
-不得通过降低断言继续验收。
+Do not weaken assertions to force a PASS.
 
-## 3. Test Environment
+## 4. Integration Environment
 
-使用专用临时目录，例如：
+Use disposable test directories, for example:
 
 ```text
 base/
@@ -65,307 +91,120 @@ base/
 │  ├ edit.txt
 │  ├ duplicate.txt
 │  ├ utf8.txt
-│  ├ binary.bin
-│  └ nested/
+│  └ binary.bin
 └ outside/
    └ outside.txt
 ```
 
-建议 fixture：
+Filesystem assertions must inspect final bytes, not only returned tool status.
 
-```text
-existing.txt  = old content
-edit.txt      = hello from ChatGPT
-multiple.txt  = same same
-utf8.txt      = 你好, ChatGPT 👋
-binary.bin    = invalid UTF-8 bytes
-outside.txt   = must not change
-```
-
-所有 filesystem assertion 必须直接验证最终 bytes，而不只检查 MCP success/error。
-
-## 4. Required Integration Cases
-
-### INT-01 — Ready MCP contract remains M0-compatible
-
-通过 Ready Runtime 的 `tools/list` 验证：
-
-```text
-read_file
-glob
-write
-edit
-```
-
-期望：
-
-- 工具顺序不变。
-- write/edit schema field names 不变。
-- write/edit annotations 不变：`readOnly=false`, `destructive=true`, `openWorld=false`。
-- 不出现 M2+ 工具状态/config 行为。
-
-### INT-02 — Atomic write create
-
-调用：
-
-```json
-{"path":"created.txt","content":"hello from M1"}
-```
-
-期望：
-
-- success。
-- target 最终 bytes 完全等于 UTF-8 `hello from M1`。
-- `created=true`, `overwritten=false`。
-- Workspace 内无 atomic temp residue。
-- Activity/Audit 为成功 lifecycle。
-
-### INT-03 — Atomic write overwrite
-
-前置：
+Suggested fixtures:
 
 ```text
 existing.txt = old content
+edit.txt     = hello from ChatGPT
+duplicate    = same same
+utf8.txt     = 你好, ChatGPT 👋
+binary.bin   = invalid UTF-8 bytes
+outside.txt  = must not change
 ```
 
-调用 write full overwrite。
+## 5. Required Integration Cases
 
-期望：
+### INT-01 — Ready MCP contract compatibility
 
-- success。
-- 最终文件只包含完整新内容。
-- `created=false`, `overwritten=true`。
-- 不存在 target truncate 后 partial/new-old mixed state 的最终结果。
-- 无 temp residue。
+Verify the composed Runtime exposes `read_file`, `glob`, `write`, `edit` with the M0-compatible schemas and annotations. No M2+ toggle/config semantics are introduced.
 
-### INT-04 — Write preserves exact UTF-8 byte semantics
+### INT-02 — Atomic write create
 
-分别测试：
+Create a missing file and assert exact bytes, `created=true`, no atomic temp residue, and successful execution evidence.
 
-- multibyte UTF-8。
-- empty content。
-- content without trailing newline。
-- content with CRLF / LF supplied by caller。
-- UTF-8 BOM supplied explicitly in String content where representable。
+### INT-03 — Atomic write overwrite
 
-期望：
+Overwrite an existing UTF-8 file and assert the final file contains only complete new bytes, reports overwrite semantics, and leaves no temp residue.
 
-- Harness 不自动修改 newline。
-- 不自动追加 newline。
-- 不进行 Unicode normalization。
-- `bytesWritten` 等于最终 UTF-8 bytes length。
+### INT-04 — Exact UTF-8 byte semantics
 
-### INT-05 — Existing binary overwrite is rejected
+Cover multibyte UTF-8, empty content, no trailing newline, caller-supplied LF/CRLF, and explicitly supplied BOM where representable. Harness must not normalize Unicode or line endings or append newlines.
 
-对 invalid UTF-8 `binary.bin` 调用 write overwrite。
+### INT-05 — Existing binary overwrite rejected
 
-期望：
-
-- `UNSUPPORTED_CONTENT`。
-- 原 bytes 完全不变。
-- 不残留 temp。
-- Audit 不包含原 binary/content。
+Writing over invalid UTF-8 content returns `UNSUPPORTED_CONTENT`; original bytes remain unchanged; no temp residue; audit does not contain raw content.
 
 ### INT-06 — Atomic exact edit success
 
-前置：
-
-```text
-edit.txt = hello from ChatGPT
-```
-
-调用：
-
-```json
-{
-  "path":"edit.txt",
-  "oldText":"hello from ChatGPT",
-  "newText":"hello from V3"
-}
-```
-
-期望：
-
-- success。
-- 最终 bytes 完全等于 `hello from V3`。
-- `replacements=1`。
-- 无 temp residue。
+Unique exact replacement succeeds, final bytes are exact, `replacements=1`, and no temp residue remains.
 
 ### INT-07 — Edit 0-match / multi-match remain non-mutating
 
-分别执行：
-
-```text
-0 match
->1 match
-```
-
-期望：
-
-- `EDIT_MATCH_NOT_FOUND` / `EDIT_MATCH_NOT_UNIQUE`。
-- 原文件 bytes 完全不变。
-- 无 temp residue。
+Return `EDIT_MATCH_NOT_FOUND` / `EDIT_MATCH_NOT_UNIQUE`; original bytes remain unchanged.
 
 ### INT-08 — Edit invalid UTF-8 remains non-mutating
 
-对 invalid UTF-8 file 调用 edit。
+Return `UNSUPPORTED_CONTENT`; original bytes remain unchanged.
 
-期望：
+### INT-09 — Concurrent edit source change returns `TARGET_CHANGED`
 
-- `UNSUPPORTED_CONTENT`。
-- 原 bytes 完全不变。
-- 无 temp residue。
-
-### INT-09 — Concurrent edit source change returns TARGET_CHANGED
-
-必须使用稳定的 test hook / synchronization seam 构造：
+Use deterministic synchronization, not sleep races:
 
 ```text
 Runtime reads original
 → replacement prepared/staged
-→ external test actor changes target
+→ test actor changes target
 → Runtime pre-commit check
 ```
 
-期望：
-
-- 返回 `TARGET_CHANGED`。
-- Runtime 不提交旧 replacement。
-- 最终 target 保留 external actor 的内容。
-- staged temp 被 cleanup。
-- Activity/Audit 可区分 target-changed rejection。
-
-不得通过 race + sleep 作为唯一验证方式。
+Assert `TARGET_CHANGED`, external actor content remains, staged temp is cleaned up, and Activity/Audit records the correct failure category.
 
 ### INT-10 — Edit target removed/replaced before commit fails closed
 
-分别模拟：
-
-- source 在 prepare 后被删除。
-- source 在 prepare 后被换成另一个 filesystem object / 不同 bytes。
-
-期望：
-
-- invocation fail closed。
-- 不把旧 replacement 提交到新的对象上。
-- 不出现错误对象被覆盖。
-- temp cleanup。
+Simulate target deletion/replacement after prepare. The old replacement must not be committed onto the new object.
 
 ### INT-11 — Atomic failure preserves existing target
 
-通过 production test seam 分别注入：
+Inject at least:
 
 ```text
-TempWrite failure
-TempFlush failure
-Commit failure
+TempWrite
+TempFlush
+Commit
 ```
 
-对 existing target 执行 write 和/或 edit 集成路径。
-
-期望：
-
-- MCP 返回 sanitized `IO_FAILURE` / `EXECUTION_FAILED`（按实现稳定映射）。
-- existing target bytes 与调用前完全相同。
-- 无成功 execution evidence。
-- 无 temp residue（cleanup failure 专门 case 除外）。
+For write/edit existing-target paths, assert old target bytes remain unchanged and no successful execution evidence is emitted.
 
 ### INT-12 — Failed create leaves no named target
 
-对 missing target 注入 pre-commit failure。
-
-期望：
-
-- 正式 target 不存在。
-- 不存在 partial `created.txt`。
-- staging temp 被 cleanup。
+Inject a pre-commit failure for a missing target. The named target must not appear and staging temp must be cleaned up.
 
 ### INT-13 — Target-created race does not silently clobber
 
-构造：
-
-```text
-write observes target missing
-→ stages temp
-→ external actor creates target
-→ write commit
-```
-
-期望：
-
-- Runtime 不静默覆盖 external actor 创建的文件。
-- 返回确定 failure 或 SPEC 允许的明确 branch behavior。
-- 最终内容必须与所声明 branch 一致且可解释。
+If another actor creates the target after M1 observed it missing, M1 must return its deterministic conflict behavior and must not silently overwrite that actor's file.
 
 ### INT-14 — Workspace boundary survives atomic staging
 
-至少覆盖：
-
-- relative outside write。
-- absolute outside write。
-- outside edit。
-- sibling-prefix escape。
-- missing parent。
-- Windows unsupported/root-relative path form。
-
-期望：
-
-- 全部 fail closed。
-- Workspace 外无 mutation。
-- atomic temp 不得出现在 Workspace 外 staging directory。
-- error sanitized。
+Cover relative/absolute outside writes, outside edit, sibling-prefix escape, missing parent and Windows unsupported/root-relative forms. Staging must never escape into an unapproved outside directory.
 
 ### INT-15 — Symlink/junction boundary revalidation
 
-Windows 环境允许时，构造 target/parent 在 authorization 后发生 symlink/junction-sensitive 变化。
-
-期望：
-
-- pre-commit revalidation 能阻止 Workspace escape。
-- Workspace 外无 mutation。
-
-若环境无法创建 fixture，可标为 `ENVIRONMENT_SKIP`，但必须记录原因，且其它 Windows boundary tests 仍需 PASS。
+On Windows, exercise a target/parent change between authorization and commit. Workspace escape must fail closed. `ENVIRONMENT_SKIP` is allowed only when fixture creation is unavailable and the reason is recorded.
 
 ### INT-16 — M0 write/edit MCP regression
 
-重新执行 M0 核心 local golden paths：
+Re-run local write create, overwrite, exact edit, outside rejection, malformed args and sanitized errors.
 
-- write create。
-- write overwrite。
-- edit exact replacement。
-- outside write reject。
-- outside edit reject。
-- malformed args。
-- error sanitization。
+### INT-17 — `read_file` / `glob` regression
 
-期望：M1 hardening 不改变外部 core contract。
+Verify normal read/glob paths and outside rejection; the new atomic helper must not change existing-path WorkspaceGuard semantics.
 
-### INT-17 — read_file / glob regression
+### INT-18 — Audit confidentiality / failure categories
 
-验证：
+For success, `TARGET_CHANGED` and atomic I/O failure, assert Activity/Audit can distinguish outcomes and does not contain raw mutation content, temp filename/path, unnecessary Workspace root or outside absolute path.
 
-- read_file normal path。
-- glob normal path。
-- outside read/glob rejection。
-- existing-target WorkspaceGuard semantics 未被 atomic helper 改写。
+## 6. Fault-Injection Rules
 
-### INT-18 — Audit confidentiality and failure categories
+M1 failure safety must be executed, not inferred from code review.
 
-使用唯一 sentinel content 执行 success、TARGET_CHANGED、commit failure。
-
-期望 Activity/Audit：
-
-- 能关联 request/tool/policy/outcome。
-- 能区分 success / target changed / atomic I/O failure。
-- 不包含 raw `content` / `oldText` / `newText`。
-- 不包含 temp filename/absolute temp path。
-- 不包含不必要 Workspace root / outside absolute path。
-
-## 5. Fault-Injection Requirement
-
-M1 的 failure safety 不允许仅靠代码 review 推断。
-
-Integration harness 必须能稳定触发至少：
+The Integration harness must deterministically trigger at least:
 
 ```text
 TempWrite
@@ -374,83 +213,67 @@ Commit
 Concurrent target change
 ```
 
-fault seam 必须：
+Test seams must be Runtime-internal/test-only, disabled in production behavior, and must not expose a new MCP/Tauri control surface.
 
-- 仅 Runtime internal/test 可用。
-- production default path 无 fault behavior。
-- 不成为 MCP/Tauri 用户可控接口。
-- 不复制第二套 atomic production implementation。
+## 7. Windows Atomic Replace Requirement
 
-## 6. Windows Atomic Replace Verification
-
-因为产品是 Windows-first，必须至少有一项运行在 Windows 上、真实触发 existing-target replace 的 integration/automated evidence。
-
-验证不能只证明：
+At least one automated Windows test must exercise a real existing-target replacement and prove:
 
 ```text
-mock commit called
+old target bytes
+→ production replacement primitive
+→ new target bytes
 ```
 
-而要证明：
+The implementation must not be `delete target → rename temp`.
 
-```text
-existing target old bytes
-→ replace operation
-→ existing target new bytes
-```
+If the instantaneous atomic visibility window cannot be observed externally, combine observable filesystem assertions with primitive-level evidence for the actual Windows replacement API/semantics.
 
-并确认实现不是：
+## 8. Agent Execution / Evidence Format
 
-```text
-delete target
-→ rename temp
-```
-
-如果测试只能从外部可观察行为证明 atomic replace，而无法直接观察瞬时窗口，则还必须配合源码/primitive-level test evidence确认使用的 Windows API/primitive 语义。
-
-## 7. Evidence Required
-
-每个 INT case 记录：
+The Coding Agent executes all Integration cases without human intervention and records:
 
 ```text
 Case ID
 Result: PASS / FAIL / BLOCKED / ENVIRONMENT_SKIP
-Test command / test name
-MCP result/error code
-Filesystem before/after bytes assertion
+Automated test name / command
+Relevant MCP/runtime result code
+Filesystem before/after assertion
 Temp residue assertion
 Activity/Audit assertion where applicable
+Injected phase where applicable
 ```
 
-对 fault case 还应记录 injected phase，但不得记录真实 temp absolute path。
+Secrets and raw temp absolute paths must not be copied into evidence.
 
-## 8. Integration Exit Criteria
+## 9. Integration Exit Criteria
 
-M1 Integration 只有在以下全部满足时为 `PASS`：
+Integration is `PASS` only when:
 
-- INT-01 ～ INT-18 PASS；仅允许明确记录的 symlink/junction `ENVIRONMENT_SKIP`。
-- Windows existing-target atomic replace 有真实自动化 evidence。
-- atomic write create/overwrite PASS。
-- atomic edit PASS。
-- TempWrite/TempFlush/Commit failure 均证明 existing target unchanged。
-- failed create 不留下正式 target。
-- concurrent edit 返回 `TARGET_CHANGED` 且不覆盖 external modification。
-- UTF-8 boundary PASS。
-- Workspace boundary PASS。
-- M0 write/edit/read/glob regression PASS。
-- Activity/Audit 无 mutation content/temp-path leakage。
+- INT-01 through INT-18 pass, except an explicitly justified Windows symlink/junction `ENVIRONMENT_SKIP`;
+- real Windows existing-target atomic replacement has automated evidence;
+- atomic write create/overwrite and atomic edit pass;
+- TempWrite/TempFlush/Commit failures preserve old target bytes;
+- failed create leaves no named target;
+- concurrent edit produces `TARGET_CHANGED` without clobbering external modification;
+- UTF-8 and Workspace boundaries pass;
+- M0 write/edit/read/glob regression passes;
+- Activity/Audit sanitization passes.
 
-Integration PASS 后仍需执行 `E2E_TEST_PLAN.md` regression smoke 和 `MANUAL_ACCEPTANCE_CHECKLIST.md`，但 M1 不重新定义 M0 External capability gate。
+When Integration passes, the **Coding Agent**, not a human reviewer, proceeds to `E2E_TEST_PLAN.md`.
 
-## 9. Non-Claims
+Integration PASS alone is not M1 acceptance.
 
-M1 Integration PASS 不代表：
+## 10. Non-Claims
+
+Integration PASS does not claim:
 
 ```text
+real process-boundary E2E complete
+External ChatGPT/Tunnel complete
 power-loss durable fsync guarantee
 multi-file transaction guarantee
 OS sandbox guarantee
-M2 Tool Toggle complete
-M3 Policy complete
-V3 ACCEPTED / FROZEN
+M2+ capabilities complete
+M1 ACCEPTED / FROZEN
 ```
