@@ -1,276 +1,367 @@
-# M1 E2E Test Plan — External Regression Smoke
+# M1 E2E Test Plan — Local Black-box Runtime/MCP Regression
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: DRAFT / READY FOR AUTOMATED EXECUTION  
 > Milestone: M1 — Write/Edit Production Hardening  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`, `INTEGRATION_TEST_PLAN.md`  
 > Baseline: M0 — ACCEPTED / FROZEN  
-> Purpose: External ChatGPT regression smoke only. This plan does not re-prove product-side write/edit capability discovery.
+> Owner: Coding Agent  
+> Scope: local black-box E2E against a final / near-final Runtime build. No human interaction is required.
 
-## 1. Objective
+## 1. Responsibility Boundary
 
-M0 已经证明真实：
-
-```text
-External ChatGPT
-→ Tunnel
-→ Runtime MCP
-→ write / edit
-→ Workspace filesystem
-```
-
-M1 不重复做 capability gate，而是确认 atomic hardening 后没有破坏已经验收的真实 External ChatGPT 使用路径。
-
-External smoke 只验证用户可观察行为：
-
-- write 仍可创建文件。
-- write 仍可 full overwrite。
-- edit 仍可 exact replacement。
-- Workspace 外 mutation 仍被拒绝。
-- Runtime Activity/Audit 仍有对应 evidence。
-
-Atomic failure injection、TARGET_CHANGED race、temp cleanup 等生产化内部语义由 `INTEGRATION_TEST_PLAN.md` 证明，不要求通过真实 ChatGPT 人工制造故障。
-
-## 2. Preconditions
-
-开始 E2E 前必须：
-
-- M1 Integration result = PASS。
-- 使用包含 M1 实现的明确 build / commit。
-- Harness Runtime Ready。
-- Tunnel 已连接当前 Runtime MCP endpoint。
-- External ChatGPT 当前连接的是本次验收 Harness，而非旧实例。
-- 使用专用 M1 E2E Workspace。
-
-建议 Workspace 初始为空或只包含可丢弃 fixture。
-
-## 3. Evidence Rule
-
-每个 External case 必须至少有两类 evidence：
+M1 uses this verification split:
 
 ```text
-External ChatGPT session observation
-+
-filesystem / Runtime Activity-Audit observation
+Unit Tests           → Coding Agent
+Integration Tests    → Coding Agent
+Local Black-box E2E  → Coding Agent
+Manual Acceptance    → Human Reviewer
 ```
 
-不能只依据 ChatGPT 文本回复判断成功。
+This document owns **Local Black-box E2E** only.
 
-以下均不能替代本计划：
+External ChatGPT, Tunnel and Harness UI are **not** part of this automated E2E layer. They belong to `MANUAL_ACCEPTANCE_CHECKLIST.md` because they require real user/product interaction.
 
-- MCP Inspector。
-- local HTTP request。
-- loopback MCP client。
-- mock。
-- Unit/Integration test。
+All E2E cases in this document must be executable by Codex locally without:
 
-但这些已经在 M1 Integration 中承担其自己的覆盖范围。
+- browser automation;
+- clicking Harness UI;
+- External ChatGPT;
+- Tunnel credentials;
+- manual file edits between cases.
 
-## 4. E2E Cases
+## 2. What Counts as M1 E2E
 
-### E2E-01 — External write create regression
-
-请求 External ChatGPT 创建：
+The E2E runner may be test-only code, but the system under test must be the real built Runtime process and real external surfaces:
 
 ```text
-m1-e2e.txt
+Coding Agent test runner
+→ actual compiled chatgpt-harness-runtime process
+→ stdin/stdout Control RPC initialize
+→ mcp.endpoint.get
+→ real loopback MCP HTTP endpoint
+→ MCP tools/list + tools/call
+→ ExecutionPipeline / WorkspaceGuard / Policy / executor
+→ real Workspace filesystem
+→ real Activity pipeline
+→ activity.list over Control RPC
 ```
 
-内容必须完全为：
+The runner must **not** call these as its main E2E execution path:
 
 ```text
-hello from M1
+RuntimeCore::execute(...)
+ToolExecutor::execute(...)
+McpService::call_tool(...) in-process
+atomic helper directly
+mock MCP transport
+fake Activity sink
 ```
 
-期望：
+Those are Unit/Integration techniques, not E2E.
 
-- ChatGPT 实际发起 Harness `write` tool call。
-- Workspace 中真实创建 `m1-e2e.txt`。
-- 文件 bytes 对应精确 UTF-8 `hello from M1`。
-- 无额外 newline/文本变化。
-- Activity/Audit 有对应成功 request evidence。
+## 3. Build Requirement
 
-### E2E-02 — External write full-overwrite regression
+E2E must run against an explicit final / near-final build identity.
 
-前置：E2E-01 已创建文件。
-
-请求 ChatGPT 将 `m1-e2e.txt` 完整覆盖为：
+Preferred target:
 
 ```text
-hello from M1 overwrite
+cargo build -p chatgpt-harness-runtime --release
 ```
 
-期望：
+and then spawn the produced `chatgpt-harness-runtime` binary.
 
-- 实际调用 `write`。
-- 最终文件完整等于新内容。
-- 不残留旧内容。
-- Activity/Audit 有成功 evidence。
+A Cargo integration-test binary target is acceptable if it launches the real package binary through `CARGO_BIN_EXE_chatgpt-harness-runtime`; it must not substitute an in-process Runtime instance.
 
-本 case 只验证 External observable overwrite；atomic failure safety 已由 Integration 负责。
+The E2E server process must use production-default behavior:
 
-### E2E-03 — External exact edit regression
+- no atomic fault injection;
+- no test-only alternate executor;
+- no mock filesystem;
+- no alternate WorkspaceGuard;
+- no fake Activity source.
 
-请求 ChatGPT 精确替换：
+## 4. Required Automated Runner Contract
+
+The Coding Agent may implement the runner as Rust integration-test code or an equivalent checked-in test-only harness.
+
+The runner must autonomously:
+
+1. create disposable `workspace/` and adjacent `outside/` directories;
+2. start the actual Runtime binary with piped stdin/stdout;
+3. send the real Control RPC `initialize` request using the production protocol;
+4. send the `initialized` acknowledgement;
+5. request `mcp.endpoint.get`;
+6. connect to that returned loopback URL using a real MCP Streamable HTTP client;
+7. call `tools/list` / `tools/call` through MCP;
+8. inspect actual filesystem bytes;
+9. query `activity.list` through Control RPC;
+10. stop the Runtime through `runtime.stop` or equivalent graceful control flow;
+11. fail the test process on any mismatch.
+
+A single command should be sufficient to execute the complete E2E suite after the runner exists, for example:
 
 ```text
-hello from M1 overwrite
+cargo test -p chatgpt-harness-runtime --test m1_e2e -- --nocapture
 ```
 
-为：
+The exact filename/command may differ, but execution must remain non-interactive and reproducible.
+
+## 5. Entry Criteria
+
+The Coding Agent starts E2E only when:
+
+- M1 development T1–T4 is complete;
+- Unit Tests pass;
+- `INTEGRATION_TEST_PLAN.md` result = PASS;
+- `cargo fmt --all -- --check` passes;
+- `cargo check --workspace` passes;
+- `cargo test --workspace` passes;
+- the E2E target build identity is recorded;
+- the real Runtime process can start from the test runner.
+
+No human confirmation is an Entry Criterion.
+
+If the local machine cannot launch the actual Runtime binary or loopback MCP endpoint, mark the E2E run:
 
 ```text
-hello from M1 hardened
+BLOCKED — LOCAL TEST ENVIRONMENT
 ```
 
-期望：
+Do not replace it with an in-process mock and call that E2E.
 
-- 实际调用 `edit`。
-- 最终文件完全为 `hello from M1 hardened`。
-- 只发生一次预期 replacement。
-- Activity/Audit 有成功 evidence。
+## 6. Test Fixture
 
-### E2E-04 — External edit ambiguous match remains safe
-
-先通过正常方式准备一个专用文件：
+The runner creates all fixtures itself:
 
 ```text
-m1-duplicate.txt = same same
+base/
+├ workspace/
+│  ├ duplicate.txt
+│  └ optional pre-existing fixtures
+└ outside/
+   └ outside.txt
 ```
 
-请求 ChatGPT 把 `same` 替换为 `changed`。
-
-期望：
-
-- Runtime 返回 edit multi-match failure。
-- 文件仍为 `same same`。
-- ChatGPT 不应通过 Harness 自动猜测 first match。
-- Activity/Audit 有 failure evidence。
-
-如果 ChatGPT 在失败后主动提出其它操作，不属于 Harness 自动 edit 的成功；Reviewer 只验证本次工具调用没有 mutation。
-
-### E2E-05 — External Workspace boundary regression
-
-请求 External ChatGPT 尝试写入 Workspace 外路径。
-
-路径选择应确保请求能到达 Runtime，但不会危害真实数据；使用专门的相邻测试目录。
-
-期望：
-
-- ChatGPT 实际发起 mutation tool call。
-- Runtime 返回 `WORKSPACE_VIOLATION` 或当前稳定对应 error。
-- Workspace 外目标没有创建/修改。
-- error 不泄露不必要绝对路径。
-- Activity/Audit 为 Workspace rejection，无成功 execution evidence。
-
-### E2E-06 — External read regression after hardened mutation
-
-请求 ChatGPT 使用 `read_file` 读取最终 `m1-e2e.txt`。
-
-期望：
+Initial values where needed:
 
 ```text
-hello from M1 hardened
+duplicate.txt = same same
+outside.txt   = must not change
 ```
 
-目的：确认 M1 mutation hardening 没有破坏已有 read path，且真实文件最终状态可由同一 Harness 链路读取。
+No case may depend on a human preparing or repairing the fixture.
 
-## 5. Optional External UTF-8 Smoke
+## 7. Required E2E Cases
 
-建议但不是额外 capability gate：
+### E2E-01 — Runtime process boot + real MCP exposure
 
-请求创建或覆盖：
+The runner:
+
+- spawns the actual Runtime build;
+- initializes it with the disposable Workspace;
+- obtains the real `mcp.endpoint.get` URL;
+- connects over loopback MCP HTTP;
+- lists tools.
+
+Expected tools include:
 
 ```text
-m1-utf8.txt
+read_file
+glob
+write
+edit
 ```
 
-内容：
+Also query `activity.list` to prove the Control/Activity surface belongs to the same Runtime generation.
+
+### E2E-02 — Real MCP write create
+
+Call `write` over the real MCP endpoint:
+
+```json
+{"path":"m1-e2e.txt","content":"hello from M1"}
+```
+
+Assert:
+
+- MCP returns success;
+- `workspace/m1-e2e.txt` exists;
+- bytes equal exactly `hello from M1`;
+- no additional newline or normalization;
+- no `.chatgpt-harness-*` temp residue remains;
+- `activity.list` contains the corresponding request/execution success evidence.
+
+### E2E-03 — Real MCP write full overwrite
+
+Call `write` again:
+
+```json
+{"path":"m1-e2e.txt","content":"hello from M1 overwrite"}
+```
+
+Assert:
+
+- success;
+- final bytes equal exactly the new content;
+- no old-content residue;
+- no atomic temp residue;
+- Activity contains successful write evidence.
+
+This case verifies production observable overwrite behavior. Deterministic commit-failure safety remains an Integration responsibility.
+
+### E2E-04 — Real MCP exact edit + read-back
+
+Call `edit`:
+
+```json
+{
+  "path":"m1-e2e.txt",
+  "oldText":"hello from M1 overwrite",
+  "newText":"hello from M1 hardened"
+}
+```
+
+Then call `read_file` over the same real MCP endpoint.
+
+Assert:
+
+- edit succeeds;
+- final filesystem bytes equal exactly `hello from M1 hardened`;
+- read_file returns the same content;
+- no temp residue;
+- Activity contains successful edit/read evidence.
+
+### E2E-05 — Ambiguous edit fails without mutation
+
+Prepare `duplicate.txt = same same` automatically, then call:
+
+```json
+{
+  "path":"duplicate.txt",
+  "oldText":"same",
+  "newText":"changed"
+}
+```
+
+Assert:
+
+- tool result is an error with stable `EDIT_MATCH_NOT_UNIQUE` semantics;
+- filesystem bytes remain `same same`;
+- no temp residue;
+- Activity contains failure evidence and no successful edit completion for that request.
+
+### E2E-06 — Workspace boundary rejected through real MCP
+
+Use an absolute or otherwise validly formed path pointing into the adjacent disposable `outside/` directory and call `write`.
+
+Assert:
+
+- real MCP call reaches Runtime and is rejected as Workspace violation;
+- `outside.txt` remains exactly `must not change` or the requested outside target is not created;
+- no outside temp file is created;
+- error is sanitized;
+- Activity records Workspace rejection and no successful execution.
+
+### E2E-07 — Exact UTF-8 production path
+
+Call `write` for:
 
 ```text
-你好，M1 👋
+m1-utf8.txt = 你好，M1 👋
 ```
 
-验证 filesystem UTF-8 bytes 和 External read-back 一致。
+Then call `read_file`.
 
-如果执行，记录为：
+Assert:
 
-```text
-E2E-07 — PASS / FAIL
-```
+- filesystem bytes equal the caller-supplied UTF-8 bytes exactly;
+- MCP read-back is semantically identical;
+- no automatic newline/Unicode normalization;
+- Activity contains successful mutation/read evidence.
 
-## 6. Cases Deliberately Not Tested Through External ChatGPT
+### E2E-08 — Runtime shutdown / process cleanup
 
-以下 M1 acceptance requirement 不应通过人工 External ChatGPT 制造 flaky/risky race：
+After all tool cases:
 
-- TempWrite failure。
-- TempFlush failure。
-- atomic Commit failure。
-- target-created race。
-- edit TARGET_CHANGED synchronization race。
-- symlink/junction TOCTOU fixture。
-- temp cleanup failure。
+- issue graceful Runtime stop through the real control path;
+- assert child process exits;
+- assert the loopback MCP endpoint is no longer usable;
+- assert Workspace files remain in their final committed state;
+- assert no atomic temp residue remains.
 
-这些必须由确定性的 Runtime Integration / unit test seam 验证。
+## 8. Deliberately Integration-only Cases
 
-External E2E 不扩大其覆盖范围。
+Do not use the E2E layer to inject internal failure hooks for:
 
-## 7. Required Evidence
+- TempCreate / TempWrite / TempFlush / Commit failure;
+- deterministic `TARGET_CHANGED` synchronization;
+- target-created race hook;
+- junction/symlink mutation hook;
+- cleanup-failure hook.
 
-每个 E2E case 记录：
+Those are intentionally proven by Integration tests. E2E uses production-default behavior against the actual Runtime process.
+
+## 9. Evidence Required
+
+The Coding Agent records for each case:
 
 ```text
 Case ID
 Result: PASS / FAIL / BLOCKED
-External ChatGPT user request
-Observed tool invoked
-Sanitized tool result/error
-Filesystem observation
-Activity/Audit observation
 Build / commit identity
-Reviewer / date
+Runner command
+Runtime process identity / generation identity where available
+MCP endpoint loopback assertion
+Observed MCP tool/result or stable error code
+Filesystem byte assertion
+Activity assertion
+Temp-residue assertion where applicable
 ```
 
-不要在 evidence 文档中记录 API Key 或其它 secret。
+Do not record secrets or unnecessary absolute sensitive paths.
 
-## 8. Exit Criteria
+## 10. E2E Exit Criteria
 
-M1 External regression smoke PASS 要求：
+M1 Local Black-box E2E is `PASS` only when:
 
-- E2E-01 write create PASS。
-- E2E-02 write overwrite PASS。
-- E2E-03 exact edit PASS。
-- E2E-04 ambiguous edit无 mutation。
-- E2E-05 outside mutation仍 fail closed。
-- E2E-06 read regression PASS。
-- 对应 filesystem 与 Activity/Audit evidence 已人工核实。
+- E2E-01 through E2E-08 execute without human intervention;
+- the actual compiled Runtime process is the server under test;
+- MCP calls travel through the real loopback MCP HTTP endpoint;
+- filesystem assertions use real files under a disposable Workspace;
+- Activity assertions come from the Runtime `activity.list` control surface;
+- write create / overwrite pass;
+- exact edit + read-back pass;
+- ambiguous edit remains non-mutating;
+- Workspace escape remains fail-closed;
+- UTF-8 path passes;
+- graceful shutdown passes;
+- no case is substituted by mock/in-process executor testing.
 
-E2E-07 UTF-8 smoke 为建议项；若执行则必须记录真实结果，不能失败后忽略。
-
-## 9. Failure Interpretation
-
-如果 Integration PASS，但 External regression 失败：
-
-- 先区分 Tunnel/session/stale build/client cache 等环境问题与 Harness regression。
-- 如果确认 M1 build 的 write/edit External path 回归，则 M1 不得 ACCEPTED。
-- M0 历史 `ACCEPTED / FROZEN` 状态不因此被改写；应记录为 M1 regression defect。
-
-M1 不再使用：
+When E2E passes, the automated verification chain is complete:
 
 ```text
-BLOCKED_BY_EXTERNAL_CAPABILITY
+Unit PASS
+→ Integration PASS
+→ Local Black-box E2E PASS
 ```
 
-作为默认结论，因为 M0 已证明该账号/产品链路具备 write/edit capability。只有有新的明确产品侧能力变化证据时，才单独记录 external dependency regression，不修改 M0 历史事实。
+Only then does the process move to `MANUAL_ACCEPTANCE_CHECKLIST.md` for human final acceptance.
 
-## 10. Non-Claims
+## 11. Non-Claims
 
-本 External smoke 不证明：
+Automated Local E2E does not claim:
 
 ```text
-atomic fault safety
-TARGET_CHANGED race protection
-power-loss durability
-multi-file transaction
-M2+ capabilities
-V3 final acceptance
+External ChatGPT product behavior verified
+Tunnel verified
+Harness desktop UI verified
+browser/UI interaction verified
+power-loss durability verified
+multi-file transaction support
+M2+ functionality
+M1 ACCEPTED / FROZEN
 ```
+
+Those external/user-facing observations belong to Manual Acceptance where applicable.
