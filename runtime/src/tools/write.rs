@@ -404,6 +404,25 @@ mod tests {
     }
 
     #[test]
+    fn atomic_faults_on_create_leave_no_named_target_or_temp() {
+        for fault in [
+            AtomicFault::TempCreate,
+            AtomicFault::TempWrite,
+            AtomicFault::TempFlush,
+            AtomicFault::Commit,
+        ] {
+            let workspace = TestWorkspace::new();
+            let result = workspace.execute_with_options(
+                &WriteRequest::new("created.txt", "new content"),
+                AtomicMutationOptions::with_fault(fault),
+            );
+            assert!(matches!(result, Err(WriteError::AtomicFailure { .. })));
+            assert!(!workspace.root.join("created.txt").exists());
+            assert_eq!(fs::read_dir(&workspace.root).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
     fn target_created_after_prepare_is_not_silently_overwritten() {
         let workspace = TestWorkspace::new();
         let target = workspace.root.join("raced.txt");

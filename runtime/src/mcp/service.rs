@@ -197,6 +197,15 @@ mod tests {
             fs::write(path, content).expect("write fixture");
         }
 
+        fn assert_no_atomic_temp_residue(&self) {
+            let residue = fs::read_dir(&self.root)
+                .expect("read workspace directory")
+                .map(|entry| entry.expect("read workspace entry").file_name())
+                .filter(|name| name.to_string_lossy().contains(".chatgpt-harness-"))
+                .collect::<Vec<_>>();
+            assert!(residue.is_empty(), "atomic temporary residue: {residue:?}");
+        }
+
         fn service(&self) -> McpService {
             let mut core = RuntimeCore::new();
             core.initialize(config_for(&self.root))
@@ -528,6 +537,46 @@ mod tests {
             fs::read(workspace.root.join("existing.txt")).unwrap(),
             b"new content"
         );
+    }
+
+    #[test]
+    fn m1_integration_write_preserves_exact_utf8_bytes_and_rejects_binary() {
+        let workspace = TestWorkspace::new();
+        let service = workspace.service();
+        let cases = [
+            ("multibyte.txt", "你好, ChatGPT 👋"),
+            ("empty.txt", ""),
+            ("no-trailing-newline.txt", "no trailing newline"),
+            ("lf.txt", "line one\nline two\n"),
+            ("crlf.txt", "line one\r\nline two\r\n"),
+            ("bom.txt", "\u{FEFF}BOM supplied explicitly"),
+        ];
+
+        for (path, content) in cases {
+            let result = call(&service, WRITE, json!({ "path": path, "content": content }));
+            assert_eq!(result.is_error, Some(false), "write failed for {path}");
+            assert_eq!(
+                result.structured_content.as_ref().unwrap()["bytesWritten"],
+                content.as_bytes().len()
+            );
+            assert_eq!(
+                fs::read(workspace.root.join(path)).unwrap(),
+                content.as_bytes()
+            );
+            workspace.assert_no_atomic_temp_residue();
+        }
+
+        let binary_path = workspace.root.join("binary.bin");
+        let binary_before = [0xff, 0xfe, 0x00, 0x80];
+        fs::write(&binary_path, binary_before).expect("binary fixture");
+        let rejected = call(
+            &service,
+            WRITE,
+            json!({ "path": "binary.bin", "content": "replacement" }),
+        );
+        assert_eq!(error_code(&rejected), "UNSUPPORTED_CONTENT");
+        assert_eq!(fs::read(&binary_path).unwrap(), binary_before);
+        workspace.assert_no_atomic_temp_residue();
     }
 
     #[test]

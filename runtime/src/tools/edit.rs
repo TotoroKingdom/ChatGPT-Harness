@@ -486,6 +486,59 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn parent_junction_change_before_commit_fails_closed_without_escape() {
+        let workspace = TestWorkspace::new();
+        let inside = workspace.root.join("inside");
+        let outside = workspace.outside.join("outside");
+        fs::create_dir_all(&inside).expect("inside directory");
+        fs::create_dir_all(&outside).expect("outside directory");
+        let inside_file = inside.join("file.txt");
+        let outside_file = outside.join("file.txt");
+        fs::write(&inside_file, "inside").expect("inside fixture");
+        fs::write(&outside_file, "outside").expect("outside fixture");
+
+        let link = workspace.root.join("link");
+        if !create_junction(&link, &inside) {
+            eprintln!("ENVIRONMENT_SKIP: mklink /J unavailable for dynamic junction test");
+            return;
+        }
+
+        let mut hook = || {
+            fs::remove_dir(&link).expect("remove original junction");
+            assert!(create_junction(&link, &outside));
+        };
+        let result = workspace.execute_with_hook(
+            &EditRequest::new("link/file.txt", "inside", "agent replacement"),
+            &mut hook,
+        );
+
+        assert!(matches!(
+            result,
+            Err(EditError::Workspace(WorkspaceError::WorkspaceEscape { .. }))
+        ));
+        assert_eq!(fs::read(&inside_file).unwrap(), b"inside");
+        assert_eq!(fs::read(&outside_file).unwrap(), b"outside");
+        assert!(fs::read_dir(&inside).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".chatgpt-harness-")));
+        let _ = fs::remove_dir(&link);
+    }
+
+    #[cfg(windows)]
+    fn create_junction(link: &std::path::Path, target: &std::path::Path) -> bool {
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
     #[test]
     fn zero_and_multiple_matches_fail_without_modifying_the_file() {
         let workspace = TestWorkspace::new();
