@@ -30,7 +30,10 @@ if ($LASTEXITCODE -ne 0) { throw "Distribution staging failed." }
 
 Push-Location $uiDirectory
 try {
-    & npx tauri build --no-bundle --ci --config src-tauri/tauri.portable.conf.json
+    # Release binaries must enable Tauri's custom protocol; without it the
+    # embedded frontend falls back to devUrl (localhost:1420) and a portable
+    # build incorrectly depends on a running Vite dev server.
+    & npx tauri build --no-bundle --ci --features custom-protocol --config src-tauri/tauri.portable.conf.json
     if ($LASTEXITCODE -ne 0) { throw "Portable Tauri build failed." }
 } finally {
     Pop-Location
