@@ -1,6 +1,6 @@
 # M1 Manual Acceptance Checklist — Write/Edit Production Hardening
 
-> Status: DRAFT / READY FOR FINAL HUMAN REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M1 — Write/Edit Production Hardening  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`, `INTEGRATION_TEST_PLAN.md`, `E2E_TEST_PLAN.md`  
 > Baseline: M0 — ACCEPTED / FROZEN  
@@ -27,7 +27,7 @@ Manual Acceptance is responsible for:
 3. validating the real user-facing `External ChatGPT → Tunnel → Harness → Runtime` chain where required;
 4. making the final `ACCEPTED / FROZEN` decision.
 
-M1 does not re-open M0's product capability question. M0 already proved External ChatGPT can invoke write/edit. M1 manual acceptance only checks that the hardened build did not regress that real user path.
+M1 does not revisit M0's product capability question. M0 already proved External ChatGPT can invoke write/edit. M1 manual acceptance only checks that the hardened build did not regress that real user path.
 
 ## 2. Entry Criteria
 
@@ -43,35 +43,35 @@ and provides build / commit identity plus automated evidence.
 
 Required automated completion:
 
-- [ ] T1–T4 development complete.
-- [ ] `cargo fmt --all -- --check` PASS.
-- [ ] `cargo check --workspace` PASS.
-- [ ] `cargo test --workspace` PASS.
-- [ ] `git diff --check` PASS.
-- [ ] `INTEGRATION_TEST_PLAN.md` PASS.
-- [ ] `E2E_TEST_PLAN.md` Local Black-box E2E PASS.
-- [ ] Windows atomic-replace automated evidence present.
-- [ ] atomic fault-injection evidence present.
-- [ ] concurrent edit `TARGET_CHANGED` evidence present.
+- [x] T1–T4 development complete.
+- [x] `cargo fmt --all -- --check` PASS.
+- [x] `cargo check --workspace` PASS.
+- [x] `cargo test --workspace` PASS.
+- [x] `git diff --check` PASS.
+- [x] `INTEGRATION_TEST_PLAN.md` PASS.
+- [x] `E2E_TEST_PLAN.md` Local Black-box E2E PASS.
+- [x] Windows atomic-replace automated evidence present.
+- [x] atomic fault-injection evidence present.
+- [x] concurrent edit `TARGET_CHANGED` evidence present.
 
 The reviewer must not compensate for a missing automated layer by manually performing equivalent low-level cases.
 
 ## 3. Build / Source Identity
 
-- [ ] Record the acceptance commit SHA.
-- [ ] Confirm the reviewed build contains the M1 T1–T4 production implementation.
-- [ ] Confirm the build is not an M0 binary.
-- [ ] Record any later test-only commit separately from the production implementation commit.
-- [ ] Confirm no unexplained production source changes were introduced after automated verification.
+- [x] Record the acceptance commit SHA.
+- [x] Confirm the reviewed build contains the M1 T1–T4 production implementation.
+- [x] Confirm the build is not an M0 binary.
+- [x] Record any later test-only commit separately from the production implementation commit.
+- [x] Confirm no unexplained production source changes were introduced after automated verification.
 
 Evidence:
 
 ```text
 Production implementation commit: 7db206b6232e955df2553d054cb7c2e9e063c76c
 Later automated-test coverage commit: 22f57a87f9d5e9dec0d68d61c3825b6703b38a33
-Final acceptance commit/build:
-Reviewer:
-Date:
+Final acceptance commit/build: 455228e130e1c8100e1061606b4c445376d29b3d (tag: `M1-freeze`)
+Reviewer: User-directed acceptance evidence review
+Date: 2026-09-30
 ```
 
 The later `22f57a8...` commit adds/strengthens automated test coverage; it does not by itself invalidate already completed External ChatGPT evidence for the unchanged production semantics. If later commits modify production write/edit semantics, the reviewer must reassess whether external evidence needs rerun.
@@ -80,53 +80,53 @@ The later `22f57a8...` commit adds/strengthens automated test coverage; it does 
 
 ### 4.1 Unit / Task Evidence
 
-- [ ] T1 Shared Atomic File Mutation Primitive PASS.
-- [ ] T2 Production Harden `write` PASS.
-- [ ] T3 Production Harden `edit` PASS.
-- [ ] T4 Errors / Evidence / M0 Regression PASS.
-- [ ] No M2 Tool Toggle semantics introduced.
-- [ ] No M3 configurable Policy semantics introduced.
-- [ ] No M4 Approval semantics introduced.
+- [x] T1 Shared Atomic File Mutation Primitive PASS.
+- [x] T2 Production Harden `write` PASS.
+- [x] T3 Production Harden `edit` PASS.
+- [x] T4 Errors / Evidence / M0 Regression PASS.
+- [x] No M2 Tool Toggle semantics introduced.
+- [x] No M3 configurable Policy semantics introduced.
+- [x] No M4 Approval semantics introduced.
 
 ### 4.2 Integration Evidence
 
 From `INTEGRATION_TEST_PLAN.md`:
 
-- [ ] Integration result = PASS.
-- [ ] INT-01 through INT-18 executed with evidence.
-- [ ] atomic write create/overwrite PASS.
-- [ ] atomic edit PASS.
-- [ ] TempWrite/TempFlush/Commit failures preserve existing target.
-- [ ] failed create leaves no named target.
-- [ ] concurrent edit `TARGET_CHANGED` PASS.
-- [ ] UTF-8 boundary PASS.
-- [ ] Workspace boundary PASS.
-- [ ] M0 write/edit/read/glob regression PASS.
-- [ ] Activity/Audit confidentiality PASS.
+- [x] Integration result = PASS.
+- [x] INT-01 through INT-18 executed with evidence.
+- [x] atomic write create/overwrite PASS.
+- [x] atomic edit PASS.
+- [x] TempWrite/TempFlush/Commit failures preserve existing target.
+- [x] failed create leaves no named target.
+- [x] concurrent edit `TARGET_CHANGED` PASS.
+- [x] UTF-8 boundary PASS.
+- [x] Workspace boundary PASS.
+- [x] M0 write/edit/read/glob regression PASS.
+- [x] Activity/Audit confidentiality PASS.
 
 If Windows symlink/junction fixture creation was unavailable:
 
-- [ ] `ENVIRONMENT_SKIP` is explicitly justified.
-- [ ] other Windows atomic/boundary tests still PASS.
+- [x] `ENVIRONMENT_SKIP` is explicitly justified where a Windows symlink/junction fixture is unavailable.
+- [x] other Windows atomic/boundary tests still PASS.
 
 ### 4.3 Local Black-box E2E Evidence
 
 From `E2E_TEST_PLAN.md`:
 
-- [ ] E2E-01 through E2E-08 executed autonomously by Coding Agent.
-- [ ] actual compiled Runtime process was spawned.
-- [ ] Runtime was initialized through real stdin/stdout Control RPC.
-- [ ] MCP endpoint was obtained through `mcp.endpoint.get`.
-- [ ] tools were called through the real loopback MCP HTTP endpoint.
-- [ ] filesystem bytes were asserted directly.
-- [ ] Activity was asserted through `activity.list`.
-- [ ] write create/overwrite PASS.
-- [ ] exact edit/read-back PASS.
-- [ ] ambiguous edit remained non-mutating.
-- [ ] outside mutation was rejected.
-- [ ] UTF-8 production path PASS.
-- [ ] Runtime shutdown/cleanup PASS.
-- [ ] no E2E case was replaced by mock or in-process executor testing.
+- [x] E2E-01 through E2E-08 executed autonomously by Coding Agent.
+- [x] actual compiled Runtime process was spawned.
+- [x] Runtime was initialized through real stdin/stdout Control RPC.
+- [x] MCP endpoint was obtained through `mcp.endpoint.get`.
+- [x] tools were called through the real loopback MCP HTTP endpoint.
+- [x] filesystem bytes were asserted directly.
+- [x] Activity was asserted through `activity.list`.
+- [x] write create/overwrite PASS.
+- [x] exact edit/read-back PASS.
+- [x] ambiguous edit remained non-mutating.
+- [x] outside mutation was rejected.
+- [x] UTF-8 production path PASS.
+- [x] Runtime shutdown/cleanup PASS.
+- [x] no E2E case was replaced by mock or in-process executor testing.
 
 Automated evidence reference:
 
@@ -140,33 +140,33 @@ Build identity:
 
 The reviewer checks evidence and source-level design, but does not manually reproduce internal failure injection.
 
-- [ ] temp file is created in the same approved target directory.
-- [ ] temp uses exclusive create semantics.
-- [ ] full bytes are staged/flushed before commit.
-- [ ] target/parent are revalidated before commit.
-- [ ] Windows existing-target replacement uses real atomic-replace semantics.
-- [ ] implementation is not `delete target → rename temp`.
-- [ ] atomic helper is not an authorization authority.
-- [ ] WorkspaceGuard remains the path-authorization authority.
-- [ ] Policy evaluation remains inside ExecutionPipeline.
-- [ ] MCP adapters do not bypass Pipeline/ExecutionPermit.
-- [ ] test/fault seams are not exposed as user-controlled MCP/Tauri interfaces.
+- [x] temp file is created in the same approved target directory.
+- [x] temp uses exclusive create semantics.
+- [x] full bytes are staged/flushed before commit.
+- [x] target/parent are revalidated before commit.
+- [x] Windows existing-target replacement uses real atomic-replace semantics.
+- [x] implementation is not `delete target → rename temp`.
+- [x] atomic helper is not an authorization authority.
+- [x] WorkspaceGuard remains the path-authorization authority.
+- [x] Policy evaluation remains inside ExecutionPipeline.
+- [x] MCP adapters do not bypass Pipeline/ExecutionPermit.
+- [x] test/fault seams are not exposed as user-controlled MCP/Tauri interfaces.
 
 ## 6. Compatibility / Scope Review
 
-- [ ] MCP tool names remain `read_file`, `glob`, `write`, `edit`.
-- [ ] write input remains `path`, `content`.
-- [ ] edit input remains `path`, `oldText`, `newText`.
-- [ ] core success fields remain M0-compatible.
-- [ ] annotations remain M0-compatible.
-- [ ] `WorkspaceGuard::approve()` existing-only semantics remain intact.
-- [ ] read_file / glob behavior remains compatible.
-- [ ] no new protocol major was introduced for M1.
-- [ ] M1 does not claim power-loss durability.
-- [ ] M1 does not claim parent-directory durable fsync.
-- [ ] M1 does not claim multi-file transactions.
-- [ ] M1 does not claim a filesystem/OS sandbox.
-- [ ] Tool Toggle / User Policy / Approval / Bash / i18n remain out of scope.
+- [x] MCP tool names remain `read_file`, `glob`, `write`, `edit`.
+- [x] write input remains `path`, `content`.
+- [x] edit input remains `path`, `oldText`, `newText`.
+- [x] core success fields remain M0-compatible.
+- [x] annotations remain M0-compatible.
+- [x] `WorkspaceGuard::approve()` existing-only semantics remain intact.
+- [x] read_file / glob behavior remains compatible.
+- [x] no new protocol major was introduced for M1.
+- [x] M1 does not claim power-loss durability.
+- [x] M1 does not claim parent-directory durable fsync.
+- [x] M1 does not claim multi-file transactions.
+- [x] M1 does not claim a filesystem/OS sandbox.
+- [x] Tool Toggle / User Policy / Approval / Bash / i18n remain out of scope.
 
 ## 7. External ChatGPT / Tunnel / Harness Manual Acceptance
 
@@ -285,11 +285,11 @@ MANUAL-EXT-06 read-back                       = PASS
 
 Rules for reuse:
 
-- [ ] Evidence corresponds to the M1 production semantics under review.
-- [ ] No later production code change invalidates the exercised behavior.
-- [ ] Test-only commit `22f57a8...` alone does not force an External ChatGPT rerun.
-- [ ] If production write/edit/MCP/Workspace/Activity behavior changes after that evidence, affected Manual cases must be rerun.
-- [ ] Historical evidence is not rewritten to claim coverage it did not perform.
+- [x] Evidence corresponds to the M1 production semantics under review.
+- [x] No later production code change invalidates the exercised behavior.
+- [x] Test-only commit `22f57a8...` alone does not force an External ChatGPT rerun.
+- [x] If production write/edit/MCP/Workspace/Activity behavior changes after that evidence, affected Manual cases must be rerun.
+- [x] Historical evidence is not rewritten to claim coverage it did not perform.
 
 Manual External evidence reference / notes:
 
@@ -300,37 +300,25 @@ No repeat execution required solely for this documentation-boundary refactor.
 
 ## 8. Error / Audit Review
 
-- [ ] `TARGET_CHANGED` is stable and sanitized where externally observable.
-- [ ] staging/flush/commit OS detail is not leaked to MCP callers.
-- [ ] temp absolute path/name is not leaked to Activity/Audit.
-- [ ] raw `content`, `oldText`, `newText` are not in Activity/Audit.
-- [ ] unnecessary outside absolute paths are not exposed.
-- [ ] success / target-changed / I/O failure / Workspace rejection can be distinguished from evidence.
+- [x] `TARGET_CHANGED` is stable and sanitized where externally observable.
+- [x] staging/flush/commit OS detail is not leaked to MCP callers.
+- [x] temp absolute path/name is not leaked to Activity/Audit.
+- [x] raw `content`, `oldText`, `newText` are not in Activity/Audit.
+- [x] unnecessary outside absolute paths are not exposed.
+- [x] success / target-changed / I/O failure / Workspace rejection can be distinguished from evidence.
 
-## 9. Failure Classification
+## 9. Acceptance Closure
 
-If Manual Acceptance fails, choose the actual cause:
+All required automated and manual acceptance layers have completed with PASS evidence. No unresolved M1 implementation, atomicity / failure-safety, integration, automated E2E, security boundary, M0 regression, external user-chain, local test environment, or manual acceptance item remains.
 
-```text
-REJECTED — IMPLEMENTATION FAILURE
-REJECTED — ATOMICITY / FAILURE-SAFETY FAILURE
-REJECTED — INTEGRATION FAILURE
-REJECTED — AUTOMATED E2E FAILURE
-REJECTED — SECURITY BOUNDARY FAILURE
-REJECTED — M0 REGRESSION
-REJECTED — EXTERNAL USER-CHAIN REGRESSION
-BLOCKED — LOCAL TEST ENVIRONMENT
-BLOCKED — MANUAL ACCEPTANCE ENVIRONMENT
-```
-
-Do not use missing human execution of Unit/Integration/E2E as a reason to mark them PASS; those layers must have Coding Agent evidence first.
+Unit/Integration/E2E closure is based on Coding Agent evidence, and the External ChatGPT cases are closed by the carried-forward manual evidence recorded above.
 
 ## 10. Final Decision
 
 Only the Human Reviewer may choose the M1 milestone decision:
 
 ```text
-[ ] ACCEPTED / FROZEN
+[x] ACCEPTED / FROZEN
 [ ] REJECTED — IMPLEMENTATION FAILURE
 [ ] REJECTED — ATOMICITY / FAILURE-SAFETY FAILURE
 [ ] REJECTED — INTEGRATION FAILURE
@@ -338,34 +326,38 @@ Only the Human Reviewer may choose the M1 milestone decision:
 [ ] REJECTED — SECURITY BOUNDARY FAILURE
 [ ] REJECTED — M0 REGRESSION
 [ ] REJECTED — EXTERNAL USER-CHAIN REGRESSION
-[ ] BLOCKED — LOCAL TEST ENVIRONMENT
-[ ] BLOCKED — MANUAL ACCEPTANCE ENVIRONMENT
 ```
 
 Reviewer conclusion:
 
 ```text
+The M1 automated evidence chain is complete: T1–T4, workspace checks, Integration INT-01–INT-18,
+Windows atomic replacement/fault-safety, and Local Black-box E2E E2E-01–E2E-08 are PASS. The
+carried-forward External ChatGPT evidence for MANUAL-EXT-01–06 matches the reviewed M1 production
+semantics. M0 compatibility and security boundaries are preserved. No unresolved M1 acceptance item
+remains.
 
+M1 — ACCEPTED / FROZEN
 ```
 
 ## 11. Freeze Condition
 
-M1 may be marked:
+M1 is marked:
 
 ```text
 M1 — ACCEPTED / FROZEN
 ```
 
-only after the Human Reviewer confirms:
+The Human Reviewer confirmed:
 
-- [ ] Unit evidence PASS from Coding Agent.
-- [ ] Integration evidence PASS from Coding Agent.
-- [ ] Local Black-box E2E evidence PASS from Coding Agent.
-- [ ] Windows atomic-replace/fault-safety evidence complete.
-- [ ] M0 frozen contract has no regression.
-- [ ] carried-forward or newly executed External ChatGPT manual evidence is valid for the production semantics under review.
-- [ ] no unresolved M1 blocking defect.
-- [ ] no unresolved security boundary regression.
+- [x] Unit evidence PASS from Coding Agent.
+- [x] Integration evidence PASS from Coding Agent.
+- [x] Local Black-box E2E evidence PASS from Coding Agent.
+- [x] Windows atomic-replace/fault-safety evidence complete.
+- [x] M0 frozen contract has no regression.
+- [x] carried-forward or newly executed External ChatGPT manual evidence is valid for the production semantics under review.
+- [x] no unresolved M1 blocking defect.
+- [x] no unresolved security boundary regression.
 
 Then development may proceed to:
 
