@@ -97,6 +97,25 @@ impl ActivityStore {
         }
     }
 
+    /// Rebinds the observation projection to a new generation registry while
+    /// preserving the RuntimeCore-lifetime activity history. Tool toggle only
+    /// changes enabled state; declared tool identity remains stable, but the
+    /// new store must still use the new generation registry for future events.
+    pub(crate) fn with_previous_entries(
+        previous: &ActivityStore,
+        registry: Arc<ToolRegistry>,
+    ) -> Self {
+        let entries = previous
+            .entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        Self {
+            entries: Mutex::new(entries),
+            registry,
+        }
+    }
+
     pub(crate) fn snapshot(&self, limit: usize) -> Vec<ActivityEntry> {
         // Poison recovery is only for observational data, never security state.
         let entries = self

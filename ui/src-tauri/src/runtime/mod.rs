@@ -1223,6 +1223,9 @@ fn machine_code(code: &harness_control_protocol::MachineErrorCode) -> &'static s
 }
 
 #[cfg(test)]
+mod m2_e2e;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use harness_control_protocol::{
@@ -1262,6 +1265,10 @@ mod tests {
         let mut config = config(7);
         config.tools.write.enabled = false;
         config.tools.edit.enabled = false;
+        config.tunnel.api_key_ref = Some(harness_control_protocol::SecretReference {
+            provider: "memory-development".into(),
+            key: "tunnel-api-key".into(),
+        });
 
         let snapshot = runtime_config_snapshot(&config);
 
@@ -1271,6 +1278,9 @@ mod tests {
         assert!(snapshot.tools.read_file.enabled);
         assert!(snapshot.tools.glob.enabled);
         assert!(!snapshot.tools.bash.enabled);
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+        assert!(!serialized.contains("tunnel-api-key"));
+        assert!(!serialized.contains("apiKeyRef"));
     }
 
     fn test_supervisor(mode: &str, stop_timeout: Duration) -> RuntimeSupervisor {

@@ -583,7 +583,14 @@ mod tests {
                 "configRevision": "7",
                 "workspace": { "rootPath": root.to_string_lossy() },
                 "security": { "mode": "normal", "developerTestMode": false },
-                "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 2, "maxReadBytes": 1048576 }
+                "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 2, "maxReadBytes": 1048576 },
+                "tools": {
+                    "readFile": { "enabled": true },
+                    "glob": { "enabled": true },
+                    "write": { "enabled": true },
+                    "edit": { "enabled": true },
+                    "bash": { "enabled": false }
+                }
             }
         })
     }

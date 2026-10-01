@@ -620,6 +620,13 @@ fn run_e2e_01(context: &mut E2eContext) -> E2eResult<()> {
                     "maxConcurrentRequests": 1,
                     "maxActivityEvents": 256,
                     "maxReadBytes": 1048576
+                },
+                "tools": {
+                    "readFile": { "enabled": true },
+                    "glob": { "enabled": true },
+                    "write": { "enabled": true },
+                    "edit": { "enabled": true },
+                    "bash": { "enabled": false }
                 }
             }
         }),

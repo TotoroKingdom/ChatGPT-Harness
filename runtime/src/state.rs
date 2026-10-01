@@ -66,7 +66,10 @@ impl RuntimeCore {
         let workspace = Workspace::new(&config.workspace.root_path)?;
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
         let tool_registry = Arc::new(ToolRegistry::from_config(&config.tools));
-        let activity = Arc::new(ActivityStore::new(Arc::clone(&tool_registry)));
+        let activity = Arc::new(ActivityStore::with_previous_entries(
+            &self.activity,
+            Arc::clone(&tool_registry),
+        ));
         let audit_sink: Arc<dyn crate::audit::AuditSink> = activity.clone();
         let events = EventBus::from_limits(&config.runtime_limits);
         let (activity_event_sender, activity_event_receiver) = mpsc::channel();
@@ -107,8 +110,12 @@ impl RuntimeCore {
         self.activity_event_receiver = None;
         self.workspace_guard = None;
         self.execution_pipeline = None;
-        self.tool_registry = Arc::new(ToolRegistry::normal_mode());
-        self.activity = Arc::new(ActivityStore::new(Arc::clone(&self.tool_registry)));
+        let tool_registry = Arc::new(ToolRegistry::normal_mode());
+        self.activity = Arc::new(ActivityStore::with_previous_entries(
+            &self.activity,
+            Arc::clone(&tool_registry),
+        ));
+        self.tool_registry = tool_registry;
         self.last_error = None;
     }
 

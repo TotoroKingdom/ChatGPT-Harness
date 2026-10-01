@@ -355,6 +355,22 @@ mod tests {
     }
 
     #[test]
+    fn malformed_tool_object_shape_fails_closed_without_overwriting_config() {
+        let d = tempfile::tempdir().unwrap();
+        let target = d.path().join("config.json");
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["tools"]["write"] = serde_json::json!(true);
+        let original = serde_json::to_vec_pretty(&value).unwrap();
+        fs::write(&target, &original).unwrap();
+
+        assert!(matches!(
+            ConfigStore::new(d.path().into()).load(),
+            Err(ConfigError::Invalid(_))
+        ));
+        assert_eq!(fs::read(target).unwrap(), original);
+    }
+
+    #[test]
     fn unknown_tool_state_field_fails_closed() {
         let d = tempfile::tempdir().unwrap();
         let mut value = serde_json::to_value(c()).unwrap();
