@@ -1,5 +1,6 @@
 # M2 PLAN — Tool Enable / Disable
 
+> Status: ACCEPTED / FROZEN
 > Input: `SPEC.md`  
 > Baseline: M1 development complete  
 > Goal: 将 Tool enabled state 从 Runtime 硬编码迁移为持久化 desired config + immutable Runtime snapshot，并实现 UI desired/effective/restart-required 语义。  
@@ -244,7 +245,7 @@ Desired toggle
 Effective availability
 Effective policy decision
 Reason
-Pending restart marker
+Restart Required marker
 ```
 
 UX rules：
@@ -335,4 +336,4 @@ restart convergence
 M1 regression
 ```
 
-随后独立执行 M2 Integration / local black-box E2E / Manual Acceptance。
+M2 Integration、Local Black-box E2E 与 Manual Acceptance 已独立完成并 PASS；本 milestone 已收口为 `M2 — ACCEPTED / FROZEN`。

@@ -1,6 +1,6 @@
 # M2 SPEC — Tool Enable / Disable
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M2 — Tool Enable / Disable  
 > Baseline: M1 implementation complete; M0 accepted/frozen  
 > Sources: `../ChatGPT-Harness_V3_PRD.md`, `../ChatGPT-Harness_V3_ARCHITECTURE.md`, `../ChatGPT-Harness_V3_ROADMAP.md`, M0/M1 milestone docs
@@ -496,3 +496,5 @@ M2 可 `ACCEPTED / FROZEN` 前必须证明：
 ```
 
 M2 实施只允许在上述边界内选择局部 API/组件组织方式，不应提前设计 M3 Policy、M4 Approval 或 M5 Bash execution。
+
+> Final status: `M2 — ACCEPTED / FROZEN`. Integration, Local Black-box E2E, and Manual Acceptance evidence are complete; M3 remains planned and not implemented.

@@ -1,6 +1,6 @@
 # M2 Integration Test Plan — Tool Enable / Disable
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M2 — Tool Enable / Disable  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`  
 > Scope: code/component integration across Protocol, ConfigStore, Runtime snapshot/registry/MCP, Control read models and UI data flow. This is not Local Black-box E2E and does not require External ChatGPT.
@@ -43,13 +43,7 @@ Persisted Desired Tool State
 - frontend tests/typecheck/build PASS（按仓库实际命令）。
 - `git diff --check` PASS。
 
-若实现尚未完成：
-
-```text
-Integration = BLOCKED_BY_IMPLEMENTATION
-```
-
-不得通过降低 case 断言来获得 PASS。
+本计划所需实现已完成，Integration result 已记录为 PASS；不得通过降低 case 断言获得 PASS。
 
 ## 3. Test Ownership Boundary
 
@@ -335,7 +329,7 @@ refresh Runtime effective tools不得覆盖 desired OFF。
 
 ```text
 Case ID
-Result: PASS / FAIL / BLOCKED
+Result: PASS / FAIL
 Test name / command
 Input config revisions + relevant toggle state
 Observed desired state
@@ -364,7 +358,17 @@ M2 Integration 只有在以下全部满足时为 `PASS`：
 
 Integration PASS 后进入 `E2E_TEST_PLAN.md` 的真实本地黑盒验证。
 
-## 7. Non-Claims
+## 7. Final Result / Evidence Retention
+
+```text
+Integration result: PASS
+Cases: INT-01–INT-18 all PASS
+Evidence: retained from the prior M2 Integration run; no Integration Test was re-executed during final closeout.
+Implementation commit: ceb91cc36ef71e38a489357580af3cd8bcd9a495
+Test/evidence commit: aafc63fe86d857245b483e4b1613daa8d92edd13
+```
+
+## 8. Non-Claims
 
 Integration PASS 不代表：
 
@@ -375,5 +379,6 @@ same-generation tools/list_changed exists
 M3 Policy complete
 M5 Bash complete
 M7 schemaVersion v1→v2 migration complete
-M2 ACCEPTED / FROZEN
 ```
+
+The Integration PASS result did not by itself establish Manual Acceptance; the subsequent human gate passed and the milestone is now recorded as `M2 — ACCEPTED / FROZEN`.

@@ -1,6 +1,6 @@
 # M2 E2E Test Plan — Tool Enable / Disable
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M2 — Tool Enable / Disable  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`, `INTEGRATION_TEST_PLAN.md`  
 > Scope: Coding Agent-executable Local Black-box E2E using real compiled Runtime processes, real Control RPC, real loopback MCP HTTP, real filesystem and Activity. No External ChatGPT, browser, Harness UI clicking, mocks, or in-process executor substitution.
@@ -326,7 +326,7 @@ glob ON
 
 ```text
 Case ID
-PASS / FAIL / BLOCKED
+PASS / FAIL
 Runtime executable identity
 Runtime PID / generation identity
 active configRevision
@@ -353,10 +353,10 @@ MCP_EXPOSURE_FAILURE
 STALE_CALL_ENFORCEMENT_FAILURE
 RUNTIME_LIFECYCLE_FAILURE
 M1_REGRESSION
-TEST_ENVIRONMENT_BLOCK
+TEST_ENVIRONMENT_ERROR
 ```
 
-若 case 依赖的 local environment缺失，应标 `BLOCKED`，不能用 mock替代真实链路后宣称 E2E PASS。
+若 case 依赖的 local environment缺失，应记录环境错误并停止该次验证，不能用 mock替代真实链路后宣称 E2E PASS。
 
 ## 9. E2E Exit Criteria
 
@@ -376,7 +376,17 @@ M2 Local Black-box E2E 只有在以下全部满足时 PASS：
 
 通过后进入 `MANUAL_ACCEPTANCE_CHECKLIST.md`。
 
-## 10. Non-Claims
+## 10. Final Result / Evidence Retention
+
+```text
+Local Black-box E2E result: PASS
+Cases: E2E-01–E2E-12 all PASS
+Evidence: retained from the prior M2 Local Black-box E2E run; no E2E was re-executed during final closeout.
+Implementation commit: ceb91cc36ef71e38a489357580af3cd8bcd9a495
+Test/evidence commit: aafc63fe86d857245b483e4b1613daa8d92edd13
+```
+
+## 11. Non-Claims
 
 M2 E2E PASS 不代表：
 
@@ -387,5 +397,6 @@ UI visual/manual UX accepted
 M3 configurable Policy implemented
 M5 bash implemented
 M7 schema migration implemented
-M2 ACCEPTED / FROZEN
 ```
+
+The Local Black-box E2E PASS result did not by itself establish the human UI gate; that gate subsequently passed and the milestone is now recorded as `M2 — ACCEPTED / FROZEN`.

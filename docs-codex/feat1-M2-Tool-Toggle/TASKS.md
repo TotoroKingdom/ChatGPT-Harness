@@ -1,5 +1,6 @@
 # M2 TASKS — Tool Enable / Disable
 
+> Status: ACCEPTED / FROZEN
 > Inputs: `SPEC.md`, `PLAN.md`  
 > Executor: Codex / Coding Agent  
 > Baseline: M1 development complete  
@@ -331,19 +332,21 @@ Unit / Integration / E2E由 Coding Agent自动完成；只有 Manual Acceptance�
 
 ## Development Completion Checklist
 
-- [ ] T1 Tool Config / Protocol PASS
-- [ ] T2 Runtime Snapshot / Registry PASS
-- [ ] T3 MCP Exposure / Stale-call Rejection PASS
-- [ ] T4 Tools UI Desired / Effective / Restart Required PASS
-- [ ] T5 Regression PASS
-- [ ] old schema v1 compatibility PASS
-- [ ] configRevision semantics PASS
-- [ ] disabled absent from tools/list PASS
-- [ ] stale disabled call rejection PASS
-- [ ] running desired/effective mismatch PASS
-- [ ] restart convergence PASS
-- [ ] M1 regression PASS
-- [ ] cargo fmt/check/test PASS
-- [ ] frontend tests/typecheck/build PASS as applicable
-- [ ] git diff --check PASS
-- [ ] TASKS未声称 Integration/E2E/Manual Acceptance PASS
+- [x] T1 Tool Config / Protocol PASS
+- [x] T2 Runtime Snapshot / Registry PASS
+- [x] T3 MCP Exposure / Stale-call Rejection PASS
+- [x] T4 Tools UI Desired / Effective / Restart Required PASS
+- [x] T5 Regression PASS
+- [x] old schema v1 compatibility PASS
+- [x] configRevision semantics PASS
+- [x] disabled absent from tools/list PASS
+- [x] stale disabled call rejection PASS
+- [x] running desired/effective mismatch PASS
+- [x] restart convergence PASS
+- [x] M1 regression PASS
+- [x] cargo fmt/check/test PASS
+- [x] frontend tests/typecheck/build PASS as applicable
+- [x] git diff --check PASS
+- [x] TASKS未把 Integration/E2E/Manual Acceptance 当作 development completion claim
+
+Final status: `M2 — ACCEPTED / FROZEN`; M3 remains planned and not implemented.
