@@ -9,8 +9,8 @@ describe("MockHarnessControlClient", () => {
   it("returns M0-shaped normal-mode tools", async () => {
     const client = new MockHarnessControlClient();
     const result = await client.toolsList();
-    expect(result.items.map((tool) => tool.name)).toEqual(["read_file", "glob", "bash"]);
-    expect(result.items.filter((tool) => tool.exposed).map((tool) => tool.name)).toEqual(["read_file", "glob"]);
+    expect(result.items.map((tool) => tool.name)).toEqual(["read_file", "glob", "write", "edit"]);
+    expect(result.items.filter((tool) => tool.exposed).map((tool) => tool.name)).toEqual(["read_file", "glob", "write", "edit"]);
   });
 
   it("cleans up activity subscriptions", async () => {
@@ -31,6 +31,7 @@ const testConfig = (): AppConfig => ({
   tunnel: { tunnelId: "tunnel", tunnelClientPath: "D:\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } },
   security: { mode: "normal", developerTestMode: false },
   ui: {},
+  tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
 });
 
 afterEach(() => {

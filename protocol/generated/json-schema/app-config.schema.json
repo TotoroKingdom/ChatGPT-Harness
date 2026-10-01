@@ -43,6 +43,46 @@
       ],
       "type": "string"
     },
+    "ToolConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "bash": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        },
+        "edit": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        },
+        "glob": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        },
+        "readFile": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        },
+        "write": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        }
+      },
+      "required": [
+        "readFile",
+        "glob",
+        "write",
+        "edit",
+        "bash"
+      ],
+      "type": "object"
+    },
+    "ToolEnabledConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
     "TunnelConfig": {
       "properties": {
         "apiKeyRef": {
@@ -115,6 +155,26 @@
     },
     "security": {
       "$ref": "#/$defs/SecurityConfig"
+    },
+    "tools": {
+      "$ref": "#/$defs/ToolConfig",
+      "default": {
+        "bash": {
+          "enabled": false
+        },
+        "edit": {
+          "enabled": true
+        },
+        "glob": {
+          "enabled": true
+        },
+        "readFile": {
+          "enabled": true
+        },
+        "write": {
+          "enabled": true
+        }
+      }
     },
     "tunnel": {
       "$ref": "#/$defs/TunnelConfig"

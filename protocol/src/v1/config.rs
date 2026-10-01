@@ -13,6 +13,36 @@ pub struct AppConfig {
     pub tunnel: TunnelConfig,
     pub security: SecurityConfig,
     pub ui: UiConfig,
+    #[serde(default)]
+    pub tools: ToolConfig,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolEnabledConfig {
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolConfig {
+    pub read_file: ToolEnabledConfig,
+    pub glob: ToolEnabledConfig,
+    pub write: ToolEnabledConfig,
+    pub edit: ToolEnabledConfig,
+    pub bash: ToolEnabledConfig,
+}
+
+impl Default for ToolConfig {
+    fn default() -> Self {
+        Self {
+            read_file: ToolEnabledConfig { enabled: true },
+            glob: ToolEnabledConfig { enabled: true },
+            write: ToolEnabledConfig { enabled: true },
+            edit: ToolEnabledConfig { enabled: true },
+            bash: ToolEnabledConfig { enabled: false },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -99,6 +129,7 @@ pub struct RuntimeConfigSnapshot {
     pub workspace: WorkspaceConfig,
     pub security: SecurityConfig,
     pub runtime_limits: RuntimeLimits,
+    pub tools: ToolConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

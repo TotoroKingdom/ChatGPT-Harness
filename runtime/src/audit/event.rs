@@ -72,6 +72,7 @@ pub(crate) enum AuditOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AuditFailureCategory {
+    ToolDisabled,
     TargetChanged,
     AtomicFailure,
     IoFailure,

@@ -65,12 +65,15 @@ impl RuntimeCore {
     pub fn initialize(&mut self, config: RuntimeConfigSnapshot) -> Result<(), WorkspaceError> {
         let workspace = Workspace::new(&config.workspace.root_path)?;
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
+        let tool_registry = Arc::new(ToolRegistry::from_config(&config.tools));
+        let activity = Arc::new(ActivityStore::new(Arc::clone(&tool_registry)));
+        let audit_sink: Arc<dyn crate::audit::AuditSink> = activity.clone();
         let events = EventBus::from_limits(&config.runtime_limits);
         let (activity_event_sender, activity_event_receiver) = mpsc::channel();
 
         let pipeline = ExecutionPipeline::new(
             Arc::clone(&workspace_guard),
-            Arc::clone(&self.tool_registry),
+            Arc::clone(&tool_registry),
             self.policy_engine.clone(),
             SecurityContext {
                 workspace_id: uuid::Uuid::new_v4(),
@@ -79,9 +82,11 @@ impl RuntimeCore {
             config.runtime_limits.max_read_bytes,
             Arc::clone(&self.mcp_readiness),
         )
-        .with_audit_sink(self.activity.clone());
+        .with_audit_sink(audit_sink);
         let pipeline = pipeline.with_activity_event_sender(activity_event_sender);
         self.execution_pipeline = Some(Arc::new(pipeline));
+        self.tool_registry = tool_registry;
+        self.activity = activity;
         self.events = Some(events);
         self.activity_event_receiver = Some(activity_event_receiver);
         self.config = Some(config);
@@ -102,6 +107,8 @@ impl RuntimeCore {
         self.activity_event_receiver = None;
         self.workspace_guard = None;
         self.execution_pipeline = None;
+        self.tool_registry = Arc::new(ToolRegistry::normal_mode());
+        self.activity = Arc::new(ActivityStore::new(Arc::clone(&self.tool_registry)));
         self.last_error = None;
     }
 
@@ -305,7 +312,7 @@ impl RuntimeCore {
 mod tests {
     use super::*;
     use harness_control_protocol::{
-        DecimalU64, RuntimeLimits, SecurityConfig, SecurityMode, WorkspaceConfig,
+        DecimalU64, RuntimeLimits, SecurityConfig, SecurityMode, ToolConfig, WorkspaceConfig,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -352,6 +359,7 @@ mod tests {
                 max_activity_events: 2,
                 max_read_bytes: 1_048_576,
             },
+            tools: ToolConfig::default(),
         }
     }
 
@@ -411,6 +419,80 @@ mod tests {
             .effective_tools()
             .iter()
             .all(|tool| tool.availability == crate::tools::ToolAvailability::UnavailableByRuntime));
+    }
+
+    #[test]
+    fn initialized_registry_uses_snapshot_tool_state_without_registering_bash() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.tools.read_file.enabled = false;
+        config.tools.glob.enabled = false;
+        config.tools.write.enabled = false;
+        config.tools.edit.enabled = true;
+        config.tools.bash.enabled = true;
+        let mut core = RuntimeCore::new();
+
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+
+        let descriptors = core.tool_registry().list();
+        assert_eq!(
+            descriptors
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["read_file", "glob", "write", "edit"]
+        );
+        assert!(!descriptors[0].enabled);
+        assert!(!descriptors[1].enabled);
+        assert!(!descriptors[2].enabled);
+        assert!(descriptors[3].enabled);
+        assert_eq!(
+            core.tool_registry().declared_capability("write"),
+            Some(crate::tools::ToolCapability::WorkspaceWrite)
+        );
+        assert_eq!(core.tool_registry().capability("write"), None);
+
+        let effective = core.effective_tools();
+        assert_eq!(
+            effective
+                .iter()
+                .map(|tool| tool.availability.clone())
+                .collect::<Vec<_>>(),
+            [
+                crate::tools::ToolAvailability::UnavailableDisabled,
+                crate::tools::ToolAvailability::UnavailableDisabled,
+                crate::tools::ToolAvailability::UnavailableDisabled,
+                crate::tools::ToolAvailability::Available,
+            ]
+        );
+    }
+
+    #[test]
+    fn current_generation_keeps_snapshot_after_external_config_changes() {
+        let workspace = TestWorkspace::new();
+        let config_a = config_for(&workspace.root);
+        let mut config_b = config_a.clone();
+        config_b.tools.write.enabled = false;
+
+        let mut generation_a = RuntimeCore::new();
+        generation_a
+            .initialize(config_a)
+            .expect("initialize generation A");
+        generation_a
+            .acknowledge()
+            .expect("acknowledge generation A");
+        assert!(generation_a.tool_registry().capability("write").is_some());
+
+        let mut generation_b = RuntimeCore::new();
+        generation_b
+            .initialize(config_b)
+            .expect("initialize generation B");
+        generation_b
+            .acknowledge()
+            .expect("acknowledge generation B");
+        assert_eq!(generation_b.tool_registry().capability("write"), None);
+        assert!(generation_a.tool_registry().capability("write").is_some());
     }
 
     #[test]

@@ -20,6 +20,7 @@ use std::sync::{
 pub(crate) enum ExecutionError {
     RuntimeNotInitialized,
     RuntimeNotReady,
+    ToolDisabled,
     InvalidArguments,
     PolicyDenied,
     ApprovalRequired,
@@ -183,6 +184,12 @@ impl ExecutionPipeline {
     ) -> Result<E::Output, ExecutionError> {
         self.transition(context, RequestState::Validating)?;
         self.require_ready()?;
+        if self.registry.is_disabled(E::TOOL_NAME) {
+            context.mark_failure_category(AuditFailureCategory::ToolDisabled);
+            self.transition(context, RequestState::Failed)?;
+            self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+            return Err(ExecutionError::ToolDisabled);
+        }
         let executor = prepare()?;
         executor.validate()?;
         self.transition(context, RequestState::WorkspaceValidating)?;
@@ -308,6 +315,7 @@ fn audit_failure_category(error: &ExecutionError) -> AuditFailureCategory {
         | ExecutionError::Glob(GlobError::IoFailure { .. })
         | ExecutionError::Write(WriteError::IoFailure { .. })
         | ExecutionError::Edit(EditError::IoFailure { .. }) => AuditFailureCategory::IoFailure,
+        ExecutionError::ToolDisabled => AuditFailureCategory::ToolDisabled,
         ExecutionError::InvalidArguments
         | ExecutionError::ReadFile(ReadFileError::InvalidArguments { .. })
         | ExecutionError::Write(WriteError::InvalidArguments { .. })

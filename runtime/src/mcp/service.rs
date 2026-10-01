@@ -162,7 +162,7 @@ mod tests {
     use super::*;
     use crate::state::RuntimeCore;
     use harness_control_protocol::{
-        DecimalU64, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode,
+        DecimalU64, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode, ToolConfig,
         WorkspaceConfig,
     };
     use rmcp::handler::server::ServerHandler;
@@ -207,9 +207,12 @@ mod tests {
         }
 
         fn service(&self) -> McpService {
+            self.service_with_config(config_for(&self.root))
+        }
+
+        fn service_with_config(&self, config: RuntimeConfigSnapshot) -> McpService {
             let mut core = RuntimeCore::new();
-            core.initialize(config_for(&self.root))
-                .expect("initialize runtime");
+            core.initialize(config).expect("initialize runtime");
             core.acknowledge().expect("acknowledge runtime");
             core.mcp_service().expect("initialized MCP service")
         }
@@ -236,6 +239,7 @@ mod tests {
                 max_activity_events: 10,
                 max_read_bytes: 64,
             },
+            tools: ToolConfig::default(),
         }
     }
 
@@ -328,6 +332,125 @@ mod tests {
         assert!(info.capabilities.resources.is_none());
         assert!(info.capabilities.prompts.is_none());
         assert_eq!(info.server_info.name, "chatgpt-harness");
+    }
+
+    #[test]
+    fn disabled_tools_are_absent_from_mcp_tools_list_but_enabled_siblings_remain() {
+        for disabled in [READ_FILE, GLOB, WRITE, EDIT] {
+            let workspace = TestWorkspace::new();
+            let mut config = config_for(&workspace.root);
+            match disabled {
+                READ_FILE => config.tools.read_file.enabled = false,
+                GLOB => config.tools.glob.enabled = false,
+                WRITE => config.tools.write.enabled = false,
+                EDIT => config.tools.edit.enabled = false,
+                _ => unreachable!(),
+            }
+            let names = workspace
+                .service_with_config(config)
+                .tools()
+                .into_iter()
+                .map(|tool| tool.name.into_owned())
+                .collect::<Vec<_>>();
+
+            assert!(!names.iter().any(|name| name == disabled));
+            assert_eq!(names.len(), 3);
+        }
+    }
+
+    #[test]
+    fn stale_disabled_write_call_is_rejected_before_executor_and_audit_marks_disabled() {
+        use crate::audit::{AuditEventType, AuditFailureCategory};
+
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.tools.write.enabled = false;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+
+        let result = call(
+            &service,
+            WRITE,
+            json!({ "path": "stale.txt", "content": "must not write" }),
+        );
+        assert_eq!(error_code(&result), "TOOL_DISABLED");
+        assert!(!workspace.root.join("stale.txt").exists());
+
+        let activity = core.activity_snapshot(20);
+        assert_eq!(
+            activity
+                .iter()
+                .map(|entry| entry.event_type)
+                .collect::<Vec<_>>(),
+            [
+                AuditEventType::RequestReceived,
+                AuditEventType::ExecutionFailed
+            ]
+        );
+        assert_eq!(
+            activity[1].failure_category,
+            Some(AuditFailureCategory::ToolDisabled)
+        );
+        assert!(!activity.iter().any(|entry| {
+            matches!(
+                entry.event_type,
+                AuditEventType::ExecutionStarted | AuditEventType::ExecutionCompleted
+            )
+        }));
+    }
+
+    #[test]
+    fn stale_disabled_read_call_is_rejected_without_read_success_evidence() {
+        use crate::audit::{AuditEventType, AuditFailureCategory};
+
+        let workspace = TestWorkspace::new();
+        workspace.write("secret.txt", "must not be read");
+        let mut config = config_for(&workspace.root);
+        config.tools.read_file.enabled = false;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+
+        let result = call(&service, READ_FILE, json!({ "path": "secret.txt" }));
+        assert_eq!(error_code(&result), "TOOL_DISABLED");
+
+        let activity = core.activity_snapshot(20);
+        assert_eq!(activity.len(), 2);
+        assert_eq!(activity[0].event_type, AuditEventType::RequestReceived);
+        assert_eq!(activity[1].event_type, AuditEventType::ExecutionFailed);
+        assert_eq!(
+            activity[1].failure_category,
+            Some(AuditFailureCategory::ToolDisabled)
+        );
+        assert!(!activity
+            .iter()
+            .any(|entry| entry.event_type == AuditEventType::ExecutionCompleted));
+    }
+
+    #[test]
+    fn stale_disabled_edit_call_does_not_mutate_existing_file() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "unchanged");
+        let mut config = config_for(&workspace.root);
+        config.tools.edit.enabled = false;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+
+        let result = call(
+            &service,
+            EDIT,
+            json!({ "path": "file.txt", "oldText": "unchanged", "newText": "mutated" }),
+        );
+        assert_eq!(error_code(&result), "TOOL_DISABLED");
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("file.txt")).unwrap(),
+            "unchanged"
+        );
     }
 
     #[test]

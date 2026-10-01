@@ -25,11 +25,12 @@ describe("M1 application shell", () => {
     }
   });
 
-  it("does not treat legacy mock tools as M8-C observations; preserves policies", async () => {
+  it("shows M2 desired and current effective tool state while preserving policies", async () => {
     render(<App />);
     fireEvent.click(nav("Tools"));
-    expect(await screen.findByText(/Runtime unavailable/)).toBeInTheDocument();
-    expect(screen.queryByText("read_file")).not.toBeInTheDocument();
+    expect(await screen.findByText("read_file")).toBeInTheDocument();
+    expect(screen.getAllByText("ON").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("available").length).toBeGreaterThan(0);
     fireEvent.click(nav("Policies"));
     expect(await screen.findByText("Allow workspace reads")).toBeInTheDocument();
     expect(screen.getAllByText("DENY").length).toBeGreaterThan(0);

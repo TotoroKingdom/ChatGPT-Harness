@@ -592,7 +592,9 @@ pub fn harness_restart(
 #[cfg(test)]
 mod validation_tests {
     use super::*;
-    use harness_control_protocol::{SecurityConfig, TunnelConfig, UiConfig, WorkspaceConfig};
+    use harness_control_protocol::{
+        SecurityConfig, ToolConfig, TunnelConfig, UiConfig, WorkspaceConfig,
+    };
 
     fn valid_config(directory: &std::path::Path) -> AppConfig {
         AppConfig {
@@ -613,6 +615,7 @@ mod validation_tests {
                 developer_test_mode: false,
             },
             ui: UiConfig::default(),
+            tools: ToolConfig::default(),
         }
     }
 

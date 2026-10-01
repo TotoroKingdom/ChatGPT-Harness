@@ -1,5 +1,6 @@
 use harness_control_protocol::{
-    AppConfig, DecimalU64, SecurityConfig, SecurityMode, TunnelConfig, UiConfig, WorkspaceConfig,
+    AppConfig, DecimalU64, SecurityConfig, SecurityMode, ToolConfig, TunnelConfig, UiConfig,
+    WorkspaceConfig,
 };
 use serde::Serialize;
 use std::{
@@ -101,6 +102,7 @@ impl ConfigStore {
                 developer_test_mode: false,
             },
             ui: UiConfig::default(),
+            tools: ToolConfig::default(),
         }
     }
 
@@ -256,6 +258,7 @@ mod tests {
                 developer_test_mode: false,
             },
             ui: UiConfig::default(),
+            tools: ToolConfig::default(),
         }
     }
     #[test]
@@ -266,6 +269,106 @@ mod tests {
             .unwrap();
         assert!(config.workspace.root_path.is_empty());
         assert!(d.path().join("config.json").exists());
+    }
+
+    #[test]
+    fn safe_defaults_enable_m2_tools_and_keep_bash_disabled() {
+        let tools = ConfigStore::safe_defaults().tools;
+
+        assert!(tools.read_file.enabled);
+        assert!(tools.glob.enabled);
+        assert!(tools.write.enabled);
+        assert!(tools.edit.enabled);
+        assert!(!tools.bash.enabled);
+    }
+
+    #[test]
+    fn legacy_schema_v1_without_tools_loads_safe_tool_defaults() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value.as_object_mut().unwrap().remove("tools");
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let tools = ConfigStore::new(d.path().into())
+            .load()
+            .unwrap()
+            .unwrap()
+            .tools;
+        assert_eq!(tools, ToolConfig::default());
+    }
+
+    #[test]
+    fn save_and_reload_preserves_each_tool_toggle() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let mut config = c();
+        config.tools.read_file.enabled = false;
+        config.tools.glob.enabled = false;
+        config.tools.write.enabled = false;
+        config.tools.edit.enabled = false;
+        config.tools.bash.enabled = true;
+
+        let saved = store.save(config).unwrap();
+        assert_eq!(saved.config_revision, DecimalU64::new(1));
+        assert_eq!(store.load().unwrap().unwrap().tools, saved.tools);
+    }
+
+    #[test]
+    fn tool_semantic_change_increments_revision_once_and_identical_state_does_not() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let first = store.save(c()).unwrap();
+        assert_eq!(
+            store.save(first.clone()).unwrap().config_revision,
+            DecimalU64::new(1)
+        );
+
+        let mut changed = first.clone();
+        changed.tools.write.enabled = false;
+        let changed = store.save(changed).unwrap();
+        assert_eq!(changed.config_revision, DecimalU64::new(2));
+        assert_eq!(
+            store.save(changed).unwrap().config_revision,
+            DecimalU64::new(2)
+        );
+    }
+
+    #[test]
+    fn malformed_tool_state_fails_closed() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["tools"]["write"]["enabled"] = serde_json::json!("false");
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            ConfigStore::new(d.path().into()).load(),
+            Err(ConfigError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn unknown_tool_state_field_fails_closed() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["tools"]["write"]["unknown"] = serde_json::json!(true);
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            ConfigStore::new(d.path().into()).load(),
+            Err(ConfigError::Invalid(_))
+        ));
     }
     #[test]
     fn revisions_are_semantic() {

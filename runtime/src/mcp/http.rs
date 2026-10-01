@@ -145,7 +145,7 @@ mod tests {
     use super::*;
     use crate::state::RuntimeCore;
     use harness_control_protocol::{
-        DecimalU64, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode,
+        DecimalU64, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode, ToolConfig,
         WorkspaceConfig,
     };
     use serde_json::{json, Value};
@@ -216,6 +216,7 @@ mod tests {
                 max_activity_events: 10,
                 max_read_bytes: 64,
             },
+            tools: ToolConfig::default(),
         }
     }
 

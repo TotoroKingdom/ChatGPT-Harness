@@ -78,6 +78,7 @@ fn activity_summary(event_type: ActivityEventType) -> &'static str {
 
 fn failure_category_name(category: crate::audit::AuditFailureCategory) -> &'static str {
     match category {
+        crate::audit::AuditFailureCategory::ToolDisabled => "tool_disabled",
         crate::audit::AuditFailureCategory::TargetChanged => "target_changed",
         crate::audit::AuditFailureCategory::AtomicFailure => "atomic_failure",
         crate::audit::AuditFailureCategory::IoFailure => "io_failure",

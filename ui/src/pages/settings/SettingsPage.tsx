@@ -10,6 +10,7 @@ const emptyConfig: AppConfig = {
   tunnel: { tunnelId: "", autoDetect: true },
   security: { mode: "normal", developerTestMode: false },
   ui: {},
+  tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
 };
 
 function validateControlPlaneProxy(value: string): string {

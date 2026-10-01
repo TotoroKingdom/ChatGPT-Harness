@@ -21,6 +21,7 @@ pub(crate) enum McpErrorCategory {
     IoFailure,
     RuntimeNotInitialized,
     RuntimeNotReady,
+    ToolDisabled,
     PolicyDenied,
     ApprovalRequired,
     ExecutionFailed,
@@ -44,6 +45,7 @@ impl McpErrorCategory {
             Self::IoFailure => "IO_FAILURE",
             Self::RuntimeNotInitialized => "RUNTIME_NOT_INITIALIZED",
             Self::RuntimeNotReady => "RUNTIME_NOT_READY",
+            Self::ToolDisabled => "TOOL_DISABLED",
             Self::PolicyDenied => "POLICY_DENIED",
             Self::ApprovalRequired => "APPROVAL_REQUIRED",
             Self::ExecutionFailed => "EXECUTION_FAILED",
@@ -67,6 +69,7 @@ impl McpErrorCategory {
             Self::IoFailure => "The runtime could not access the requested workspace target.",
             Self::RuntimeNotInitialized => "Runtime is not initialized.",
             Self::RuntimeNotReady => "Runtime is waiting for the initialized acknowledgement.",
+            Self::ToolDisabled => "Tool is disabled by the saved Runtime configuration.",
             Self::PolicyDenied => "Tool request was blocked by policy.",
             Self::ApprovalRequired => {
                 "Tool request requires approval; approval is not implemented."
@@ -86,6 +89,7 @@ pub(crate) fn execution_error(error: &ExecutionError) -> CallToolResult {
             error_result(McpErrorCategory::RuntimeNotInitialized)
         }
         ExecutionError::RuntimeNotReady => error_result(McpErrorCategory::RuntimeNotReady),
+        ExecutionError::ToolDisabled => error_result(McpErrorCategory::ToolDisabled),
         ExecutionError::InvalidArguments => error_result(McpErrorCategory::InvalidArguments),
         ExecutionError::PolicyDenied => error_result(McpErrorCategory::PolicyDenied),
         ExecutionError::ApprovalRequired => error_result(McpErrorCategory::ApprovalRequired),

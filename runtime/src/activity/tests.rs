@@ -3,7 +3,8 @@ use crate::audit::{AuditFailureCategory, WorkspaceValidation};
 use crate::state::RuntimeCore;
 use crate::tools::{GlobRequest, ReadFileRequest};
 use harness_control_protocol::{
-    DecimalU64, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode, WorkspaceConfig,
+    DecimalU64, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode, ToolConfig,
+    WorkspaceConfig,
 };
 use std::{fs, path::PathBuf, thread};
 
@@ -269,6 +270,7 @@ impl Fixture {
                 max_activity_events: 20,
                 max_read_bytes: 4096,
             },
+            tools: ToolConfig::default(),
         }
     }
 }

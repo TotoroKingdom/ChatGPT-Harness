@@ -36,6 +36,9 @@
         "security": {
           "$ref": "#/$defs/SecurityConfig"
         },
+        "tools": {
+          "$ref": "#/$defs/ToolConfig"
+        },
         "workspace": {
           "$ref": "#/$defs/WorkspaceConfig"
         }
@@ -44,7 +47,8 @@
         "configRevision",
         "workspace",
         "security",
-        "runtimeLimits"
+        "runtimeLimits",
+        "tools"
       ],
       "type": "object"
     },
@@ -94,6 +98,46 @@
         "developer_test"
       ],
       "type": "string"
+    },
+    "ToolConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "bash": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        },
+        "edit": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        },
+        "glob": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        },
+        "readFile": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        },
+        "write": {
+          "$ref": "#/$defs/ToolEnabledConfig"
+        }
+      },
+      "required": [
+        "readFile",
+        "glob",
+        "write",
+        "edit",
+        "bash"
+      ],
+      "type": "object"
+    },
+    "ToolEnabledConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
     },
     "WorkspaceConfig": {
       "properties": {

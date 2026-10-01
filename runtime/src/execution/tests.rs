@@ -321,6 +321,46 @@ fn deny_and_ask_stop_after_policy_without_executor_or_approval_resume() {
 }
 
 #[test]
+fn disabled_tool_is_rejected_before_workspace_policy_or_executor() {
+    use RequestState::*;
+
+    let fixture = Fixture::new();
+    let mut config = harness_control_protocol::ToolConfig::default();
+    config.read_file.enabled = false;
+    let report = fixture
+        .pipeline_with_registry(
+            PolicyEngine::system_rules(),
+            ToolRegistry::from_config(&config),
+        )
+        .execute::<Spy>(|| panic!("disabled tool must not parse or execute"));
+
+    assert_eq!(report.result, Err(ExecutionError::ToolDisabled));
+    assert_eq!(report.context.state(), Failed);
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.recorder.states(), [Received, Validating, Failed]);
+    assert!(!fixture
+        .recorder
+        .has(PipelineEvent::WorkspaceValidated { passed: true }));
+    assert!(!fixture.recorder.has(PipelineEvent::PolicyDecision));
+    assert!(!fixture.recorder.has(PipelineEvent::ExecutionStarted));
+    assert!(!fixture.recorder.has(PipelineEvent::ExecutionCompleted));
+
+    let failure = report
+        .audit_events
+        .iter()
+        .find(|event| event.event_type == AuditEventType::ExecutionFailed)
+        .expect("disabled rejection audit event");
+    assert_eq!(
+        failure.failure_category,
+        Some(AuditFailureCategory::ToolDisabled)
+    );
+    assert_eq!(failure.policy_decision, None);
+    assert!(!serde_json::to_string(failure)
+        .unwrap()
+        .contains("POLICY_DENIED"));
+}
+
+#[test]
 fn allow_executes_exactly_once_and_reports_ordered_lifecycle_and_hooks() {
     use RequestState::*;
     let fixture = Fixture::new();

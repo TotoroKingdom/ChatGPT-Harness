@@ -31,6 +31,8 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         EmptyParams,
         PolicyDecision,
         AppConfig,
+        ToolEnabledConfig,
+        ToolConfig,
         WorkspaceConfig,
         TunnelConfig,
         SecretReference,

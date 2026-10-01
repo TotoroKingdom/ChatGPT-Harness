@@ -3,7 +3,7 @@ use crate::policy::PolicyEngine;
 use crate::tools::{EffectiveToolCatalog, ReadFileRequest, ToolRegistry};
 use harness_control_protocol::{
     ActivityEventType, DecimalU64, PolicyRule, PolicySource, RuntimeConfigSnapshot,
-    RuntimeErrorSummary, RuntimeLimits, SecurityConfig, SecurityMode, WorkspaceConfig,
+    RuntimeErrorSummary, RuntimeLimits, SecurityConfig, SecurityMode, ToolConfig, WorkspaceConfig,
 };
 use serde_json::json;
 use std::{fs, path::PathBuf};
@@ -31,6 +31,7 @@ impl Fixture {
                 max_activity_events: 20,
                 max_read_bytes: 4096,
             },
+            tools: ToolConfig::default(),
         }
     }
     fn ready_core(&self) -> RuntimeCore {

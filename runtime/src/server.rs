@@ -539,7 +539,7 @@ mod tests {
     use super::*;
     use harness_control_protocol::{
         DecimalU64, RuntimeConfigSnapshot, RuntimeLifecycle, RuntimeLimits, RuntimeReadiness,
-        SecurityConfig, SecurityMode, WorkspaceConfig,
+        SecurityConfig, SecurityMode, ToolConfig, WorkspaceConfig,
     };
     use serde_json::json;
     use std::fs;
@@ -603,6 +603,7 @@ mod tests {
                 max_activity_events: 2,
                 max_read_bytes: 1_048_576,
             },
+            tools: ToolConfig::default(),
         }
     }
 

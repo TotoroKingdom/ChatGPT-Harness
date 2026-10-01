@@ -6,13 +6,17 @@ export type ReadState<T> = { status: "loading" } | { status: "success"; data: T 
 
 // Lifecycle signals only invalidate the snapshot. They NEVER supply readiness,
 // policy, workspace or availability values; those come from the read API alone.
-export function useControlRead<T>(read: () => Promise<T>) {
+export function useControlRead<T>(read: () => Promise<T>, enabled = true) {
   const { components, runtime } = useHarnessData();
   const identity = runtime.status === "success" || runtime.status === "empty" ? runtime.data.runtimeId : "";
   const epoch = components.runtime + ":" + identity;
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{ read: typeof read; epoch: string; revision: number; state: ReadState<T> }>();
   useEffect(() => {
+    if (!enabled) {
+      setResult(undefined);
+      return;
+    }
     let active = true;
     void (async () => {
       try {
@@ -23,7 +27,11 @@ export function useControlRead<T>(read: () => Promise<T>) {
       }
     })();
     return () => { active = false; };
-  }, [read, epoch, revision]);
-  const state: ReadState<T> = result?.read === read && result.epoch === epoch && result.revision === revision ? result.state : { status: "loading" };
+  }, [enabled, read, epoch, revision]);
+  const state: ReadState<T> = !enabled
+    ? { status: "loading" }
+    : result?.read === read && result.epoch === epoch && result.revision === revision
+      ? result.state
+      : { status: "loading" };
   return { state, refresh: () => setRevision((value) => value + 1) };
 }

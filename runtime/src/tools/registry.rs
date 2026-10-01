@@ -1,4 +1,6 @@
-use harness_control_protocol::{PolicyDecision, RiskLevel, ToolDescriptor, ToolReadiness};
+use harness_control_protocol::{
+    PolicyDecision, RiskLevel, ToolConfig, ToolDescriptor, ToolReadiness,
+};
 use serde::{Deserialize, Serialize};
 
 const WORKSPACE_SCOPE: &str = "workspace";
@@ -25,7 +27,7 @@ struct RegisteredTool {
 }
 
 impl ToolRegistry {
-    /// Resolve only a currently executable registration, without deriving policy.
+    /// Resolve a declared capability without deriving policy or executable state.
     pub(crate) fn declared_capability(&self, name: &str) -> Option<ToolCapability> {
         self.entries
             .iter()
@@ -43,6 +45,14 @@ impl ToolRegistry {
                 .then_some(entry.capability)
         })
     }
+
+    pub(crate) fn is_disabled(&self, name: &str) -> bool {
+        self.entries
+            .iter()
+            .find(|entry| entry.descriptor.name == name)
+            .is_some_and(|entry| !entry.descriptor.enabled)
+    }
+
     /// Build the Normal Mode catalog in its stable, protocol-visible order.
     pub fn normal_mode() -> Self {
         Self {
@@ -105,6 +115,30 @@ impl ToolRegistry {
                 },
             ],
         }
+    }
+
+    /// Build a generation-specific registry from the immutable Runtime
+    /// configuration snapshot. Built-in definitions and order remain owned by
+    /// this registry; configuration only supplies the desired enabled state.
+    pub fn from_config(config: &ToolConfig) -> Self {
+        let mut registry = Self::normal_mode();
+        for (name, enabled) in [
+            ("read_file", config.read_file.enabled),
+            ("glob", config.glob.enabled),
+            ("write", config.write.enabled),
+            ("edit", config.edit.enabled),
+        ] {
+            if let Some(entry) = registry
+                .entries
+                .iter_mut()
+                .find(|entry| entry.descriptor.name == name)
+            {
+                entry.descriptor.enabled = enabled;
+            }
+        }
+        // `bash` is intentionally a persisted future field only. It is not
+        // registered here until its M5 implementation exists.
+        registry
     }
 
     #[cfg(test)]
@@ -253,5 +287,60 @@ mod tests {
             registry.capability("read_file"),
             Some(ToolCapability::WorkspaceRead)
         );
+    }
+
+    #[test]
+    fn configured_registry_preserves_order_and_declared_capability_when_disabled() {
+        let mut config = ToolConfig::default();
+        config.write.enabled = false;
+        let registry = ToolRegistry::from_config(&config);
+
+        assert_eq!(
+            registry
+                .list()
+                .iter()
+                .map(|descriptor| descriptor.name.as_str())
+                .collect::<Vec<_>>(),
+            ["read_file", "glob", "write", "edit"]
+        );
+        assert_eq!(
+            registry.declared_capability("write"),
+            Some(ToolCapability::WorkspaceWrite)
+        );
+        assert_eq!(registry.capability("write"), None);
+        assert!(!registry.list()[2].enabled);
+    }
+
+    #[test]
+    fn each_implemented_tool_can_be_disabled_independently() {
+        for (index, name) in ["read_file", "glob", "write", "edit"].iter().enumerate() {
+            let mut config = ToolConfig::default();
+            match index {
+                0 => config.read_file.enabled = false,
+                1 => config.glob.enabled = false,
+                2 => config.write.enabled = false,
+                3 => config.edit.enabled = false,
+                _ => unreachable!(),
+            }
+            let registry = ToolRegistry::from_config(&config);
+            assert!(!registry.list()[index].enabled, "{name} remained enabled");
+            assert_eq!(registry.capability(name), None);
+            assert!(registry.declared_capability(name).is_some());
+            assert!(registry
+                .list()
+                .iter()
+                .enumerate()
+                .all(|(other_index, tool)| other_index == index || tool.enabled));
+        }
+    }
+
+    #[test]
+    fn bash_desired_state_does_not_register_an_executor_or_catalog_entry() {
+        let mut config = ToolConfig::default();
+        config.bash.enabled = true;
+        let registry = ToolRegistry::from_config(&config);
+
+        assert_eq!(registry.capability("bash"), None);
+        assert!(!registry.list().iter().any(|tool| tool.name == "bash"));
     }
 }

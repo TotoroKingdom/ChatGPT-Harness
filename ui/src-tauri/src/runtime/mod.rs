@@ -568,16 +568,7 @@ impl RuntimeSupervisor {
         process: &RuntimeProcessRef,
         config: &AppConfig,
     ) -> Result<RuntimeState, SupervisorError> {
-        let snapshot = RuntimeConfigSnapshot {
-            config_revision: config.config_revision,
-            workspace: config.workspace.clone(),
-            security: config.security.clone(),
-            runtime_limits: RuntimeLimits {
-                max_concurrent_requests: DEFAULT_MAX_CONCURRENT_REQUESTS,
-                max_activity_events: DEFAULT_MAX_ACTIVITY_EVENTS,
-                max_read_bytes: DEFAULT_MAX_READ_BYTES,
-            },
-        };
+        let snapshot = runtime_config_snapshot(config);
         let initialize = InitializeParams {
             client_info: ClientInfo {
                 name: "chatgpt-harness-ui".into(),
@@ -936,6 +927,20 @@ fn runtime_process_ref(process: &RuntimeProcess) -> RuntimeProcessRef {
     }
 }
 
+fn runtime_config_snapshot(config: &AppConfig) -> RuntimeConfigSnapshot {
+    RuntimeConfigSnapshot {
+        config_revision: config.config_revision,
+        workspace: config.workspace.clone(),
+        security: config.security.clone(),
+        runtime_limits: RuntimeLimits {
+            max_concurrent_requests: DEFAULT_MAX_CONCURRENT_REQUESTS,
+            max_activity_events: DEFAULT_MAX_ACTIVITY_EVENTS,
+            max_read_bytes: DEFAULT_MAX_READ_BYTES,
+        },
+        tools: config.tools.clone(),
+    }
+}
+
 fn validate_mcp_endpoint(url: &str) -> Result<(), SupervisorError> {
     let authority_and_path = url.strip_prefix("http://").ok_or_else(|| {
         SupervisorError::disconnected("Runtime MCP endpoint must use loopback HTTP.")
@@ -1222,7 +1227,7 @@ mod tests {
     use super::*;
     use harness_control_protocol::{
         DecimalU64, RpcResponse, RuntimeLifecycle, RuntimeReadiness, SecurityConfig, SecurityMode,
-        ServerInfo, TunnelConfig, UiConfig, WorkspaceConfig,
+        ServerInfo, ToolConfig, TunnelConfig, UiConfig, WorkspaceConfig,
     };
     use std::env;
     use std::io::{BufRead, BufReader, BufWriter};
@@ -1248,7 +1253,24 @@ mod tests {
                 developer_test_mode: false,
             },
             ui: UiConfig::default(),
+            tools: ToolConfig::default(),
         }
+    }
+
+    #[test]
+    fn runtime_snapshot_captures_persisted_tool_state_at_generation_start() {
+        let mut config = config(7);
+        config.tools.write.enabled = false;
+        config.tools.edit.enabled = false;
+
+        let snapshot = runtime_config_snapshot(&config);
+
+        assert_eq!(snapshot.config_revision, DecimalU64::new(7));
+        assert!(!snapshot.tools.write.enabled);
+        assert!(!snapshot.tools.edit.enabled);
+        assert!(snapshot.tools.read_file.enabled);
+        assert!(snapshot.tools.glob.enabled);
+        assert!(!snapshot.tools.bash.enabled);
     }
 
     fn test_supervisor(mode: &str, stop_timeout: Duration) -> RuntimeSupervisor {
