@@ -524,11 +524,35 @@ fn validate_config_for_save(config: &AppConfig) -> Result<(), ControlError> {
             message: "Choose an accessible Workspace folder.".into(),
         });
     }
+    if let Err(message) = config.policies.validate_for_save() {
+        return Err(ControlError {
+            code: "CONFIG_INVALID".into(),
+            message,
+        });
+    }
     validate_security(config)
 }
 
 fn validate_config_for_local_start(config: &AppConfig) -> Result<(), ControlError> {
-    validate_config_for_save(config)
+    if config.schema_version != CURRENT_SCHEMA_VERSION {
+        return Err(ControlError {
+            code: "CONFIG_INVALID".into(),
+            message: "Unsupported configuration schema version.".into(),
+        });
+    }
+    if config.workspace.root_path.trim().is_empty()
+        || !crate::platform::is_valid_directory(&config.workspace.root_path)
+    {
+        return Err(ControlError {
+            code: "WORKSPACE_INVALID".into(),
+            message: "Choose an accessible Workspace folder.".into(),
+        });
+    }
+    // Semantic policy errors are deliberately left for the Runtime compiler:
+    // a hand-edited config must produce an observable invalid snapshot and
+    // fail closed, rather than preventing the diagnostic control surface from
+    // starting at all.
+    validate_security(config)
 }
 
 fn validate_security(config: &AppConfig) -> Result<(), ControlError> {
@@ -593,7 +617,7 @@ pub fn harness_restart(
 mod validation_tests {
     use super::*;
     use harness_control_protocol::{
-        SecurityConfig, ToolConfig, TunnelConfig, UiConfig, WorkspaceConfig,
+        PolicyConfig, SecurityConfig, ToolConfig, TunnelConfig, UiConfig, WorkspaceConfig,
     };
 
     fn valid_config(directory: &std::path::Path) -> AppConfig {
@@ -616,6 +640,7 @@ mod validation_tests {
             },
             ui: UiConfig::default(),
             tools: ToolConfig::default(),
+            policies: PolicyConfig::default(),
         }
     }
 

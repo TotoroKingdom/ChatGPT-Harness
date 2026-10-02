@@ -24,11 +24,79 @@
       "description": "A non-negative 64-bit integer represented as a decimal string on the JSON wire.\n\nKeeping revisions and cursors as strings avoids JSON number precision loss and\nmakes the representation identical across Tauri and future JSONL transports.",
       "type": "string"
     },
+    "PolicyConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "toolDefaults": {
+          "$ref": "#/$defs/ToolPolicyDefaults",
+          "default": {
+            "bash": "ask",
+            "edit": "allow",
+            "glob": "allow",
+            "readFile": "allow",
+            "write": "allow"
+          }
+        },
+        "userRules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/UserPolicyRuleConfig"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "PolicyDecision": {
+      "enum": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "type": "string"
+    },
+    "PolicyMatcherConfig": {
+      "additionalProperties": false,
+      "description": "Persisted typed matcher. Its wire shape is `{ \"type\": \"tool\", \"tool\":\n\"write\" }`, while the closed discriminator prevents arbitrary matcher\nexpressions from becoming authorization input.",
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/PolicyMatcherType"
+        }
+      },
+      "required": [
+        "type",
+        "tool"
+      ],
+      "type": "object"
+    },
+    "PolicyMatcherType": {
+      "description": "The matcher type discriminator is intentionally closed in M3. Future\nmatcher kinds can be added as new tagged variants without making the\npersisted user rule shape free-form again.",
+      "enum": [
+        "tool"
+      ],
+      "type": "string"
+    },
     "RuntimeConfigSnapshot": {
       "description": "The non-secret, immutable-at-startup configuration consumed by a Runtime.",
       "properties": {
         "configRevision": {
           "$ref": "#/$defs/DecimalU64"
+        },
+        "policies": {
+          "$ref": "#/$defs/PolicyConfig",
+          "default": {
+            "toolDefaults": {
+              "bash": "ask",
+              "edit": "allow",
+              "glob": "allow",
+              "readFile": "allow",
+              "write": "allow"
+            },
+            "userRules": []
+          }
         },
         "runtimeLimits": {
           "$ref": "#/$defs/RuntimeLimits"
@@ -136,6 +204,67 @@
       },
       "required": [
         "enabled"
+      ],
+      "type": "object"
+    },
+    "ToolPolicyDefaults": {
+      "additionalProperties": false,
+      "properties": {
+        "bash": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "edit": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "glob": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "readFile": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "write": {
+          "$ref": "#/$defs/PolicyDecision"
+        }
+      },
+      "required": [
+        "readFile",
+        "glob",
+        "write",
+        "edit",
+        "bash"
+      ],
+      "type": "object"
+    },
+    "UserPolicyRuleConfig": {
+      "additionalProperties": false,
+      "description": "Only user-owned fields are persisted. Runtime projections add `source` and\n`editable`, so callers cannot manufacture a system rule in AppConfig.",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "matcher": {
+          "$ref": "#/$defs/PolicyMatcherConfig"
+        },
+        "name": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "enabled",
+        "decision",
+        "matcher",
+        "reason"
       ],
       "type": "object"
     },

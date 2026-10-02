@@ -20,6 +20,7 @@ fn event(id: u128) -> AuditEvent {
         workspace_validation: WorkspaceValidation::NotAttempted,
         policy_decision: None,
         matched_rule_ids: vec![],
+        policy_reason: None,
         outcome: AuditOutcome::InProgress,
         failure_category: None,
     }
@@ -124,6 +125,7 @@ fn redaction_drops_all_free_text_and_has_a_closed_serialized_shape() {
                 "eventId",
                 "eventType",
                 "lifecycleState",
+                "matchedRuleIds",
                 "outcomeSummary",
                 "requestId",
                 "timestamp",
@@ -271,6 +273,7 @@ impl Fixture {
                 max_read_bytes: 4096,
             },
             tools: ToolConfig::default(),
+            policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
 }

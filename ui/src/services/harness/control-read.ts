@@ -1,6 +1,6 @@
 // Display-only projections of M8-C wire responses (protocol/src/v1/control_read.rs).
 // No Runtime imports, config reads, policy evaluation or availability inference.
-import type { PolicyDecision, RuntimeReadiness } from "@protocol/v1";
+import type { PolicyDecision, PolicyReason, RuntimeReadiness } from "@protocol/v1";
 
 export type ToolDiagnostic = {
   name: string;
@@ -22,6 +22,8 @@ export type ActivityEntry = {
   eventType: "request_received" | "workspace_validated" | "policy_evaluated" | "execution_started" | "execution_completed" | "execution_failed" | "request_denied" | "approval_required";
   toolName: string | null;
   decisionSummary: PolicyDecision | null;
+  matchedRuleIds: string[];
+  policyReason: PolicyReason | null;
   outcomeSummary: "in_progress" | "success" | "failed" | "denied" | "approval_required";
 };
 export interface ControlReadClient {
@@ -50,7 +52,11 @@ function toolName(value: unknown): string {
   // Syntax check only, NOT a second registry. Names are source-controlled by Runtime.
   return typeof value === "string" && /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/.test(value) ? value : invalid();
 }
+function ruleId(value: unknown): string {
+  return typeof value === "string" && /^[a-z0-9][a-zA-Z0-9_-]{0,63}$/.test(value) ? value : invalid();
+}
 const decisions = ["allow", "ask", "deny"] as const;
+const policyReasons = ["system_guardrail", "matched_user_rules", "tool_default", "invalid_policy_snapshot", "invalid_context", "unsupported_capability", "tool_disabled"] as const;
 export function parseDiagnostics(value: unknown): RuntimeDiagnostics {
   const data = record(value);
   if (data.schemaVersion !== 1) return invalid();
@@ -85,6 +91,8 @@ export function parseActivity(value: unknown): ActivityEntry[] {
       eventType: enumeration(entry.eventType, ["request_received", "workspace_validated", "policy_evaluated", "execution_started", "execution_completed", "execution_failed", "request_denied", "approval_required"]),
       toolName: entry.toolName === null ? null : toolName(entry.toolName),
       decisionSummary: entry.decisionSummary === null ? null : enumeration(entry.decisionSummary, decisions),
+      matchedRuleIds: entry.matchedRuleIds === undefined ? [] : Array.isArray(entry.matchedRuleIds) ? entry.matchedRuleIds.map(ruleId) : invalid(),
+      policyReason: entry.policyReason === undefined || entry.policyReason === null ? null : enumeration(entry.policyReason, policyReasons),
       outcomeSummary: enumeration(entry.outcomeSummary, ["in_progress", "success", "failed", "denied", "approval_required"]),
     };
   });

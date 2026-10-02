@@ -32,6 +32,7 @@ impl Fixture {
                 max_read_bytes: 4096,
             },
             tools: ToolConfig::default(),
+            policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
     fn ready_core(&self) -> RuntimeCore {

@@ -1,11 +1,177 @@
 {
   "$comment": "GENERATED FILE — DO NOT EDIT",
   "$defs": {
+    "EffectivePolicyRule": {
+      "additionalProperties": false,
+      "description": "Runtime-owned projection of either a fixed system rule or a compiled user\nrule. User projections retain the typed matcher; system rules have none.",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "matcher": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyMatcherConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/PolicySource"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "decision",
+        "reason",
+        "source",
+        "editable",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "EffectivePolicyTool": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "$ref": "#/$defs/PolicyToolAvailability"
+        },
+        "decision": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "matchedRuleIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "$ref": "#/$defs/PolicyReason"
+        },
+        "tool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "decision",
+        "matchedRuleIds",
+        "reason",
+        "availability"
+      ],
+      "type": "object"
+    },
     "PolicyDecision": {
       "enum": [
         "deny",
         "ask",
         "allow"
+      ],
+      "type": "string"
+    },
+    "PolicyEffectiveSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "perTool": {
+          "items": {
+            "$ref": "#/$defs/EffectivePolicyTool"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/PolicySnapshotStatus"
+        },
+        "statusReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PolicyReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "systemRules": {
+          "items": {
+            "$ref": "#/$defs/EffectivePolicyRule"
+          },
+          "type": "array"
+        },
+        "toolDefaults": {
+          "$ref": "#/$defs/ToolPolicyDefaults"
+        },
+        "userRules": {
+          "items": {
+            "$ref": "#/$defs/EffectivePolicyRule"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "valid",
+        "status",
+        "systemRules",
+        "userRules",
+        "toolDefaults",
+        "perTool"
+      ],
+      "type": "object"
+    },
+    "PolicyMatcherConfig": {
+      "additionalProperties": false,
+      "description": "Persisted typed matcher. Its wire shape is `{ \"type\": \"tool\", \"tool\":\n\"write\" }`, while the closed discriminator prevents arbitrary matcher\nexpressions from becoming authorization input.",
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/PolicyMatcherType"
+        }
+      },
+      "required": [
+        "type",
+        "tool"
+      ],
+      "type": "object"
+    },
+    "PolicyMatcherType": {
+      "description": "The matcher type discriminator is intentionally closed in M3. Future\nmatcher kinds can be added as new tagged variants without making the\npersisted user rule shape free-form again.",
+      "enum": [
+        "tool"
+      ],
+      "type": "string"
+    },
+    "PolicyReason": {
+      "description": "Reasons are typed because policy evidence is consumed by Runtime, control\nreads, activity, and the UI. They are not display-only log strings.",
+      "enum": [
+        "system_guardrail",
+        "matched_user_rules",
+        "tool_default",
+        "invalid_policy_snapshot",
+        "invalid_context",
+        "unsupported_capability",
+        "tool_disabled"
       ],
       "type": "string"
     },
@@ -48,16 +214,70 @@
       ],
       "type": "object"
     },
+    "PolicySnapshotStatus": {
+      "enum": [
+        "valid",
+        "invalid"
+      ],
+      "type": "string"
+    },
     "PolicySource": {
       "enum": [
         "system",
         "user"
       ],
       "type": "string"
+    },
+    "PolicyToolAvailability": {
+      "enum": [
+        "available",
+        "unavailable_by_policy",
+        "unavailable_by_runtime",
+        "disabled"
+      ],
+      "type": "string"
+    },
+    "ToolPolicyDefaults": {
+      "additionalProperties": false,
+      "properties": {
+        "bash": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "edit": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "glob": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "readFile": {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        "write": {
+          "$ref": "#/$defs/PolicyDecision"
+        }
+      },
+      "required": [
+        "readFile",
+        "glob",
+        "write",
+        "edit",
+        "bash"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "effective": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyEffectiveSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "items": {
       "items": {
         "$ref": "#/$defs/PolicyRule"

@@ -45,6 +45,10 @@ pub struct RuntimeCore {
 impl RuntimeCore {
     pub fn new() -> Self {
         let tool_registry = Arc::new(ToolRegistry::normal_mode());
+        let policy_engine = PolicyEngine::compile(
+            &harness_control_protocol::PolicyConfig::default(),
+            &tool_registry,
+        );
         Self {
             runtime_id: uuid::Uuid::new_v4().to_string(),
             started_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -56,7 +60,7 @@ impl RuntimeCore {
             mcp_readiness: Arc::new(AtomicBool::new(false)),
             activity: Arc::new(ActivityStore::new(Arc::clone(&tool_registry))),
             tool_registry,
-            policy_engine: PolicyEngine::new(PolicyEngine::system_rules()),
+            policy_engine,
             execution_pipeline: None,
             last_error: None,
         }
@@ -66,6 +70,7 @@ impl RuntimeCore {
         let workspace = Workspace::new(&config.workspace.root_path)?;
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
         let tool_registry = Arc::new(ToolRegistry::from_config(&config.tools));
+        let policy_engine = PolicyEngine::compile(&config.policies, &tool_registry);
         let activity = Arc::new(ActivityStore::with_previous_entries(
             &self.activity,
             Arc::clone(&tool_registry),
@@ -77,7 +82,7 @@ impl RuntimeCore {
         let pipeline = ExecutionPipeline::new(
             Arc::clone(&workspace_guard),
             Arc::clone(&tool_registry),
-            self.policy_engine.clone(),
+            policy_engine.clone(),
             SecurityContext {
                 workspace_id: uuid::Uuid::new_v4(),
                 mode: config.security.mode.clone(),
@@ -89,6 +94,7 @@ impl RuntimeCore {
         let pipeline = pipeline.with_activity_event_sender(activity_event_sender);
         self.execution_pipeline = Some(Arc::new(pipeline));
         self.tool_registry = tool_registry;
+        self.policy_engine = policy_engine;
         self.activity = activity;
         self.events = Some(events);
         self.activity_event_receiver = Some(activity_event_receiver);
@@ -111,6 +117,10 @@ impl RuntimeCore {
         self.workspace_guard = None;
         self.execution_pipeline = None;
         let tool_registry = Arc::new(ToolRegistry::normal_mode());
+        self.policy_engine = PolicyEngine::compile(
+            &harness_control_protocol::PolicyConfig::default(),
+            &tool_registry,
+        );
         self.activity = Arc::new(ActivityStore::with_previous_entries(
             &self.activity,
             Arc::clone(&tool_registry),
@@ -157,6 +167,17 @@ impl RuntimeCore {
 
     pub fn tool_registry(&self) -> &ToolRegistry {
         &self.tool_registry
+    }
+
+    /// Returns the current generation's Runtime-owned effective policy
+    /// projection. It is observational only; callers cannot mutate the engine.
+    pub fn effective_policy(&self) -> harness_control_protocol::PolicyEffectiveSnapshot {
+        self.policy_engine.effective_snapshot(&self.tool_registry)
+    }
+
+    pub fn policy_rules(&self) -> Vec<harness_control_protocol::PolicyRule> {
+        self.policy_engine
+            .legacy_rules_for_list(&self.tool_registry)
     }
 
     /// Returns the Runtime's current effective exposure view.
@@ -319,7 +340,8 @@ impl RuntimeCore {
 mod tests {
     use super::*;
     use harness_control_protocol::{
-        DecimalU64, RuntimeLimits, SecurityConfig, SecurityMode, ToolConfig, WorkspaceConfig,
+        DecimalU64, PolicyDecision, PolicyMatcherConfig, RuntimeLimits, SecurityConfig,
+        SecurityMode, ToolConfig, UserPolicyRuleConfig, WorkspaceConfig,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -367,6 +389,18 @@ mod tests {
                 max_read_bytes: 1_048_576,
             },
             tools: ToolConfig::default(),
+            policies: harness_control_protocol::PolicyConfig::default(),
+        }
+    }
+
+    fn user_rule(id: &str, decision: PolicyDecision, tool: &str) -> UserPolicyRuleConfig {
+        UserPolicyRuleConfig {
+            id: id.into(),
+            name: format!("Rule {id}"),
+            enabled: true,
+            decision,
+            matcher: PolicyMatcherConfig::tool(tool),
+            reason: "Runtime test policy.".into(),
         }
     }
 
@@ -500,6 +534,103 @@ mod tests {
             .expect("acknowledge generation B");
         assert_eq!(generation_b.tool_registry().capability("write"), None);
         assert!(generation_a.tool_registry().capability("write").is_some());
+    }
+
+    #[test]
+    fn current_generation_keeps_compiled_policy_snapshot_immutable() {
+        let workspace = TestWorkspace::new();
+        let mut config_a = config_for(&workspace.root);
+        config_a.policies.tool_defaults.write = PolicyDecision::Deny;
+        let mut generation_a = RuntimeCore::new();
+        generation_a
+            .initialize(config_a)
+            .expect("initialize generation A");
+        generation_a
+            .acknowledge()
+            .expect("acknowledge generation A");
+
+        let mut config_b = config_for(&workspace.root);
+        config_b.policies.tool_defaults.write = PolicyDecision::Allow;
+        config_b
+            .policies
+            .user_rules
+            .push(user_rule("write-ask", PolicyDecision::Ask, "write"));
+        let mut generation_b = RuntimeCore::new();
+        generation_b
+            .initialize(config_b)
+            .expect("initialize generation B");
+        generation_b
+            .acknowledge()
+            .expect("acknowledge generation B");
+
+        let write_a = generation_a
+            .effective_policy()
+            .per_tool
+            .into_iter()
+            .find(|tool| tool.tool == "write")
+            .expect("write policy A");
+        let write_b = generation_b
+            .effective_policy()
+            .per_tool
+            .into_iter()
+            .find(|tool| tool.tool == "write")
+            .expect("write policy B");
+        assert_eq!(write_a.decision, PolicyDecision::Deny);
+        assert_eq!(write_b.decision, PolicyDecision::Ask);
+        assert_eq!(write_b.matched_rule_ids, ["write-ask"]);
+    }
+
+    #[test]
+    fn invalid_policy_snapshot_is_observable_and_denies_without_executor_side_effect() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.user_rules.push(user_rule(
+            "unknown",
+            PolicyDecision::Allow,
+            "unknown_tool",
+        ));
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+
+        let result = core.write(&WriteRequest::new("blocked.txt", "secret"));
+        assert!(matches!(result, Err(ExecutionError::PolicyDenied)));
+        assert!(!workspace.root.join("blocked.txt").exists());
+        let snapshot = core.effective_policy();
+        assert!(!snapshot.valid);
+        assert_eq!(
+            snapshot.status,
+            harness_control_protocol::PolicySnapshotStatus::Invalid
+        );
+        assert!(snapshot.per_tool.iter().all(|tool| {
+            tool.decision == PolicyDecision::Deny
+                && tool.reason == harness_control_protocol::PolicyReason::InvalidPolicySnapshot
+        }));
+    }
+
+    #[test]
+    fn ask_policy_returns_approval_required_without_executor_side_effect_and_keeps_evidence() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config
+            .policies
+            .user_rules
+            .push(user_rule("write-review", PolicyDecision::Ask, "write"));
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+
+        let result = core.write(&WriteRequest::new("approval.txt", "secret"));
+        assert!(matches!(result, Err(ExecutionError::ApprovalRequired)));
+        assert!(!workspace.root.join("approval.txt").exists());
+        let entries = core.activity_snapshot(20);
+        assert!(entries.iter().any(|entry| {
+            entry.event_type == crate::audit::AuditEventType::PolicyEvaluated
+                && entry.decision_summary == Some(PolicyDecision::Ask)
+                && entry.matched_rule_ids == ["write-review"]
+                && entry.policy_reason
+                    == Some(harness_control_protocol::PolicyReason::MatchedUserRules)
+        }));
     }
 
     #[test]

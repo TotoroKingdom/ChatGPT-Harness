@@ -5,7 +5,7 @@ use crate::audit::{
     AuditEvent, AuditEventType, AuditFailureCategory, AuditLifecycleState, AuditOutcome, AuditSink,
 };
 use crate::tools::ToolRegistry;
-use harness_control_protocol::PolicyDecision;
+use harness_control_protocol::{PolicyDecision, PolicyReason};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -39,6 +39,10 @@ pub(crate) struct ActivityEntry {
     pub(crate) tool_name: Option<String>,
     /// None means policy was not evaluated, never an implicit ALLOW.
     pub(crate) decision_summary: Option<PolicyDecision>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) matched_rule_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) policy_reason: Option<PolicyReason>,
     pub(crate) outcome_summary: AuditOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) failure_category: Option<AuditFailureCategory>,
@@ -57,7 +61,7 @@ impl ActivityEntry {
             | AuditEventType::ExecutionFailed => ActivityCategory::Execution,
             AuditEventType::ApprovalRequired => ActivityCategory::Approval,
         };
-        // Do not copy arbitrary strings, rule IDs, paths, or future audit fields.
+        // Do not copy arbitrary strings, paths, or future audit fields.
         // Registry lookup is metadata validation, not policy/exposure evaluation.
         let tool_name = registry
             .declared_capability(&event.tool_name)
@@ -78,9 +82,28 @@ impl ActivityEntry {
             lifecycle_state: event.lifecycle_state,
             tool_name,
             decision_summary: event.policy_decision.clone(),
+            matched_rule_ids: event
+                .matched_rule_ids
+                .iter()
+                .map(|id| redact_rule_id(id))
+                .collect(),
+            policy_reason: event.policy_reason,
             outcome_summary: event.outcome,
             failure_category: event.failure_category,
         }
+    }
+}
+
+fn redact_rule_id(id: &str) -> String {
+    if id.len() <= 64
+        && id.bytes().any(|byte| byte.is_ascii_lowercase())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        id.to_owned()
+    } else {
+        "<redacted>".into()
     }
 }
 

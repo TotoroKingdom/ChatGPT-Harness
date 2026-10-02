@@ -1,6 +1,6 @@
 use harness_control_protocol::{
-    AppConfig, DecimalU64, SecurityConfig, SecurityMode, ToolConfig, TunnelConfig, UiConfig,
-    WorkspaceConfig,
+    AppConfig, DecimalU64, PolicyConfig, SecurityConfig, SecurityMode, ToolConfig, TunnelConfig,
+    UiConfig, WorkspaceConfig,
 };
 use serde::Serialize;
 use std::{
@@ -103,6 +103,7 @@ impl ConfigStore {
             },
             ui: UiConfig::default(),
             tools: ToolConfig::default(),
+            policies: PolicyConfig::default(),
         }
     }
 
@@ -110,6 +111,10 @@ impl ConfigStore {
         if config.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(ConfigError::Invalid("unsupported schemaVersion".into()));
         }
+        config
+            .policies
+            .validate_for_save()
+            .map_err(ConfigError::Invalid)?;
         if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
             let normalized = crate::platform::normalize_tunnel_client_directory(path);
             *path = normalized.display().to_string();
@@ -237,7 +242,8 @@ fn replace_file(tmp: &Path, target: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use harness_control_protocol::{
-        AppConfig, SecurityConfig, SecurityMode, TunnelConfig, UiConfig, WorkspaceConfig,
+        AppConfig, PolicyConfig, PolicyDecision, PolicyMatcherConfig, SecurityConfig, SecurityMode,
+        TunnelConfig, UiConfig, UserPolicyRuleConfig, WorkspaceConfig,
     };
     fn c() -> AppConfig {
         AppConfig {
@@ -259,6 +265,7 @@ mod tests {
             },
             ui: UiConfig::default(),
             tools: ToolConfig::default(),
+            policies: PolicyConfig::default(),
         }
     }
     #[test]
@@ -299,6 +306,143 @@ mod tests {
             .unwrap()
             .tools;
         assert_eq!(tools, ToolConfig::default());
+    }
+
+    #[test]
+    fn legacy_schema_v1_without_policies_loads_safe_policy_defaults() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value.as_object_mut().unwrap().remove("policies");
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let policies = ConfigStore::new(d.path().into())
+            .load()
+            .unwrap()
+            .unwrap()
+            .policies;
+        assert_eq!(policies, PolicyConfig::default());
+        assert_eq!(policies.tool_defaults.read_file, PolicyDecision::Allow);
+        assert_eq!(policies.tool_defaults.bash, PolicyDecision::Ask);
+        assert!(policies.user_rules.is_empty());
+    }
+
+    #[test]
+    fn save_and_reload_persists_policy_defaults_and_user_rule_crud() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let mut config = c();
+        config.policies.tool_defaults.write = PolicyDecision::Ask;
+        config.policies.user_rules.push(UserPolicyRuleConfig {
+            id: "rule-write".into(),
+            name: "Review writes".into(),
+            enabled: true,
+            decision: PolicyDecision::Ask,
+            matcher: PolicyMatcherConfig::tool("write"),
+            reason: "Writes need review.".into(),
+        });
+        let saved = store.save(config).unwrap();
+        assert_eq!(saved.config_revision, DecimalU64::new(1));
+        let loaded = store.load().unwrap().unwrap();
+        assert_eq!(loaded.policies, saved.policies);
+
+        let mut edited = loaded.clone();
+        edited.policies.user_rules[0].name = "Review changed writes".into();
+        edited.policies.user_rules[0].enabled = false;
+        edited.policies.user_rules[0].decision = PolicyDecision::Deny;
+        let edited = store.save(edited).unwrap();
+        assert_eq!(edited.config_revision, DecimalU64::new(2));
+
+        let mut deleted = edited.clone();
+        deleted.policies.user_rules.clear();
+        let deleted = store.save(deleted).unwrap();
+        assert_eq!(deleted.config_revision, DecimalU64::new(3));
+        assert!(store
+            .load()
+            .unwrap()
+            .unwrap()
+            .policies
+            .user_rules
+            .is_empty());
+    }
+
+    #[test]
+    fn identical_policy_save_keeps_revision_and_invalid_save_preserves_old_config() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let first = store.save(c()).unwrap();
+        assert_eq!(
+            store.save(first.clone()).unwrap().config_revision,
+            DecimalU64::new(1)
+        );
+
+        let mut invalid = first.clone();
+        invalid.policies.user_rules.push(UserPolicyRuleConfig {
+            id: "duplicate".into(),
+            name: "first".into(),
+            enabled: true,
+            decision: PolicyDecision::Allow,
+            matcher: PolicyMatcherConfig::tool("write"),
+            reason: "valid".into(),
+        });
+        invalid.policies.user_rules.push(UserPolicyRuleConfig {
+            id: "duplicate".into(),
+            name: "second".into(),
+            enabled: true,
+            decision: PolicyDecision::Deny,
+            matcher: PolicyMatcherConfig::tool("write"),
+            reason: "invalid duplicate".into(),
+        });
+        assert!(
+            matches!(store.save(invalid), Err(ConfigError::Invalid(message)) if message.contains("Duplicate user policy rule ID"))
+        );
+        assert_eq!(store.load().unwrap().unwrap(), first);
+    }
+
+    #[test]
+    fn unsupported_or_unknown_policy_matchers_are_rejected_before_save() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let mut config = c();
+        config.policies.user_rules.push(UserPolicyRuleConfig {
+            id: "bad-tool".into(),
+            name: "Bad tool".into(),
+            enabled: true,
+            decision: PolicyDecision::Allow,
+            matcher: PolicyMatcherConfig::tool("bash"),
+            reason: "bash is not implemented in M3".into(),
+        });
+        assert!(
+            matches!(store.save(config), Err(ConfigError::Invalid(message)) if message.contains("unknown or unavailable tool"))
+        );
+    }
+
+    #[test]
+    fn persisted_user_rule_cannot_claim_system_authority() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["policies"]["userRules"] = serde_json::json!([{
+            "id": "forged",
+            "name": "Forged system rule",
+            "enabled": true,
+            "decision": "allow",
+            "matcher": { "type": "tool", "tool": "write" },
+            "reason": "invalid",
+            "source": "system",
+            "editable": false
+        }]);
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            ConfigStore::new(d.path().into()).load(),
+            Err(ConfigError::Invalid(message)) if message.contains("unknown field")
+        ));
     }
 
     #[test]

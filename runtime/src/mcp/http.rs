@@ -217,6 +217,7 @@ mod tests {
                 max_read_bytes: 64,
             },
             tools: ToolConfig::default(),
+            policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
 

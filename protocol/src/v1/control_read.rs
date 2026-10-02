@@ -1,6 +1,6 @@
 //! M8-C local read contracts. Wire DTOs mirror the frozen safe M8-A/M8-B
 //! projections; they are not Runtime authorities or MCP schemas.
-use crate::{MachineErrorCode, PolicyDecision, RuntimeLifecycle, RuntimeReadiness};
+use crate::{MachineErrorCode, PolicyDecision, PolicyReason, RuntimeLifecycle, RuntimeReadiness};
 use serde::{Deserialize, Serialize};
 
 pub const DIAGNOSTICS_GET: &str = "control.diagnostics.get";
@@ -268,5 +268,9 @@ pub struct ActivityEntry {
     pub tool_name: Option<String>,
     /// None means policy was not evaluated, never an implicit ALLOW.
     pub decision_summary: Option<PolicyDecision>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matched_rule_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_reason: Option<PolicyReason>,
     pub outcome_summary: AuditOutcome,
 }

@@ -1,6 +1,9 @@
 use super::*;
 use crate::tools::ToolRegistry;
-use harness_control_protocol::{PolicyDecision, PolicyRule, PolicySource, SecurityMode};
+use harness_control_protocol::{
+    PolicyConfig, PolicyDecision, PolicyMatcherConfig, PolicyRule, PolicySource, SecurityMode,
+    UserPolicyRuleConfig,
+};
 
 fn rule(id: &str, decision: PolicyDecision, scope: &str) -> PolicyRule {
     PolicyRule {
@@ -35,6 +38,29 @@ fn decisions(decisions: &[PolicyDecision]) -> PolicyEvaluation {
                 )
             })
             .collect(),
+    )
+}
+
+fn user_config(id: &str, decision: PolicyDecision, tool: &str) -> UserPolicyRuleConfig {
+    UserPolicyRuleConfig {
+        id: id.into(),
+        name: format!("Rule {id}"),
+        enabled: true,
+        decision,
+        matcher: PolicyMatcherConfig::tool(tool),
+        reason: "test rule".into(),
+    }
+}
+
+fn compiled(config: PolicyConfig) -> PolicyEngine {
+    let registry = ToolRegistry::normal_mode();
+    PolicyEngine::compile(&config, &registry)
+}
+
+fn evaluate_compiled(config: PolicyConfig, tool: &str) -> PolicyEvaluation {
+    compiled(config).evaluate(
+        &PolicyContext::new(tool, SecurityMode::Normal, "active_workspace"),
+        &ToolRegistry::normal_mode(),
     )
 }
 
@@ -441,6 +467,131 @@ fn runtime_workspace_alias_matches_m0_scope_in_both_directions() {
             PolicyDecision::Allow
         );
     }
+}
+
+#[test]
+fn m3_defaults_are_fallbacks_and_bash_remains_unimplemented() {
+    let mut config = PolicyConfig::default();
+    config.tool_defaults.write = PolicyDecision::Allow;
+    assert_eq!(
+        evaluate_compiled(config.clone(), "write"),
+        PolicyEvaluation {
+            decision: PolicyDecision::Allow,
+            matched_rule_ids: vec![],
+            reason: PolicyEvaluationReason::ToolDefault,
+        }
+    );
+    assert_eq!(config.tool_defaults.bash, PolicyDecision::Ask);
+    assert_eq!(
+        ToolRegistry::normal_mode().capability("bash"),
+        None,
+        "persisting bash's ASK default must not register an executor capability"
+    );
+}
+
+#[test]
+fn explicit_allow_overrides_an_ask_tool_default() {
+    let mut config = PolicyConfig::default();
+    config.tool_defaults.write = PolicyDecision::Ask;
+    config
+        .user_rules
+        .push(user_config("write-allow", PolicyDecision::Allow, "write"));
+    assert_eq!(
+        evaluate_compiled(config, "write"),
+        PolicyEvaluation {
+            decision: PolicyDecision::Allow,
+            matched_rule_ids: vec!["write-allow".into()],
+            reason: PolicyEvaluationReason::MatchedUserRules,
+        }
+    );
+}
+
+#[test]
+fn typed_user_rules_aggregate_deny_ask_allow_in_stable_order() {
+    let mut config = PolicyConfig::default();
+    config.user_rules = vec![
+        user_config("z-allow", PolicyDecision::Allow, "write"),
+        user_config("a-ask", PolicyDecision::Ask, "write"),
+        user_config("m-deny", PolicyDecision::Deny, "write"),
+    ];
+    let expected = PolicyEvaluation {
+        decision: PolicyDecision::Deny,
+        matched_rule_ids: vec!["a-ask".into(), "m-deny".into(), "z-allow".into()],
+        reason: PolicyEvaluationReason::MatchedUserRules,
+    };
+    assert_eq!(evaluate_compiled(config.clone(), "write"), expected);
+    config.user_rules.reverse();
+    assert_eq!(evaluate_compiled(config, "write"), expected);
+}
+
+#[test]
+fn enabled_invalid_typed_rule_invalidates_the_whole_snapshot_even_when_unmatched() {
+    let mut config = PolicyConfig::default();
+    config
+        .user_rules
+        .push(user_config("valid", PolicyDecision::Allow, "read_file"));
+    config.user_rules.push(user_config(
+        "unknown",
+        PolicyDecision::Allow,
+        "unknown_tool",
+    ));
+    let engine = compiled(config);
+    assert!(!engine.is_valid());
+    for tool in ["read_file", "glob", "write", "edit"] {
+        let result = engine.evaluate(
+            &PolicyContext::new(tool, SecurityMode::Normal, "active_workspace"),
+            &ToolRegistry::normal_mode(),
+        );
+        assert_eq!(result.decision, PolicyDecision::Deny, "{tool}");
+        assert_eq!(result.reason, PolicyEvaluationReason::InvalidRuleSet);
+        assert!(result.matched_rule_ids.is_empty());
+    }
+}
+
+#[test]
+fn duplicate_enabled_ids_invalidate_the_snapshot_and_disabled_invalid_rule_is_ignored() {
+    let mut duplicate = PolicyConfig::default();
+    duplicate.user_rules = vec![
+        user_config("same", PolicyDecision::Allow, "write"),
+        user_config("same", PolicyDecision::Deny, "write"),
+    ];
+    assert!(!compiled(duplicate).is_valid());
+
+    let mut disabled = user_config("", PolicyDecision::Deny, "unknown_tool");
+    disabled.enabled = false;
+    let mut config = PolicyConfig::default();
+    config.user_rules = vec![
+        disabled,
+        user_config("allow", PolicyDecision::Allow, "write"),
+    ];
+    let engine = compiled(config);
+    assert!(engine.is_valid());
+    assert_eq!(
+        engine
+            .evaluate(
+                &PolicyContext::new("write", SecurityMode::Normal, "active_workspace"),
+                &ToolRegistry::normal_mode(),
+            )
+            .decision,
+        PolicyDecision::Allow
+    );
+}
+
+#[test]
+fn system_guardrail_denies_outside_workspace_before_user_allow() {
+    let mut config = PolicyConfig::default();
+    config
+        .user_rules
+        .push(user_config("outside-allow", PolicyDecision::Allow, "write"));
+    let registry = ToolRegistry::normal_mode().with_test_scope(2, "outside_active_workspace");
+    let engine = PolicyEngine::compile(&config, &registry);
+    let result = engine.evaluate(
+        &PolicyContext::new("write", SecurityMode::Normal, "outside_active_workspace"),
+        &registry,
+    );
+    assert_eq!(result.decision, PolicyDecision::Deny);
+    assert_eq!(result.reason, PolicyEvaluationReason::SystemGuardrail);
+    assert_eq!(result.matched_rule_ids, ["system-deny-outside"]);
 }
 
 #[test]

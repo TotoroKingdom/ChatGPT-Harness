@@ -938,6 +938,7 @@ fn runtime_config_snapshot(config: &AppConfig) -> RuntimeConfigSnapshot {
             max_read_bytes: DEFAULT_MAX_READ_BYTES,
         },
         tools: config.tools.clone(),
+        policies: config.policies.clone(),
     }
 }
 
@@ -1257,6 +1258,7 @@ mod tests {
             },
             ui: UiConfig::default(),
             tools: ToolConfig::default(),
+            policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
 
@@ -1265,6 +1267,7 @@ mod tests {
         let mut config = config(7);
         config.tools.write.enabled = false;
         config.tools.edit.enabled = false;
+        config.policies.tool_defaults.write = harness_control_protocol::PolicyDecision::Ask;
         config.tunnel.api_key_ref = Some(harness_control_protocol::SecretReference {
             provider: "memory-development".into(),
             key: "tunnel-api-key".into(),
@@ -1278,6 +1281,10 @@ mod tests {
         assert!(snapshot.tools.read_file.enabled);
         assert!(snapshot.tools.glob.enabled);
         assert!(!snapshot.tools.bash.enabled);
+        assert_eq!(
+            snapshot.policies.tool_defaults.write,
+            harness_control_protocol::PolicyDecision::Ask
+        );
         let serialized = serde_json::to_string(&snapshot).unwrap();
         assert!(!serialized.contains("tunnel-api-key"));
         assert!(!serialized.contains("apiKeyRef"));

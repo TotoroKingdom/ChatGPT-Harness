@@ -1,5 +1,6 @@
 use crate::execution::{PipelineEvent, RequestContext, RequestState};
-use harness_control_protocol::PolicyDecision;
+use crate::policy::PolicyEvaluationReason;
+use harness_control_protocol::{PolicyDecision, PolicyReason};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -100,6 +101,8 @@ pub(crate) struct AuditEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) policy_decision: Option<PolicyDecision>,
     pub(crate) matched_rule_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) policy_reason: Option<PolicyReason>,
     pub(crate) outcome: AuditOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) failure_category: Option<AuditFailureCategory>,
@@ -178,6 +181,7 @@ impl AuditEvent {
             matched_rule_ids: evaluation
                 .map(|item| item.matched_rule_ids.clone())
                 .unwrap_or_default(),
+            policy_reason: evaluation.map(|item| policy_reason(item.reason)),
             outcome,
             failure_category: match event {
                 PipelineEvent::WorkspaceValidated { passed: false }
@@ -185,5 +189,21 @@ impl AuditEvent {
                 _ => None,
             },
         })
+    }
+}
+
+fn policy_reason(reason: PolicyEvaluationReason) -> PolicyReason {
+    match reason {
+        PolicyEvaluationReason::MatchedRules | PolicyEvaluationReason::MatchedUserRules => {
+            PolicyReason::MatchedUserRules
+        }
+        PolicyEvaluationReason::NoApplicableRules | PolicyEvaluationReason::ToolDefault => {
+            PolicyReason::ToolDefault
+        }
+        PolicyEvaluationReason::SystemGuardrail => PolicyReason::SystemGuardrail,
+        PolicyEvaluationReason::InvalidRuleSet => PolicyReason::InvalidPolicySnapshot,
+        PolicyEvaluationReason::InvalidContext => PolicyReason::InvalidContext,
+        PolicyEvaluationReason::UnsupportedCapability => PolicyReason::UnsupportedCapability,
+        PolicyEvaluationReason::ToolDisabled => PolicyReason::ToolDisabled,
     }
 }

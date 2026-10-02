@@ -42,6 +42,7 @@ function config(): AppConfig {
       edit: { enabled: true },
       bash: { enabled: false },
     },
+    policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
   };
 }
 

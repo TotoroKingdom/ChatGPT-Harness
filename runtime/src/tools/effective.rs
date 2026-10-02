@@ -1,6 +1,6 @@
-use crate::policy::{PolicyContext, PolicyEngine, PolicyEvaluationReason};
+use crate::policy::{to_wire_reason, PolicyContext, PolicyEngine, PolicyEvaluationReason};
 use crate::tools::{ToolCapability, ToolRegistry};
-use harness_control_protocol::{PolicyDecision, SecurityMode, ToolReadiness};
+use harness_control_protocol::{PolicyDecision, PolicyReason, SecurityMode, ToolReadiness};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +20,8 @@ pub struct EffectiveTool {
     pub availability: ToolAvailability,
     pub reason: String,
     pub decision: PolicyDecision,
+    pub matched_rule_ids: Vec<String>,
+    pub policy_reason: PolicyReason,
     pub declared_capability: Option<ToolCapability>,
 }
 
@@ -44,6 +46,8 @@ impl EffectiveToolCatalog {
                     availability: ToolAvailability::UnavailableByRuntime,
                     reason: "runtime capability is unavailable".into(),
                     decision: PolicyDecision::Deny,
+                    matched_rule_ids: Vec::new(),
+                    policy_reason: PolicyReason::UnsupportedCapability,
                     declared_capability: capability,
                 };
                 if descriptor.name.trim().is_empty()
@@ -58,6 +62,7 @@ impl EffectiveToolCatalog {
                 if !descriptor.enabled || !descriptor.exposed {
                     effective.availability = ToolAvailability::UnavailableDisabled;
                     effective.reason = "tool is disabled or not exposed".into();
+                    effective.policy_reason = PolicyReason::ToolDisabled;
                     return effective;
                 }
                 if !runtime_ready || descriptor.readiness != ToolReadiness::Ready {
@@ -68,6 +73,8 @@ impl EffectiveToolCatalog {
                     registry,
                 );
                 effective.decision = evaluation.decision.clone();
+                effective.matched_rule_ids = evaluation.matched_rule_ids.clone();
+                effective.policy_reason = to_wire_reason(evaluation.reason);
                 match evaluation.decision {
                     PolicyDecision::Allow => {
                         effective.availability = ToolAvailability::Available;
@@ -90,13 +97,18 @@ impl EffectiveToolCatalog {
 
 fn policy_reason(reason: PolicyEvaluationReason) -> &'static str {
     match reason {
-        PolicyEvaluationReason::MatchedRules => "denied by policy",
+        PolicyEvaluationReason::MatchedRules | PolicyEvaluationReason::MatchedUserRules => {
+            "denied by policy"
+        }
         PolicyEvaluationReason::NoApplicableRules => "no applicable policy rule; denied by default",
+        PolicyEvaluationReason::ToolDefault => "tool default denied the request",
+        PolicyEvaluationReason::SystemGuardrail => "denied by system guardrail",
         PolicyEvaluationReason::InvalidRuleSet => "policy evaluation failed; denied by default",
         PolicyEvaluationReason::InvalidContext => "policy context is invalid; denied by default",
         PolicyEvaluationReason::UnsupportedCapability => {
             "declared capability is unsupported by policy"
         }
+        PolicyEvaluationReason::ToolDisabled => "tool is disabled",
     }
 }
 

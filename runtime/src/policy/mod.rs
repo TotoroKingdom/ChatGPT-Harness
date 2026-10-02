@@ -6,7 +6,7 @@
 mod engine;
 
 pub(crate) use engine::PolicyEvaluationReason;
-pub(crate) use engine::{PolicyContext, PolicyEngine, PolicyEvaluation};
+pub(crate) use engine::{to_wire_reason, PolicyContext, PolicyEngine, PolicyEvaluation};
 
 #[cfg(test)]
 mod tests;

@@ -320,7 +320,14 @@ fn handle_request<W: Write>(
                 Ok(value) => value,
                 Err(error) => return write_invalid_params(output, id, error),
             };
-            write_result(output, id, PoliciesListResult { items: Vec::new() })?;
+            write_result(
+                output,
+                id,
+                PoliciesListResult {
+                    items: core.policy_rules(),
+                    effective: Some(core.effective_policy()),
+                },
+            )?;
             Ok(false)
         }
         "activity.list" => {
@@ -611,6 +618,7 @@ mod tests {
                 max_read_bytes: 1_048_576,
             },
             tools: ToolConfig::default(),
+            policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
 
@@ -758,6 +766,41 @@ mod tests {
         };
         let result: ToolsListResult = serde_json::from_value(response.result.clone()).unwrap();
         assert_eq!(result.items, RuntimeCore::new().tool_registry().list());
+    }
+
+    #[test]
+    fn policies_list_returns_runtime_effective_snapshot_and_typed_evidence() {
+        let workspace = TestWorkspace::new();
+        let output = run_lines(&[
+            request(
+                "initialize",
+                "initialize",
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
+            ),
+            notification("initialized"),
+            request("policies", "policies.list", json!({})),
+        ]);
+        let RpcMessage::Response(response) = &output[1] else {
+            panic!("expected policies.list response");
+        };
+        let result: PoliciesListResult = serde_json::from_value(response.result.clone()).unwrap();
+        let effective = result.effective.expect("effective policy projection");
+        assert!(effective.valid);
+        assert!(effective.user_rules.is_empty());
+        let read = effective
+            .per_tool
+            .iter()
+            .find(|tool| tool.tool == "read_file")
+            .expect("read_file effective policy");
+        assert_eq!(
+            read.decision,
+            harness_control_protocol::PolicyDecision::Allow
+        );
+        assert!(read.matched_rule_ids.is_empty());
+        assert_eq!(
+            read.reason,
+            harness_control_protocol::PolicyReason::ToolDefault
+        );
     }
 
     #[test]

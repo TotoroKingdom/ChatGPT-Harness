@@ -32,6 +32,7 @@ const testConfig = (): AppConfig => ({
   security: { mode: "normal", developerTestMode: false },
   ui: {},
   tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
+  policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
 });
 
 afterEach(() => {

@@ -1,4 +1,5 @@
-use super::common::DecimalU64;
+use super::common::{DecimalU64, PolicyDecision};
+use super::policies::UserPolicyRuleConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -15,6 +16,109 @@ pub struct AppConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub tools: ToolConfig,
+    #[serde(default)]
+    pub policies: PolicyConfig,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolPolicyDefaults {
+    pub read_file: PolicyDecision,
+    pub glob: PolicyDecision,
+    pub write: PolicyDecision,
+    pub edit: PolicyDecision,
+    pub bash: PolicyDecision,
+}
+
+impl Default for ToolPolicyDefaults {
+    fn default() -> Self {
+        Self {
+            read_file: PolicyDecision::Allow,
+            glob: PolicyDecision::Allow,
+            write: PolicyDecision::Allow,
+            edit: PolicyDecision::Allow,
+            bash: PolicyDecision::Ask,
+        }
+    }
+}
+
+impl ToolPolicyDefaults {
+    pub fn decision_for(&self, tool: &str) -> Option<PolicyDecision> {
+        match tool {
+            "read_file" => Some(self.read_file.clone()),
+            "glob" => Some(self.glob.clone()),
+            "write" => Some(self.write.clone()),
+            "edit" => Some(self.edit.clone()),
+            "bash" => Some(self.bash.clone()),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PolicyConfig {
+    #[serde(default)]
+    pub tool_defaults: ToolPolicyDefaults,
+    #[serde(default)]
+    pub user_rules: Vec<UserPolicyRuleConfig>,
+}
+
+impl Default for PolicyConfig {
+    fn default() -> Self {
+        Self {
+            tool_defaults: ToolPolicyDefaults::default(),
+            user_rules: Vec::new(),
+        }
+    }
+}
+
+impl PolicyConfig {
+    /// Validation used by the persistence/UI boundary. Runtime compilation
+    /// repeats the authoritative registry check so hand-edited config cannot
+    /// weaken authorization.
+    pub fn validate_for_save(&self) -> Result<(), String> {
+        let mut ids = std::collections::BTreeSet::new();
+        for rule in &self.user_rules {
+            if rule.id.trim().is_empty() {
+                return Err("User policy rule ID must not be empty.".into());
+            }
+            if rule.name.trim().is_empty() {
+                return Err(format!("User policy rule '{}' needs a name.", rule.id));
+            }
+            if rule.reason.trim().is_empty() {
+                return Err(format!("User policy rule '{}' needs a reason.", rule.id));
+            }
+            if !ids.insert(rule.id.as_str()) {
+                return Err(format!("Duplicate user policy rule ID '{}'.", rule.id));
+            }
+            if rule.matcher.tool.trim().is_empty() {
+                return Err(format!(
+                    "User policy rule '{}' needs a tool matcher.",
+                    rule.id
+                ));
+            }
+            if !matches!(
+                rule.matcher.matcher_type,
+                super::policies::PolicyMatcherType::Tool
+            ) {
+                return Err(format!(
+                    "User policy rule '{}' uses an unsupported matcher type.",
+                    rule.id
+                ));
+            }
+            if !matches!(
+                rule.matcher.tool.as_str(),
+                "read_file" | "glob" | "write" | "edit"
+            ) {
+                return Err(format!(
+                    "User policy rule '{}' targets an unknown or unavailable tool.",
+                    rule.id
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -130,6 +234,8 @@ pub struct RuntimeConfigSnapshot {
     pub security: SecurityConfig,
     pub runtime_limits: RuntimeLimits,
     pub tools: ToolConfig,
+    #[serde(default)]
+    pub policies: PolicyConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
