@@ -54,8 +54,29 @@ describe("M4 Approval Center", () => {
 
   it("resolves through Runtime and refreshes truth instead of faking success", async () => {
     const { approvalsResolve, refreshApprovals } = setup();
+    for (const [label, decision] of [
+      ["Allow once", "allow_once"],
+      ["Allow for session", "allow_for_session"],
+      ["Deny", "deny"],
+    ] as const) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await waitFor(() => expect(approvalsResolve).toHaveBeenLastCalledWith("request_01", decision));
+    }
+    expect(refreshApprovals).toHaveBeenCalled();
+  });
+
+  it("explains stale resolve failures and refreshes Runtime truth", async () => {
+    const approvalsResolve = vi.fn().mockRejectedValue({ code: "APPROVAL_ALREADY_RESOLVED" });
+    const refreshApprovals = vi.fn().mockResolvedValue(undefined);
+    state.context = {
+      approvals: { status: "success", data: { items: [approval()] } },
+      components: { runtime: "ready" },
+      client: { approvalsResolve },
+      refreshApprovals,
+    };
+    render(<ApprovalsPage />);
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    await waitFor(() => expect(approvalsResolve).toHaveBeenCalledWith("request_01", "allow_once"));
+    expect(await screen.findByText("This approval is already resolved or expired. Refresh the Approval Center.")).toBeInTheDocument();
     expect(refreshApprovals).toHaveBeenCalled();
   });
 

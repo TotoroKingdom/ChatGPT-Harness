@@ -372,6 +372,7 @@ fn safe_rule_id(id: String) -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Barrier;
     use std::thread;
 
     struct ManualClock {
@@ -534,6 +535,97 @@ mod tests {
             wake.status,
             ApprovalStatus::Approved | ApprovalStatus::Denied
         ));
+    }
+
+    #[tokio::test]
+    async fn resolve_vs_expiry_has_one_terminal_transition() {
+        let clock = ManualClock::new();
+        let manager = ApprovalManager::with_test_clock(
+            "runtime-a",
+            "generation-a",
+            std::time::Duration::from_secs(5),
+            Arc::clone(&clock) as Arc<dyn ApprovalClock>,
+        );
+        let registration = manager
+            .register(facts(Uuid::new_v4(), "write", "race-expiry.txt"))
+            .unwrap();
+        let request_id = registration.request.request_id.clone();
+        clock.advance(std::time::Duration::from_secs(5));
+        let barrier = Arc::new(Barrier::new(2));
+
+        let resolve_result = thread::scope(|scope| {
+            let resolve_barrier = Arc::clone(&barrier);
+            let resolve_manager = Arc::clone(&manager);
+            let resolve_id = request_id.clone();
+            let resolve = scope.spawn(move || {
+                resolve_barrier.wait();
+                resolve_manager.resolve(&resolve_id, ApprovalDecision::AllowOnce)
+            });
+            let expire_barrier = Arc::clone(&barrier);
+            let expire_manager = Arc::clone(&manager);
+            let expire = scope.spawn(move || {
+                expire_barrier.wait();
+                expire_manager.expire_due();
+            });
+            let resolve_result = resolve.join().expect("resolve race worker");
+            expire.join().expect("expiry race worker");
+            resolve_result
+        });
+
+        assert_eq!(manager.pending_count(), 0);
+        let approved = manager.list(Some(ApprovalStatus::Approved)).len();
+        let expired = manager.list(Some(ApprovalStatus::Expired)).len();
+        assert_eq!(approved + expired, 1);
+        assert!(matches!(
+            registration.receiver.await.unwrap().status,
+            ApprovalStatus::Approved | ApprovalStatus::Expired
+        ));
+        assert!(
+            resolve_result.is_ok() == (approved == 1),
+            "resolve/expiry race produced inconsistent terminal ownership"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_vs_cancel_has_one_terminal_transition() {
+        let manager = ApprovalManager::new("runtime-a");
+        let registration = manager
+            .register(facts(Uuid::new_v4(), "write", "race-stop.txt"))
+            .unwrap();
+        let request_id = registration.request.request_id.clone();
+        let barrier = Arc::new(Barrier::new(2));
+
+        let resolve_result = thread::scope(|scope| {
+            let resolve_barrier = Arc::clone(&barrier);
+            let resolve_manager = Arc::clone(&manager);
+            let resolve_id = request_id.clone();
+            let resolve = scope.spawn(move || {
+                resolve_barrier.wait();
+                resolve_manager.resolve(&resolve_id, ApprovalDecision::AllowOnce)
+            });
+            let cancel_barrier = Arc::clone(&barrier);
+            let cancel_manager = Arc::clone(&manager);
+            let cancel = scope.spawn(move || {
+                cancel_barrier.wait();
+                cancel_manager.cancel_all();
+            });
+            let resolve_result = resolve.join().expect("resolve stop race worker");
+            cancel.join().expect("cancel stop race worker");
+            resolve_result
+        });
+
+        assert_eq!(manager.pending_count(), 0);
+        let approved = manager.list(Some(ApprovalStatus::Approved)).len();
+        let cancelled = manager.list(Some(ApprovalStatus::Cancelled)).len();
+        assert_eq!(approved + cancelled, 1);
+        assert!(matches!(
+            registration.receiver.await.unwrap().status,
+            ApprovalStatus::Approved | ApprovalStatus::Cancelled
+        ));
+        assert!(
+            resolve_result.is_ok() == (approved == 1),
+            "resolve/cancel race produced inconsistent terminal ownership"
+        );
     }
 
     #[test]

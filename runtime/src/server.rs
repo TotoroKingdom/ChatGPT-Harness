@@ -1215,4 +1215,72 @@ mod tests {
             MachineErrorCode::ApprovalAlreadyResolved
         );
     }
+
+    #[test]
+    fn approval_control_unknown_and_malformed_params_are_stable() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(runtime_config(&workspace.root))
+            .expect("initialize core");
+        core.acknowledge().expect("acknowledge core");
+        let mut mcp_service = McpRuntimeService::new();
+        let mut subscribed = false;
+        let mut output = Vec::new();
+
+        handle_request(
+            RpcRequest {
+                id: harness_control_protocol::RequestId::String("unknown".into()),
+                method: "approvals.resolve".into(),
+                params: Some(json!({
+                    "requestId": uuid::Uuid::new_v4().to_string(),
+                    "decision": "deny"
+                })),
+            },
+            &mut core,
+            &mut mcp_service,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("unknown approval response");
+        let unknown = String::from_utf8(output.clone())
+            .unwrap()
+            .lines()
+            .last()
+            .map(|line| serde_json::from_str::<RpcMessage>(line).unwrap())
+            .expect("unknown approval error response");
+        assert_eq!(
+            response_error(&unknown).error.data.code,
+            MachineErrorCode::ApprovalNotFound
+        );
+
+        handle_request(
+            RpcRequest {
+                id: harness_control_protocol::RequestId::String("malformed".into()),
+                method: "approvals.resolve".into(),
+                params: Some(json!({
+                    "requestId": "not-a-valid-live-request",
+                    "decision": "not-a-decision"
+                })),
+            },
+            &mut core,
+            &mut mcp_service,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("malformed approval response");
+        let malformed = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .last()
+            .map(|line| serde_json::from_str::<RpcMessage>(line).unwrap())
+            .expect("malformed approval error response");
+        assert_eq!(
+            response_error(&malformed).error.code,
+            error_codes::INVALID_PARAMS
+        );
+        assert_eq!(
+            response_error(&malformed).error.data.code,
+            MachineErrorCode::InvalidArgument
+        );
+    }
 }

@@ -184,8 +184,8 @@ mod tests {
     use super::*;
     use crate::state::RuntimeCore;
     use harness_control_protocol::{
-        DecimalU64, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode, ToolConfig,
-        WorkspaceConfig,
+        DecimalU64, PolicyDecision, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig,
+        SecurityMode, ToolConfig, UserPolicyRuleConfig, WorkspaceConfig,
     };
     use rmcp::handler::server::ServerHandler;
     use serde_json::json;
@@ -625,6 +625,167 @@ mod tests {
             "APPROVAL_DENIED"
         );
         assert!(!workspace.root.join("other.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn explicit_deny_precedes_an_existing_session_grant() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = PolicyDecision::Ask;
+        config.policies.user_rules.push(UserPolicyRuleConfig::new(
+            "deny-writes",
+            "Deny writes",
+            PolicyDecision::Deny,
+            WRITE,
+            "Integration explicit deny fixture.",
+        ));
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        core.session_grants().insert_from_approved_scope(
+            &core.runtime_id,
+            "source-request",
+            WRITE,
+            "denied-by-policy.txt",
+            chrono::Utc::now(),
+        );
+        let service = core.mcp_service().expect("MCP service");
+        let result = service
+            .call_tool_async(
+                WRITE,
+                json!({ "path": "denied-by-policy.txt", "content": "blocked" }),
+            )
+            .await
+            .expect("known tool");
+        assert_eq!(error_code(&result), "POLICY_DENIED");
+        assert_eq!(core.approval_manager().pending_count(), 0);
+        assert!(!workspace.root.join("denied-by-policy.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn system_workspace_guardrail_precedes_an_existing_session_grant() {
+        let workspace = TestWorkspace::new();
+        let outside_target = workspace.outside.join("outside.txt");
+        fs::write(&outside_target, "outside").expect("write outside fixture");
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        core.session_grants().insert_from_approved_scope(
+            &core.runtime_id,
+            "source-request",
+            WRITE,
+            &outside_target.to_string_lossy(),
+            chrono::Utc::now(),
+        );
+        let service = core.mcp_service().expect("MCP service");
+        let result = service
+            .call_tool_async(
+                WRITE,
+                json!({
+                    "path": outside_target.to_string_lossy(),
+                    "content": "must stay outside"
+                }),
+            )
+            .await
+            .expect("known tool");
+        assert_eq!(error_code(&result), "WORKSPACE_VIOLATION");
+        assert_eq!(core.approval_manager().pending_count(), 0);
+        assert_eq!(fs::read(&outside_target).unwrap(), b"outside");
+    }
+
+    #[tokio::test]
+    async fn post_approval_runtime_revalidation_rejects_when_readiness_changes() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(
+                        WRITE,
+                        json!({ "path": "runtime-revalidated.txt", "content": "blocked" }),
+                    )
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        core.set_mcp_readiness_for_test(false);
+        let pending = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        core.approval_manager()
+            .resolve(
+                &pending[0].request_id,
+                harness_control_protocol::ApprovalDecision::AllowOnce,
+            )
+            .expect("approve original request");
+        let result = call.await.expect("same request task");
+        assert_eq!(error_code(&result), "RUNTIME_NOT_READY");
+        assert!(!workspace.root.join("runtime-revalidated.txt").exists());
+        let approved = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Approved));
+        assert_eq!(approved.len(), 1);
+        assert_eq!(
+            approved[0].decision,
+            Some(harness_control_protocol::ApprovalDecision::AllowOnce)
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_generation_reset_drops_old_pending_and_grants() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config.clone()).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(
+                        WRITE,
+                        json!({ "path": "generation-reset.txt", "content": "blocked" }),
+                    )
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        let old_request_id = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending))[0]
+            .request_id
+            .clone();
+        core.stop().expect("stop old generation");
+        assert_eq!(
+            error_code(&call.await.expect("cancelled old call")),
+            "APPROVAL_CANCELLED"
+        );
+        core.initialize(config).expect("initialize new generation");
+        core.acknowledge().expect("acknowledge new generation");
+        assert!(core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending))
+            .is_empty());
+        assert_eq!(
+            core.approval_manager().resolve(
+                &old_request_id,
+                harness_control_protocol::ApprovalDecision::AllowOnce
+            ),
+            Err(crate::approval::ApprovalManagerError::ApprovalNotFound)
+        );
+        assert_eq!(core.session_grants().len(), 0);
     }
 
     #[test]

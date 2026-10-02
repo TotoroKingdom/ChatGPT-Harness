@@ -290,6 +290,11 @@ impl RuntimeCore {
         self.mcp_readiness.load(Ordering::Acquire)
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_mcp_readiness_for_test(&self, ready: bool) {
+        self.mcp_readiness.store(ready, Ordering::Release);
+    }
+
     pub fn publish(
         &mut self,
         event_type: ActivityEventType,
