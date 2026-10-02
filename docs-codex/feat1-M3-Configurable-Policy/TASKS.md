@@ -1,5 +1,6 @@
 # M3 TASKS — Configurable Policy
 
+> Status: ACCEPTED / FROZEN
 > Inputs: `SPEC.md`, `PLAN.md`  
 > Executor: Codex / Coding Agent  
 > Baseline: M2 development complete  
@@ -517,25 +518,27 @@ Unit / Integration / E2E由 Coding Agent自动完成；只有 Manual Acceptance�
 
 ## Development Completion Checklist
 
-- [ ] T1 Policy Config / Protocol / Persistence PASS
-- [ ] T2 Immutable Policy Snapshot / Engine PASS
-- [ ] T3 Runtime Evidence / Control / MCP semantics PASS
-- [ ] T4 Policies UI CRUD / desired/effective/restart PASS
-- [ ] T5 Regression PASS
-- [ ] legacy config missing policies defaults PASS
-- [ ] configRevision semantics PASS
-- [ ] User Rule CRUD persistence PASS
-- [ ] Tool Default fallback PASS
-- [ ] DENY > ASK > ALLOW explicit-rule aggregation PASS
-- [ ] System Guardrail cannot be overridden PASS
-- [ ] enabled invalid rule fail-closed PASS
-- [ ] matched rule IDs deterministic PASS
-- [ ] effective reason evidence PASS
-- [ ] ASK = APPROVAL_REQUIRED / no execution PASS
-- [ ] running desired/effective mismatch PASS
-- [ ] restart convergence PASS
-- [ ] M0–M2 regression PASS
-- [ ] cargo fmt/check/test PASS
-- [ ] frontend tests/typecheck/build PASS as applicable
-- [ ] git diff --check PASS
-- [ ] TASKS未声称 Integration/E2E/Manual Acceptance PASS
+- [x] T1 Policy Config / Protocol / Persistence PASS
+- [x] T2 Immutable Policy Snapshot / Engine PASS
+- [x] T3 Runtime Evidence / Control / MCP semantics PASS
+- [x] T4 Policies UI CRUD / desired/effective/restart PASS
+- [x] T5 Regression PASS
+- [x] legacy config missing policies defaults PASS
+- [x] configRevision semantics PASS
+- [x] User Rule CRUD persistence PASS
+- [x] Tool Default fallback PASS
+- [x] DENY > ASK > ALLOW explicit-rule aggregation PASS
+- [x] System Guardrail cannot be overridden PASS
+- [x] enabled invalid rule fail-closed PASS
+- [x] matched rule IDs deterministic PASS
+- [x] effective reason evidence PASS
+- [x] ASK = APPROVAL_REQUIRED / no execution PASS
+- [x] running desired/effective mismatch PASS
+- [x] restart convergence PASS
+- [x] M0–M2 regression PASS
+- [x] cargo fmt/check/test PASS
+- [x] frontend tests/typecheck/build PASS as applicable
+- [x] git diff --check PASS
+- [x] TASKS未把 Integration/E2E/Manual Acceptance 当作 development completion claim
+
+Final status: `M3 — ACCEPTED / FROZEN`。

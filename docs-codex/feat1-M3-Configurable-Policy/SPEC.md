@@ -1,6 +1,6 @@
 # M3 SPEC — Configurable Policy
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M3 — Configurable Policy  
 > Baseline: M2 development complete  
 > Sources: `../ChatGPT-Harness_V3_PRD.md`, `../ChatGPT-Harness_V3_ARCHITECTURE.md`, `../ChatGPT-Harness_V3_ROADMAP.md`, M0–M2 milestone docs
@@ -693,3 +693,5 @@ M3可 `ACCEPTED / FROZEN` 前必须证明：
 ```
 
 局部类型名、control method名和组件拆分可在实现中选择，但不得改变以上 Policy precedence、fallback、fail-closed、immutable generation与 M4边界。
+
+> Final status: `M3 — ACCEPTED / FROZEN`. Integration, Local Black-box E2E, and Manual Acceptance evidence are complete; M4 remains planned and was not started in this closeout.

@@ -1,6 +1,6 @@
 # M3 Integration Test Plan — Configurable Policy
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M3 — Configurable Policy  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`  
 > Scope: Protocol / ConfigStore / Runtime policy compilation / ExecutionPipeline / Control read / UI data integration. This is not Local Black-box E2E and does not require External ChatGPT.
@@ -396,9 +396,22 @@ M3 Integration只有以下全部满足才为 PASS：
 - Runtime effective projection + UI desired/effective/restart PASS。
 - M0–M2 regression PASS。
 
-随后进入 `E2E_TEST_PLAN.md` 的真实本地黑盒验证。
+随后已完成 `E2E_TEST_PLAN.md` 的真实本地黑盒验证，并完成 Manual Acceptance。
 
-## 7. Non-Claims
+## 7. Final Result / Evidence Retention
+
+```text
+Integration result: PASS
+Cases: INT-01–INT-25 all PASS (`m3_config_integration_cases` + `m3_runtime_integration_cases` evidence)
+Evidence: retained from the existing M3 Integration run; no Integration Test was re-executed during final closeout.
+Implementation commit: b49c7a8031edcfe6fdf39acd8b7fd43be34bb08b
+Test/evidence commit: 67b2fb81d5d1f3351d713512358493b0b2f62a85
+Manual Acceptance: PASS (confirmed by Human Reviewer on 2026-10-02)
+```
+
+The existing Integration PASS evidence remains the source for this closeout. The observed `read_file=ASK` behavior difference from Manual Acceptance is recorded as a non-blocking observation; it does not change the M3 result and is not fixed in this closeout.
+
+## 8. Non-Claims
 
 Integration PASS不代表：
 
@@ -408,5 +421,7 @@ ASK request can be approved/resumed
 Bash command-specific policy implemented
 schemaVersion v1→v2 migration complete
 External ChatGPT acceptance complete
-M3 ACCEPTED / FROZEN
+M4 Approval lifecycle started or implemented
 ```
+
+The Integration PASS result did not by itself establish Manual Acceptance; the subsequent human gate passed and the milestone is now recorded as `M3 — ACCEPTED / FROZEN`.

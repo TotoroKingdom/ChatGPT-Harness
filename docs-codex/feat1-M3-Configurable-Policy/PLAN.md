@@ -1,5 +1,6 @@
 # M3 PLAN — Configurable Policy
 
+> Status: ACCEPTED / FROZEN
 > Input: `SPEC.md`  
 > Baseline: M2 development complete  
 > Goal: 将当前 Runtime 内部固定/只读 Policy 基础设施升级为 persistent desired policy + immutable compiled Runtime snapshot + editable UI。  
@@ -430,4 +431,4 @@ restart convergence
 M0-M2 regression
 ```
 
-随后独立生成并执行 M3 Integration / local black-box E2E / Manual Acceptance。
+M3 Integration、Local Black-box E2E 与 Manual Acceptance 已独立完成并 PASS；本 milestone 已收口为 `M3 — ACCEPTED / FROZEN`。M4 仍仅作为下一 milestone 规划，本次未开始实现。

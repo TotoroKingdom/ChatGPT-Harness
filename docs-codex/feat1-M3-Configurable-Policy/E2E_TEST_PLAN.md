@@ -1,6 +1,6 @@
 # M3 E2E Test Plan — Configurable Policy
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M3 — Configurable Policy  
 > Owner: Coding Agent / QA Agent  
 > Scope: fully local black-box E2E against a real compiled Runtime process. No browser, no External ChatGPT, no Tunnel dependency, no in-process executor substitute.
@@ -403,9 +403,22 @@ M3 Local Black-box E2E只有以下全部满足才为 PASS：
 - Activity confidentiality PASS。
 - shutdown/cleanup PASS。
 
-完成后进入 `MANUAL_ACCEPTANCE_CHECKLIST.md`。
+完成后已进入并通过 `MANUAL_ACCEPTANCE_CHECKLIST.md`。
 
-## 8. Non-Claims
+## 8. Final Result / Evidence Retention
+
+```text
+Local Black-box E2E result: PASS
+Cases: E2E-01–E2E-14 all PASS (`m3_local_black_box_e2e`; `LOCAL_M3_BLACK_BOX_E2E=PASS`)
+Evidence: retained from the existing M3 Local Black-box E2E run; no E2E was re-executed during final closeout.
+Implementation commit: b49c7a8031edcfe6fdf39acd8b7fd43be34bb08b
+Test/evidence commit: 67b2fb81d5d1f3351d713512358493b0b2f62a85
+Manual Acceptance: PASS (confirmed by Human Reviewer on 2026-10-02)
+```
+
+The existing Local Black-box E2E PASS evidence remains the source for this closeout. The observed `read_file=ASK` behavior difference from Manual Acceptance is recorded as a non-blocking observation; it does not change the M3 result and is not fixed in this closeout.
+
+## 9. Non-Claims
 
 E2E PASS不代表：
 
@@ -414,5 +427,7 @@ M4 human approval works
 ASK request can resume
 Bash command policy works
 External ChatGPT has been exercised
-M3 is ACCEPTED / FROZEN
+M4 human approval works or has started
 ```
+
+The Local Black-box E2E PASS result did not by itself establish the human UI gate; that gate subsequently passed and the milestone is now recorded as `M3 — ACCEPTED / FROZEN`.
