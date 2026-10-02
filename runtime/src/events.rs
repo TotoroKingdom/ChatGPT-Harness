@@ -1,5 +1,7 @@
 use crate::audit::{AuditEvent, AuditEventType as InternalAuditEventType};
-use harness_control_protocol::{ActivityEvent, ActivityEventType, DecimalU64, RuntimeLimits};
+use harness_control_protocol::{
+    ActivityEvent, ActivityEventType, DecimalU64, PolicyDecision, PolicyReason, RuntimeLimits,
+};
 use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
 
@@ -38,6 +40,21 @@ impl ActivityEventInput {
         };
 
         let mut metadata = vec![("tool".into(), event.tool_name.clone())];
+        if let Some(decision) = &event.policy_decision {
+            metadata.push(("decision".into(), policy_decision_name(decision).into()));
+            let matched_rule_ids = event
+                .matched_rule_ids
+                .iter()
+                .map(|id| redact_rule_id(id))
+                .collect::<Vec<_>>();
+            metadata.push((
+                "matchedRuleIds".into(),
+                serde_json::to_string(&matched_rule_ids).unwrap_or_else(|_| "[]".into()),
+            ));
+        }
+        if let Some(reason) = event.policy_reason {
+            metadata.push(("policyReason".into(), policy_reason_name(reason).into()));
+        }
         if let Some(category) = event.failure_category {
             metadata.push((
                 "failureCategory".into(),
@@ -52,6 +69,39 @@ impl ActivityEventInput {
             metadata,
             request_id: Some(event.request_id.to_string()),
         })
+    }
+}
+
+fn policy_decision_name(decision: &PolicyDecision) -> &'static str {
+    match decision {
+        PolicyDecision::Allow => "allow",
+        PolicyDecision::Ask => "ask",
+        PolicyDecision::Deny => "deny",
+    }
+}
+
+fn policy_reason_name(reason: PolicyReason) -> &'static str {
+    match reason {
+        PolicyReason::SystemGuardrail => "system_guardrail",
+        PolicyReason::MatchedUserRules => "matched_user_rules",
+        PolicyReason::ToolDefault => "tool_default",
+        PolicyReason::InvalidPolicySnapshot => "invalid_policy_snapshot",
+        PolicyReason::InvalidContext => "invalid_context",
+        PolicyReason::UnsupportedCapability => "unsupported_capability",
+        PolicyReason::ToolDisabled => "tool_disabled",
+    }
+}
+
+fn redact_rule_id(id: &str) -> String {
+    if id.len() <= 64
+        && id.bytes().any(|byte| byte.is_ascii_lowercase())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        id.to_owned()
+    } else {
+        "<redacted>".into()
     }
 }
 
@@ -154,7 +204,52 @@ impl EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audit::{
+        AuditEvent, AuditEventType, AuditLifecycleState, AuditOutcome, WorkspaceValidation,
+    };
     use harness_control_protocol::ActivityEventType;
+    use uuid::Uuid;
+
+    #[test]
+    fn policy_evidence_is_projected_without_raw_or_unsafe_rule_ids() {
+        let input = ActivityEventInput::from_audit(&AuditEvent {
+            event_id: Uuid::new_v4(),
+            request_id: Uuid::new_v4(),
+            timestamp: "2026-10-02T00:00:00.000Z".into(),
+            event_type: AuditEventType::PolicyEvaluated,
+            tool_name: "write".into(),
+            lifecycle_state: AuditLifecycleState::PolicyEvaluating,
+            workspace_id: "active".into(),
+            workspace_validation: WorkspaceValidation::Passed,
+            policy_decision: Some(PolicyDecision::Allow),
+            matched_rule_ids: vec![
+                "user-write-allow".into(),
+                "M3_SECRET_CONTENT_SENTINEL".into(),
+            ],
+            policy_reason: Some(PolicyReason::MatchedUserRules),
+            outcome: AuditOutcome::InProgress,
+            failure_category: None,
+        })
+        .expect("policy audit event projects to activity");
+
+        let metadata = input
+            .metadata
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(metadata.get("tool"), Some(&"write".into()));
+        assert_eq!(metadata.get("decision"), Some(&"allow".into()));
+        assert_eq!(
+            metadata.get("matchedRuleIds"),
+            Some(&r#"["user-write-allow","<redacted>"]"#.into())
+        );
+        assert_eq!(
+            metadata.get("policyReason"),
+            Some(&"matched_user_rules".into())
+        );
+        assert!(!metadata
+            .values()
+            .any(|value| value.contains("M3_SECRET_CONTENT_SENTINEL")));
+    }
 
     #[test]
     fn subscribe_after_sequence_only_replays_missing_events() {

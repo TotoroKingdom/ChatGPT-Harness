@@ -1,6 +1,8 @@
 use super::runtime_config_snapshot;
 use crate::config::ConfigStore;
-use harness_control_protocol::AppConfig;
+use harness_control_protocol::{
+    AppConfig, DecimalU64, PolicyDecision, PolicyMatcherConfig, UserPolicyRuleConfig,
+};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -1189,5 +1191,822 @@ fn assert_bytes(path: &Path, expected: &[u8]) -> E2eResult<()> {
         actual == expected,
         "filesystem bytes did not match the expected result"
     );
+    Ok(())
+}
+
+#[test]
+#[ignore = "M3 local black-box E2E requires an explicitly built release Runtime"]
+fn m3_local_black_box_e2e() {
+    if let Err(error) = run_m3_suite() {
+        panic!("M3 local black-box E2E failed: {error}");
+    }
+}
+
+fn run_m3_suite() -> E2eResult<()> {
+    let fixture = Fixture::new()?;
+    for (name, contents) in [
+        ("read.txt", b"hello from M3".as_slice()),
+        ("edit.txt", b"hello from M3 edit".as_slice()),
+        ("deny-target.txt", b"unchanged".as_slice()),
+        ("write-target.txt", b"old".as_slice()),
+    ] {
+        fs::write(fixture.workspace.join(name), contents)
+            .map_err(|_| E2eError::new("create M3 fixture failed"))?;
+    }
+
+    let store = ConfigStore::new(fixture.config_dir.clone());
+    let mut base = ConfigStore::safe_defaults();
+    base.workspace.root_path = fixture.workspace.to_string_lossy().into_owned();
+    let base = store
+        .save(base)
+        .map_err(|_| E2eError::new("save initial M3 E2E config failed"))?;
+    let binary = runtime_binary()?;
+    println!(
+        "M3_E2E_RUNTIME_BINARY={}",
+        binary.file_name().unwrap_or_default().to_string_lossy()
+    );
+    let mut failures = Vec::new();
+
+    let (mut generation_a, mut mcp_a) = RuntimeProcess::start(&binary, &base, "M3-A")?;
+    report_case(
+        "E2E-01",
+        run_m3_e2e_01(&mut generation_a, &mut mcp_a, &fixture),
+        &mut failures,
+    );
+
+    let mut deny_default = base.clone();
+    deny_default.policies.tool_defaults.write = PolicyDecision::Deny;
+    let deny_default = store
+        .save(deny_default)
+        .map_err(|_| E2eError::new("save M3 deny-default config failed"))?;
+    report_case(
+        "E2E-08",
+        run_m3_e2e_08(
+            &mut generation_a,
+            &mut mcp_a,
+            &store,
+            &deny_default,
+            &fixture,
+        ),
+        &mut failures,
+    );
+    generation_a.stop()?;
+
+    let mut allow_rule = deny_default.clone();
+    allow_rule.policies.user_rules = vec![m3_rule(
+        "user-write-allow",
+        PolicyDecision::Allow,
+        "write",
+        true,
+    )];
+    let allow_rule = store
+        .save(allow_rule)
+        .map_err(|_| E2eError::new("save M3 allow-rule config failed"))?;
+    let (mut generation_b, mut mcp_b) = RuntimeProcess::start(&binary, &deny_default, "M3-B")?;
+    report_case(
+        "E2E-02",
+        run_m3_e2e_02(&mut generation_b, &mut mcp_b, &fixture),
+        &mut failures,
+    );
+    generation_b.stop()?;
+
+    let (mut generation_c, mut mcp_c) = RuntimeProcess::start(&binary, &allow_rule, "M3-C")?;
+    report_case(
+        "E2E-03",
+        run_m3_e2e_03(&mut generation_c, &mut mcp_c, &fixture),
+        &mut failures,
+    );
+    generation_c.stop()?;
+
+    let mut severity = allow_rule.clone();
+    severity.policies.tool_defaults.write = PolicyDecision::Allow;
+    severity.policies.user_rules = vec![
+        m3_rule("z-allow", PolicyDecision::Allow, "write", true),
+        m3_rule("a-ask", PolicyDecision::Ask, "write", true),
+        m3_rule("m-deny", PolicyDecision::Deny, "write", true),
+    ];
+    let severity = store
+        .save(severity)
+        .map_err(|_| E2eError::new("save M3 severity config failed"))?;
+    let (mut generation_d, mut mcp_d) = RuntimeProcess::start(&binary, &severity, "M3-D")?;
+    report_case(
+        "E2E-04",
+        run_m3_e2e_04(&mut generation_d, &mut mcp_d, &fixture),
+        &mut failures,
+    );
+    generation_d.stop()?;
+
+    let mut ask = severity.clone();
+    ask.policies.user_rules = vec![m3_rule(
+        "user-write-ask",
+        PolicyDecision::Ask,
+        "write",
+        true,
+    )];
+    let ask = store
+        .save(ask)
+        .map_err(|_| E2eError::new("save M3 ask config failed"))?;
+    let (mut generation_e, mut mcp_e) = RuntimeProcess::start(&binary, &ask, "M3-E")?;
+    report_case(
+        "E2E-05",
+        run_m3_e2e_05(&mut generation_e, &mut mcp_e, &fixture),
+        &mut failures,
+    );
+    generation_e.stop()?;
+
+    let mut invalid = ask.clone();
+    invalid.config_revision = DecimalU64::new(6);
+    invalid.policies.user_rules = vec![
+        m3_rule("valid-write-allow", PolicyDecision::Allow, "write", true),
+        m3_rule(
+            "invalid-enabled",
+            PolicyDecision::Allow,
+            "unknown_tool",
+            true,
+        ),
+    ];
+    let (mut generation_f, mut mcp_f) = RuntimeProcess::start(&binary, &invalid, "M3-F")?;
+    report_case(
+        "E2E-06",
+        run_m3_e2e_06(&mut generation_f, &mut mcp_f, &fixture),
+        &mut failures,
+    );
+    generation_f.stop()?;
+
+    let mut disabled_invalid = invalid.clone();
+    disabled_invalid.config_revision = DecimalU64::new(7);
+    disabled_invalid.policies.user_rules[1].enabled = false;
+    let (mut generation_g, mut mcp_g) = RuntimeProcess::start(&binary, &disabled_invalid, "M3-G")?;
+    report_case(
+        "E2E-07",
+        run_m3_e2e_07(&binary, &mut generation_g, &mut mcp_g, &invalid, &fixture),
+        &mut failures,
+    );
+
+    let mut guardrail = base.clone();
+    guardrail.config_revision = DecimalU64::new(9);
+    guardrail.policies.user_rules = vec![m3_rule(
+        "outside-write-allow",
+        PolicyDecision::Allow,
+        "write",
+        true,
+    )];
+    let (mut generation_k, mut mcp_k) = RuntimeProcess::start(&binary, &guardrail, "M3-K")?;
+    report_case(
+        "E2E-09",
+        run_m3_e2e_09(&mut generation_k, &mut mcp_k, &fixture),
+        &mut failures,
+    );
+    generation_k.stop()?;
+
+    let mut disabled_tool = base.clone();
+    disabled_tool.config_revision = DecimalU64::new(10);
+    disabled_tool.tools.write.enabled = false;
+    disabled_tool.policies.user_rules = vec![m3_rule(
+        "disabled-write-allow",
+        PolicyDecision::Allow,
+        "write",
+        true,
+    )];
+    let (mut generation_l, mut mcp_l) = RuntimeProcess::start(&binary, &disabled_tool, "M3-L")?;
+    report_case(
+        "E2E-10",
+        run_m3_e2e_10(&mut generation_l, &mut mcp_l, &fixture),
+        &mut failures,
+    );
+    generation_l.stop()?;
+
+    report_case(
+        "E2E-11",
+        run_m3_e2e_11(&binary, &base, &deny_default, &ask, &fixture),
+        &mut failures,
+    );
+    report_case(
+        "E2E-12",
+        run_m3_e2e_12(&binary, &base, &disabled_tool, &fixture),
+        &mut failures,
+    );
+    report_case(
+        "E2E-13",
+        run_m3_e2e_13(&binary, &base, &deny_default, &ask, &fixture),
+        &mut failures,
+    );
+    report_case(
+        "E2E-14",
+        run_m3_e2e_14(&binary, &base, &fixture),
+        &mut failures,
+    );
+
+    let base_path = fixture.base.clone();
+    fixture.cleanup()?;
+    check!(
+        !base_path.exists(),
+        "M3 E2E fixture cleanup left temporary data"
+    );
+    check!(failures.is_empty(), "failed M3 E2E cases: {:?}", failures);
+    println!("LOCAL_M3_BLACK_BOX_E2E=PASS");
+    Ok(())
+}
+
+fn m3_rule(id: &str, decision: PolicyDecision, tool: &str, enabled: bool) -> UserPolicyRuleConfig {
+    UserPolicyRuleConfig {
+        id: id.into(),
+        name: format!("M3 {id}"),
+        enabled,
+        decision,
+        matcher: PolicyMatcherConfig::tool(tool),
+        reason: "M3 E2E policy fixture.".into(),
+    }
+}
+
+fn run_m3_e2e_01(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    check!(
+        list_names(mcp.list_tools()?)? == ["read_file", "glob", "write", "edit"],
+        "M3 baseline tools/list changed"
+    );
+    let before = latest_activity(runtime)?;
+    let read = mcp.call_tool("read_file", json!({ "path": "read.txt" }))?;
+    assert_mcp_success(&read)?;
+    check!(
+        read["result"]["structuredContent"]["content"] == json!("hello from M3"),
+        "M3 baseline read_file returned unexpected content"
+    );
+    assert_mcp_success(&mcp.call_tool(
+        "write",
+        json!({ "path": "write-target.txt", "content": "new" }),
+    )?)?;
+    assert_mcp_success(&mcp.call_tool(
+        "edit",
+        json!({ "path": "edit.txt", "oldText": "hello from M3 edit", "newText": "edited by M3" }),
+    )?)?;
+    assert_bytes(&fixture.workspace.join("write-target.txt"), b"new")?;
+    assert_bytes(&fixture.workspace.join("edit.txt"), b"edited by M3")?;
+    m3_assert_policy(runtime, "write", "allow", "tool_default", &[])?;
+    let activity = activity_after(runtime, &before)?;
+    m3_assert_activity(&activity, "write", "allow", "tool_default", &[])?;
+    Ok(())
+}
+
+fn run_m3_e2e_02(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let before_bytes = fs::read(fixture.workspace.join("write-target.txt"))
+        .map_err(|_| E2eError::new("read M3 deny fixture failed"))?;
+    let before = latest_activity(runtime)?;
+    assert_mcp_error_code(
+        &mcp.call_tool(
+            "write",
+            json!({ "path": "write-target.txt", "content": "must not write" }),
+        )?,
+        "POLICY_DENIED",
+    )?;
+    check!(
+        fs::read(fixture.workspace.join("write-target.txt"))
+            .map_err(|_| E2eError::new("read M3 denied target failed"))?
+            == before_bytes,
+        "M3 default DENY mutated the target"
+    );
+    m3_assert_policy(runtime, "write", "deny", "tool_default", &[])?;
+    let activity = activity_after(runtime, &before)?;
+    m3_assert_activity(&activity, "write", "deny", "tool_default", &[])?;
+    check!(
+        !activity
+            .iter()
+            .any(|item| item["eventType"] == json!("execution_completed")),
+        "M3 default DENY emitted execution completion"
+    );
+    Ok(())
+}
+
+fn run_m3_e2e_03(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let before = latest_activity(runtime)?;
+    assert_mcp_success(&mcp.call_tool(
+        "write",
+        json!({ "path": "deny-target.txt", "content": "allowed by user rule" }),
+    )?)?;
+    assert_bytes(
+        &fixture.workspace.join("deny-target.txt"),
+        b"allowed by user rule",
+    )?;
+    m3_assert_policy(
+        runtime,
+        "write",
+        "allow",
+        "matched_user_rules",
+        &["user-write-allow"],
+    )?;
+    let activity = activity_after(runtime, &before)?;
+    m3_assert_activity(
+        &activity,
+        "write",
+        "allow",
+        "matched_user_rules",
+        &["user-write-allow"],
+    )?;
+    Ok(())
+}
+
+fn run_m3_e2e_04(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let before_bytes = fs::read(fixture.workspace.join("deny-target.txt"))
+        .map_err(|_| E2eError::new("read M3 severity fixture failed"))?;
+    let before = latest_activity(runtime)?;
+    assert_mcp_error_code(
+        &mcp.call_tool(
+            "write",
+            json!({ "path": "deny-target.txt", "content": "severity must deny" }),
+        )?,
+        "POLICY_DENIED",
+    )?;
+    check!(
+        fs::read(fixture.workspace.join("deny-target.txt"))
+            .map_err(|_| E2eError::new("read M3 severity target failed"))?
+            == before_bytes,
+        "M3 severity DENY mutated the target"
+    );
+    let ids = ["a-ask", "m-deny", "z-allow"];
+    m3_assert_policy(runtime, "write", "deny", "matched_user_rules", &ids)?;
+    let activity = activity_after(runtime, &before)?;
+    m3_assert_activity(&activity, "write", "deny", "matched_user_rules", &ids)?;
+    Ok(())
+}
+
+fn run_m3_e2e_05(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let before_bytes = fs::read(fixture.workspace.join("write-target.txt"))
+        .map_err(|_| E2eError::new("read M3 ASK fixture failed"))?;
+    let before = latest_activity(runtime)?;
+    assert_mcp_error_code(
+        &mcp.call_tool(
+            "write",
+            json!({ "path": "write-target.txt", "content": "must await approval" }),
+        )?,
+        "APPROVAL_REQUIRED",
+    )?;
+    check!(
+        fs::read(fixture.workspace.join("write-target.txt"))
+            .map_err(|_| E2eError::new("read M3 ASK target failed"))?
+            == before_bytes,
+        "M3 ASK mutated the target"
+    );
+    let status = runtime.control_request("runtime.status", json!({}))?;
+    check!(
+        status["pendingApprovals"] == json!(0),
+        "M3 ASK created a pending approval"
+    );
+    m3_assert_policy(
+        runtime,
+        "write",
+        "ask",
+        "matched_user_rules",
+        &["user-write-ask"],
+    )?;
+    let activity = activity_after(runtime, &before)?;
+    m3_assert_activity(
+        &activity,
+        "write",
+        "ask",
+        "matched_user_rules",
+        &["user-write-ask"],
+    )?;
+    check!(
+        activity
+            .iter()
+            .any(|item| item["eventType"] == json!("approval_requested")),
+        "M3 ASK did not emit approval evidence"
+    );
+    check!(
+        !activity
+            .iter()
+            .any(|item| item["eventType"] == json!("execution_completed")),
+        "M3 ASK emitted execution completion"
+    );
+    Ok(())
+}
+
+fn run_m3_e2e_06(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let before_bytes = fs::read(fixture.workspace.join("deny-target.txt"))
+        .map_err(|_| E2eError::new("read M3 invalid snapshot fixture failed"))?;
+    let before = latest_activity(runtime)?;
+    assert_mcp_error_code(
+        &mcp.call_tool(
+            "write",
+            json!({ "path": "deny-target.txt", "content": "invalid snapshot" }),
+        )?,
+        "POLICY_DENIED",
+    )?;
+    check!(
+        fs::read(fixture.workspace.join("deny-target.txt"))
+            .map_err(|_| E2eError::new("read M3 invalid snapshot target failed"))?
+            == before_bytes,
+        "M3 invalid snapshot mutated the target"
+    );
+    let policies = runtime.control_request("policies.list", json!({}))?;
+    check!(
+        policies["effective"]["valid"] == json!(false),
+        "M3 invalid snapshot was not observable"
+    );
+    check!(
+        policies["effective"]["statusReason"] == json!("invalid_policy_snapshot"),
+        "M3 invalid snapshot reason was not observable"
+    );
+    m3_assert_policy(runtime, "write", "deny", "invalid_policy_snapshot", &[])?;
+    let activity = activity_after(runtime, &before)?;
+    m3_assert_activity(&activity, "write", "deny", "invalid_policy_snapshot", &[])?;
+    Ok(())
+}
+
+fn run_m3_e2e_07(
+    binary: &Path,
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    enabled_invalid: &AppConfig,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let before = latest_activity(runtime)?;
+    assert_mcp_success(&mcp.call_tool(
+        "write",
+        json!({ "path": "disabled-invalid.txt", "content": "valid allow" }),
+    )?)?;
+    assert_bytes(
+        &fixture.workspace.join("disabled-invalid.txt"),
+        b"valid allow",
+    )?;
+    let policies = runtime.control_request("policies.list", json!({}))?;
+    check!(
+        policies["effective"]["valid"] == json!(true),
+        "disabled invalid rule poisoned snapshot"
+    );
+    m3_assert_policy(
+        runtime,
+        "write",
+        "allow",
+        "matched_user_rules",
+        &["valid-write-allow"],
+    )?;
+    let activity = activity_after(runtime, &before)?;
+    m3_assert_activity(
+        &activity,
+        "write",
+        "allow",
+        "matched_user_rules",
+        &["valid-write-allow"],
+    )?;
+
+    runtime.stop()?;
+    let (mut next_runtime, mut next_mcp) = RuntimeProcess::start(binary, enabled_invalid, "M3-H")?;
+    let result = run_m3_e2e_06(&mut next_runtime, &mut next_mcp, fixture);
+    next_runtime.stop()?;
+    check!(
+        result.is_ok(),
+        "enabling the invalid rule did not fail closed"
+    );
+    Ok(())
+}
+
+fn run_m3_e2e_08(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    store: &ConfigStore,
+    desired: &AppConfig,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let active = runtime.control_request("runtime.status", json!({}))?;
+    let active_revision = active["configRevision"]
+        .as_str()
+        .ok_or_else(|| E2eError::new("M3 generation A revision missing"))?
+        .to_owned();
+    let desired_loaded = store
+        .load()
+        .map_err(|_| E2eError::new("reload M3 desired config failed"))?
+        .ok_or_else(|| E2eError::new("M3 desired config disappeared"))?;
+    check!(
+        desired_loaded.config_revision == desired.config_revision,
+        "M3 desired revision did not advance"
+    );
+    check!(
+        active_revision != desired.config_revision.get().to_string(),
+        "M3 generation A adopted the desired revision without restart"
+    );
+    assert_mcp_success(&mcp.call_tool(
+        "write",
+        json!({ "path": "immutable-generation.txt", "content": "generation A" }),
+    )?)?;
+    assert_bytes(
+        &fixture.workspace.join("immutable-generation.txt"),
+        b"generation A",
+    )?;
+    Ok(())
+}
+
+fn run_m3_e2e_09(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let outside_target = fixture.outside.join("user-allow-must-not-create.txt");
+    let before = latest_activity(runtime)?;
+    assert_mcp_error_code(
+        &mcp.call_tool(
+            "write",
+            json!({ "path": outside_target.to_string_lossy(), "content": "outside" }),
+        )?,
+        "WORKSPACE_VIOLATION",
+    )?;
+    check!(
+        !outside_target.exists(),
+        "M3 user ALLOW created an outside target"
+    );
+    let activity = activity_after(runtime, &before)?;
+    check!(
+        activity
+            .iter()
+            .any(|item| item["eventType"] == json!("workspace_violation")),
+        "M3 boundary rejection was not observable"
+    );
+    check!(
+        !activity
+            .iter()
+            .any(|item| item["eventType"] == json!("execution_completed")),
+        "M3 boundary rejection emitted execution completion"
+    );
+    Ok(())
+}
+
+fn run_m3_e2e_10(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    check!(
+        !list_names(mcp.list_tools()?)?.contains(&"write".to_owned()),
+        "M3 disabled write remained in tools/list"
+    );
+    let target = fixture.workspace.join("disabled-user-allow.txt");
+    let before = latest_activity(runtime)?;
+    assert_mcp_error_code(
+        &mcp.call_tool(
+            "write",
+            json!({ "path": "disabled-user-allow.txt", "content": "must not write" }),
+        )?,
+        "TOOL_DISABLED",
+    )?;
+    check!(!target.exists(), "M3 disabled write created a target");
+    let activity = activity_after(runtime, &before)?;
+    assert_disabled_activity(&activity, "write")?;
+    Ok(())
+}
+
+fn run_m3_e2e_11(
+    binary: &Path,
+    allow: &AppConfig,
+    deny: &AppConfig,
+    ask: &AppConfig,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    for (generation, config, expected, reason, ids) in [
+        (
+            "M3-control-allow",
+            allow,
+            "allow",
+            "tool_default",
+            Vec::<&str>::new(),
+        ),
+        (
+            "M3-control-deny",
+            deny,
+            "deny",
+            "tool_default",
+            Vec::<&str>::new(),
+        ),
+        (
+            "M3-control-ask",
+            ask,
+            "ask",
+            "matched_user_rules",
+            vec!["user-write-ask"],
+        ),
+    ] {
+        let (mut runtime, mut mcp) = RuntimeProcess::start(binary, config, generation)?;
+        let result = (|| {
+            m3_assert_policy(&mut runtime, "write", expected, reason, &ids)?;
+            match expected {
+                "allow" => assert_mcp_success(&mcp.call_tool(
+                    "write",
+                    json!({ "path": "control-allow.txt", "content": "allowed" }),
+                )?)?,
+                "deny" => assert_mcp_error_code(
+                    &mcp.call_tool(
+                        "write",
+                        json!({ "path": "control-deny.txt", "content": "denied" }),
+                    )?,
+                    "POLICY_DENIED",
+                )?,
+                "ask" => assert_mcp_error_code(
+                    &mcp.call_tool(
+                        "write",
+                        json!({ "path": "control-ask.txt", "content": "ask" }),
+                    )?,
+                    "APPROVAL_REQUIRED",
+                )?,
+                _ => return Err(E2eError::new("unknown M3 control fixture")),
+            }
+            Ok(())
+        })();
+        runtime.stop()?;
+        result?;
+    }
+    check!(
+        !fixture.workspace.join("control-deny.txt").exists()
+            && !fixture.workspace.join("control-ask.txt").exists(),
+        "M3 control observations did not match MCP outcomes"
+    );
+    Ok(())
+}
+
+fn run_m3_e2e_12(
+    binary: &Path,
+    base: &AppConfig,
+    disabled: &AppConfig,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let (mut runtime, mut mcp) = RuntimeProcess::start(binary, base, "M3-regression-default")?;
+    let result = (|| {
+        assert_mcp_success(&mcp.call_tool("read_file", json!({ "path": "read.txt" }))?)?;
+        assert_mcp_success(&mcp.call_tool("glob", json!({ "pattern": "**/*.txt" }))?)?;
+        assert_mcp_success(&mcp.call_tool(
+            "write",
+            json!({ "path": "write-target.txt", "content": "atomic overwrite" }),
+        )?)?;
+        assert_mcp_success(&mcp.call_tool(
+            "write",
+            json!({ "path": "regression-edit.txt", "content": "old exact" }),
+        )?)?;
+        assert_mcp_success(&mcp.call_tool(
+            "edit",
+            json!({ "path": "regression-edit.txt", "oldText": "old exact", "newText": "exact replacement" }),
+        )?)?;
+        assert_bytes(
+            &fixture.workspace.join("write-target.txt"),
+            b"atomic overwrite",
+        )?;
+        assert_bytes(
+            &fixture.workspace.join("regression-edit.txt"),
+            b"exact replacement",
+        )?;
+        Ok(())
+    })();
+    runtime.stop()?;
+    result?;
+
+    let (mut disabled_runtime, mut disabled_mcp) =
+        RuntimeProcess::start(binary, disabled, "M3-regression-disabled")?;
+    let before = latest_activity(&mut disabled_runtime)?;
+    let result = assert_mcp_error_code(
+        &disabled_mcp.call_tool(
+            "write",
+            json!({ "path": "regression-stale.txt", "content": "must not write" }),
+        )?,
+        "TOOL_DISABLED",
+    );
+    check!(!fixture.workspace.join("regression-stale.txt").exists());
+    let activity = activity_after(&mut disabled_runtime, &before)?;
+    assert_disabled_activity(&activity, "write")?;
+    disabled_runtime.stop()?;
+    result
+}
+
+fn run_m3_e2e_13(
+    binary: &Path,
+    allow: &AppConfig,
+    deny: &AppConfig,
+    ask: &AppConfig,
+    fixture: &Fixture,
+) -> E2eResult<()> {
+    let sentinel = "M3_SECRET_CONTENT_SENTINEL";
+    for (generation, config, expected_code) in [
+        ("M3-secret-allow", allow, None),
+        ("M3-secret-deny", deny, Some("POLICY_DENIED")),
+        ("M3-secret-ask", ask, Some("APPROVAL_REQUIRED")),
+    ] {
+        let (mut runtime, mut mcp) = RuntimeProcess::start(binary, config, generation)?;
+        let before = latest_activity(&mut runtime)?;
+        let response = mcp.call_tool(
+            "write",
+            json!({ "path": "confidentiality.txt", "content": sentinel }),
+        )?;
+        match expected_code {
+            Some(code) => assert_mcp_error_code(&response, code)?,
+            None => assert_mcp_success(&response)?,
+        }
+        let activity = activity_after(&mut runtime, &before)?;
+        let serialized = serde_json::to_string(&activity)
+            .map_err(|_| E2eError::new("serialize M3 activity evidence failed"))?;
+        let workspace_path = fixture.workspace.to_string_lossy();
+        check!(
+            !serialized.contains(sentinel),
+            "M3 Activity leaked mutation content"
+        );
+        check!(
+            !serialized.contains(workspace_path.as_ref()),
+            "M3 Activity leaked an absolute workspace path"
+        );
+        check!(
+            activity
+                .iter()
+                .any(|item| item["eventType"] == json!("policy_evaluated")),
+            "M3 Activity omitted policy evidence"
+        );
+        runtime.stop()?;
+    }
+    Ok(())
+}
+
+fn run_m3_e2e_14(binary: &Path, base: &AppConfig, fixture: &Fixture) -> E2eResult<()> {
+    let (mut runtime, _mcp) = RuntimeProcess::start(binary, base, "M3-shutdown")?;
+    let endpoint = runtime.endpoint;
+    runtime.stop()?;
+    check!(
+        TcpStream::connect_timeout(&endpoint.address, Duration::from_millis(500)).is_err(),
+        "M3 MCP endpoint remained open after shutdown"
+    );
+    check!(
+        runtime
+            .child
+            .try_wait()
+            .map_err(|_| E2eError::new("poll M3 Runtime shutdown failed"))?
+            .is_some(),
+        "M3 Runtime child remained alive after shutdown"
+    );
+    check!(fixture.workspace.join("read.txt").exists());
+    Ok(())
+}
+
+fn m3_assert_policy(
+    runtime: &mut RuntimeProcess,
+    tool: &str,
+    decision: &str,
+    reason: &str,
+    matched_ids: &[&str],
+) -> E2eResult<()> {
+    let policies = runtime.control_request("policies.list", json!({}))?;
+    let per_tool = policies["effective"]["perTool"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["tool"] == json!(tool)))
+        .ok_or_else(|| E2eError::new("M3 effective policy omitted the requested tool"))?;
+    check!(
+        per_tool["decision"] == json!(decision),
+        "M3 effective decision mismatch"
+    );
+    check!(
+        per_tool["reason"] == json!(reason),
+        "M3 effective policy reason mismatch"
+    );
+    check!(
+        per_tool["matchedRuleIds"] == json!(matched_ids),
+        "M3 effective matched rule IDs mismatch"
+    );
+    Ok(())
+}
+
+fn m3_assert_activity(
+    items: &[Value],
+    tool: &str,
+    decision: &str,
+    reason: &str,
+    matched_ids: &[&str],
+) -> E2eResult<()> {
+    let policy = items
+        .iter()
+        .find(|item| {
+            item["eventType"] == json!("policy_evaluated")
+                && item["metadata"]["tool"] == json!(tool)
+        })
+        .ok_or_else(|| E2eError::new("M3 Activity omitted policy decision evidence"))?;
+    check!(policy["metadata"]["decision"] == json!(decision));
+    check!(policy["metadata"]["policyReason"] == json!(reason));
+    let expected_ids = serde_json::to_string(matched_ids)
+        .map_err(|_| E2eError::new("serialize M3 matched IDs failed"))?;
+    check!(policy["metadata"]["matchedRuleIds"] == json!(expected_ids));
     Ok(())
 }

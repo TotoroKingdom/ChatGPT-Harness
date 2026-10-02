@@ -94,4 +94,20 @@ describe("M3 PoliciesPage", () => {
     expect(await screen.findByText("User policy rule ID is required.")).toBeInTheDocument();
     expect(saveConfig).toHaveBeenCalledTimes(1);
   });
+
+  it("hides Restart Required after the effective generation converges", () => {
+    setup({ restartRequired: false });
+    expect(screen.queryByText("Restart Required")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Desired default for write")).toHaveValue("allow");
+  });
+
+  it("rolls back desired policy state when control save fails", async () => {
+    const saveConfig = vi.fn().mockResolvedValue({ ok: false, error: { message: "save rejected" } });
+    setup({ saveConfig });
+    fireEvent.change(screen.getByLabelText("Desired default for write"), { target: { value: "deny" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Policy Changes" }));
+    expect(await screen.findByText("save rejected")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Desired default for write")).toHaveValue("allow"));
+    expect(screen.queryByText("Unsaved policy changes")).not.toBeInTheDocument();
+  });
 });

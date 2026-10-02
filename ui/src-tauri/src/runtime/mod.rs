@@ -1227,6 +1227,9 @@ fn machine_code(code: &harness_control_protocol::MachineErrorCode) -> &'static s
 mod m2_e2e;
 
 #[cfg(test)]
+mod m3_config_integration;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use harness_control_protocol::{

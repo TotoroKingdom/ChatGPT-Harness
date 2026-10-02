@@ -12,6 +12,9 @@ mod state;
 mod tools;
 mod workspace;
 
+#[cfg(test)]
+mod m3_integration;
+
 fn main() {
     if let Err(error) = server::run() {
         eprintln!("runtime server stopped: {error}");
