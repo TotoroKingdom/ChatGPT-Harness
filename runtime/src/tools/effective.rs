@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum ToolAvailability {
     Available,
+    AvailableWithApproval,
     UnavailableByPolicy,
     UnavailableByRuntime,
     UnavailableDisabled,
@@ -81,7 +82,7 @@ impl EffectiveToolCatalog {
                         effective.reason = "allowed by policy".into();
                     }
                     PolicyDecision::Ask => {
-                        effective.availability = ToolAvailability::UnavailableByPolicy;
+                        effective.availability = ToolAvailability::AvailableWithApproval;
                         effective.reason = "approval is required by policy".into();
                     }
                     PolicyDecision::Deny => {
@@ -167,12 +168,12 @@ mod tests {
     }
 
     #[test]
-    fn ask_is_not_directly_available() {
+    fn ask_is_exposed_with_approval() {
         let ts = catalog(vec![rule("ask", PolicyDecision::Ask)], true);
-        assert!(ts
-            .iter()
-            .all(|t| t.availability == ToolAvailability::UnavailableByPolicy
-                && t.decision == PolicyDecision::Ask));
+        assert!(ts.iter().all(
+            |t| t.availability == ToolAvailability::AvailableWithApproval
+                && t.decision == PolicyDecision::Ask
+        ));
     }
     #[test]
     fn policy_errors_fail_closed() {

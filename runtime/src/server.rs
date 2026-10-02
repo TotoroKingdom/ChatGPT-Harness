@@ -19,6 +19,7 @@ const NOT_INITIALIZED_ERROR: i32 = error_codes::HARNESS_MIN;
 const ALREADY_INITIALIZED_ERROR: i32 = -32001;
 const PROTOCOL_VERSION_MISMATCH_ERROR: i32 = -32002;
 const APPROVAL_NOT_FOUND_ERROR: i32 = -32003;
+const APPROVAL_ALREADY_RESOLVED_ERROR: i32 = -32004;
 const RUNTIME_NOT_READY_ERROR: i32 = error_codes::HARNESS_MAX;
 
 pub fn run() -> io::Result<()> {
@@ -364,26 +365,68 @@ fn handle_request<W: Write>(
             Ok(false)
         }
         "approvals.list" => {
-            let _: harness_control_protocol::ApprovalsListParams =
+            let params: harness_control_protocol::ApprovalsListParams =
                 match params_or_default(&request.params) {
                     Ok(value) => value,
                     Err(error) => return write_invalid_params(output, id, error),
                 };
-            write_result(output, id, ApprovalsListResult { items: Vec::new() })?;
+            let manager = core.approval_manager();
+            write_result(
+                output,
+                id,
+                ApprovalsListResult {
+                    items: manager.list(params.status),
+                },
+            )?;
             Ok(false)
         }
         "approvals.resolve" => {
-            let _: ApprovalsResolveParams = match params(&request.params) {
+            let params: ApprovalsResolveParams = match params(&request.params) {
                 Ok(value) => value,
                 Err(error) => return write_invalid_params(output, id, error),
             };
-            write_error(
-                output,
-                id,
-                APPROVAL_NOT_FOUND_ERROR,
-                MachineErrorCode::ApprovalNotFound,
-                "Approval actions are not implemented in the Runtime skeleton.",
-            )?;
+            let manager = core.approval_manager();
+            let grants = core.session_grants();
+            let decision = params.decision;
+            let result = manager.resolve_with(&params.request_id, decision, |approval, scope| {
+                if decision == harness_control_protocol::ApprovalDecision::AllowForSession {
+                    grants.insert_from_approved_scope(
+                        &approval.generation_id,
+                        &approval.request_id,
+                        &approval.tool,
+                        scope,
+                        chrono::Utc::now(),
+                    );
+                }
+            });
+            match result {
+                Ok(approval) => write_result(
+                    output,
+                    id,
+                    harness_control_protocol::ApprovalsResolveResult { approval },
+                )?,
+                Err(crate::approval::ApprovalManagerError::ApprovalNotFound) => write_error(
+                    output,
+                    id,
+                    APPROVAL_NOT_FOUND_ERROR,
+                    MachineErrorCode::ApprovalNotFound,
+                    "Approval request was not found.",
+                )?,
+                Err(crate::approval::ApprovalManagerError::ApprovalAlreadyResolved) => write_error(
+                    output,
+                    id,
+                    APPROVAL_ALREADY_RESOLVED_ERROR,
+                    MachineErrorCode::ApprovalAlreadyResolved,
+                    "Approval request has already reached a terminal state.",
+                )?,
+                Err(crate::approval::ApprovalManagerError::DuplicateRequest) => write_error(
+                    output,
+                    id,
+                    error_codes::INTERNAL_ERROR,
+                    MachineErrorCode::InternalError,
+                    "Approval request could not be resolved.",
+                )?,
+            }
             Ok(false)
         }
         "diagnostics.run" => {
@@ -1056,5 +1099,120 @@ mod tests {
             .parse()
             .expect("socket address");
         TcpListener::bind(address).expect("endpoint port released during EOF cleanup");
+    }
+
+    #[test]
+    fn approvals_control_methods_list_filter_resolve_and_reject_duplicate_actions() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(runtime_config(&workspace.root))
+            .expect("initialize core");
+        core.acknowledge().expect("acknowledge core");
+        let request_id = uuid::Uuid::new_v4();
+        core.approval_manager()
+            .register(crate::approval::ApprovalFacts {
+                request_id,
+                tool: "write".into(),
+                sanitized_arguments: [("path".into(), "notes.txt".into())].into_iter().collect(),
+                scope_summary: "notes.txt".into(),
+                fingerprint: "write|notes.txt|secret-is-internal-only".into(),
+                matched_rule_ids: vec!["review-writes".into()],
+                policy_reason: harness_control_protocol::PolicyReason::MatchedUserRules,
+                risk_level: harness_control_protocol::RiskLevel::Medium,
+            })
+            .expect("register pending approval");
+
+        let mut mcp_service = McpRuntimeService::new();
+        let mut subscribed = false;
+        let mut output = Vec::new();
+        let list_request = RpcRequest {
+            id: harness_control_protocol::RequestId::String("list".into()),
+            method: "approvals.list".into(),
+            params: Some(json!({ "status": "pending" })),
+        };
+        handle_request(
+            list_request,
+            &mut core,
+            &mut mcp_service,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("list approvals");
+        let list_message: RpcMessage = serde_json::from_slice(
+            output
+                .split(|byte| *byte == b'\n')
+                .find(|line| !line.is_empty())
+                .expect("list response"),
+        )
+        .expect("decode list response");
+        let RpcMessage::Response(list_response) = list_message else {
+            panic!("expected list response");
+        };
+        let list: ApprovalsListResult = serde_json::from_value(list_response.result).unwrap();
+        assert_eq!(list.items.len(), 1);
+        assert_eq!(list.items[0].scope_summary, "notes.txt");
+        assert!(!serde_json::to_string(&list)
+            .unwrap()
+            .contains("secret-is-internal-only"));
+
+        let resolve = RpcRequest {
+            id: harness_control_protocol::RequestId::String("resolve".into()),
+            method: "approvals.resolve".into(),
+            params: Some(json!({
+                "requestId": list.items[0].request_id,
+                "decision": "allow_for_session"
+            })),
+        };
+        handle_request(
+            resolve,
+            &mut core,
+            &mut mcp_service,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("resolve approval");
+        let resolved_message = String::from_utf8(output.clone())
+            .unwrap()
+            .lines()
+            .last()
+            .map(|line| serde_json::from_str::<RpcMessage>(line).unwrap())
+            .expect("resolved response");
+        let RpcMessage::Response(resolved_response) = resolved_message else {
+            panic!("expected resolved response");
+        };
+        let resolved: harness_control_protocol::ApprovalsResolveResult =
+            serde_json::from_value(resolved_response.result).unwrap();
+        assert_eq!(
+            resolved.approval.status,
+            harness_control_protocol::ApprovalStatus::Approved
+        );
+        assert_eq!(core.session_grants().len(), 1);
+
+        let duplicate = RpcRequest {
+            id: harness_control_protocol::RequestId::String("duplicate".into()),
+            method: "approvals.resolve".into(),
+            params: Some(json!({
+                "requestId": resolved.approval.request_id,
+                "decision": "deny"
+            })),
+        };
+        handle_request(
+            duplicate,
+            &mut core,
+            &mut mcp_service,
+            &mut subscribed,
+            &mut output,
+        )
+        .expect("duplicate response");
+        let duplicate_message: RpcMessage = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .last()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .expect("duplicate error response");
+        assert_eq!(
+            response_error(&duplicate_message).error.data.code,
+            MachineErrorCode::ApprovalAlreadyResolved
+        );
     }
 }

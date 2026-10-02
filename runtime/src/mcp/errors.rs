@@ -24,6 +24,9 @@ pub(crate) enum McpErrorCategory {
     ToolDisabled,
     PolicyDenied,
     ApprovalRequired,
+    ApprovalDenied,
+    ApprovalExpired,
+    ApprovalCancelled,
     ExecutionFailed,
 }
 
@@ -48,6 +51,9 @@ impl McpErrorCategory {
             Self::ToolDisabled => "TOOL_DISABLED",
             Self::PolicyDenied => "POLICY_DENIED",
             Self::ApprovalRequired => "APPROVAL_REQUIRED",
+            Self::ApprovalDenied => "APPROVAL_DENIED",
+            Self::ApprovalExpired => "APPROVAL_EXPIRED",
+            Self::ApprovalCancelled => "APPROVAL_CANCELLED",
             Self::ExecutionFailed => "EXECUTION_FAILED",
         }
     }
@@ -71,9 +77,10 @@ impl McpErrorCategory {
             Self::RuntimeNotReady => "Runtime is waiting for the initialized acknowledgement.",
             Self::ToolDisabled => "Tool is disabled by the saved Runtime configuration.",
             Self::PolicyDenied => "Tool request was blocked by policy.",
-            Self::ApprovalRequired => {
-                "Tool request requires approval; approval is not implemented."
-            }
+            Self::ApprovalRequired => "Tool request requires approval.",
+            Self::ApprovalDenied => "Tool request was denied by the human approver.",
+            Self::ApprovalExpired => "Tool approval expired before execution.",
+            Self::ApprovalCancelled => "Tool approval was cancelled by Runtime lifecycle.",
             Self::ExecutionFailed => "Tool execution failed.",
         }
     }
@@ -93,6 +100,9 @@ pub(crate) fn execution_error(error: &ExecutionError) -> CallToolResult {
         ExecutionError::InvalidArguments => error_result(McpErrorCategory::InvalidArguments),
         ExecutionError::PolicyDenied => error_result(McpErrorCategory::PolicyDenied),
         ExecutionError::ApprovalRequired => error_result(McpErrorCategory::ApprovalRequired),
+        ExecutionError::ApprovalDenied => error_result(McpErrorCategory::ApprovalDenied),
+        ExecutionError::ApprovalExpired => error_result(McpErrorCategory::ApprovalExpired),
+        ExecutionError::ApprovalCancelled => error_result(McpErrorCategory::ApprovalCancelled),
         ExecutionError::InvalidTransition(_) => error_result(McpErrorCategory::ExecutionFailed),
     }
 }

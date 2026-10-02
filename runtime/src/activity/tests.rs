@@ -21,6 +21,7 @@ fn event(id: u128) -> AuditEvent {
         policy_decision: None,
         matched_rule_ids: vec![],
         policy_reason: None,
+        approval_decision: None,
         outcome: AuditOutcome::InProgress,
         failure_category: None,
     }

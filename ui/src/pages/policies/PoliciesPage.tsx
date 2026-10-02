@@ -11,6 +11,7 @@ import type {
 } from "@protocol/v1";
 import { useEffect, useMemo, useState } from "react";
 import { useHarnessData } from "@/app/providers/HarnessDataProvider";
+import type { PolicyDraftHandoff } from "@/app/router/routes";
 import { Card, SectionHeading, StatusBadge } from "@/components/common/primitives";
 
 const decisions: PolicyDecision[] = ["allow", "ask", "deny"];
@@ -98,7 +99,7 @@ function legacyProjection(rule: PolicyRule): EffectivePolicyRule {
   };
 }
 
-export function PoliciesPage() {
+export function PoliciesPage({ initialDraft = null }: { initialDraft?: PolicyDraftHandoff | null }) {
   const data = useHarnessData();
   const [draft, setDraft] = useState<PolicyConfig>(() => policyConfig(data.config));
   const [dirty, setDirty] = useState(false);
@@ -111,6 +112,21 @@ export function PoliciesPage() {
   useEffect(() => {
     if (!dirty) setDraft(policyConfig(data.config));
   }, [data.config]);
+
+  useEffect(() => {
+    if (!initialDraft) return;
+    setEditor({
+      ...emptyEditor(),
+      tool: configurableTools.includes(initialDraft.tool as typeof configurableTools[number])
+        ? initialDraft.tool
+        : "read_file",
+      name: initialDraft.name,
+      reason: initialDraft.reason,
+    });
+    setEditingId(null);
+    setError("");
+    setMessage("Approval scope prepared as a policy draft. Review and save it explicitly.");
+  }, [initialDraft]);
 
   const effective = data.policies.status === "success" || data.policies.status === "empty"
     ? data.policies.data.effective
@@ -219,6 +235,7 @@ export function PoliciesPage() {
       {draft.userRules.length === 0 ? <p className="muted">No desired User Rules configured.</p> : <div className="policy-list">{draft.userRules.map((rule) => <DesiredRuleRow key={rule.id} rule={rule} disabled={saving} onEdit={() => { setEditor(ruleEditor(rule)); setEditingId(rule.id); setError(""); }} onToggle={() => void toggleRule(rule)} onDelete={() => void deleteRule(rule)} />)}</div>}
       <div className="policy-editor">
         <h3>{editingId ? "Edit User Rule" : "Create User Rule"}</h3>
+        {initialDraft && <div className="notice notice-warning" role="note"><strong>Approval handoff</strong><span>Current approval scope: <span className="mono">{initialDraft.scope}</span>. The persistent M3 tool rule below is broader than this exact scope; review it before saving.</span></div>}
         <div className="form-row">
           <label className="form-field grow"><span>Rule ID</span><input aria-label="User rule ID" value={editor.id} readOnly={Boolean(editingId)} onChange={(event) => setEditor((current) => ({ ...current, id: event.target.value }))} placeholder="e.g. review-writes" /></label>
           <label className="form-field grow"><span>Name</span><input aria-label="User rule name" value={editor.name} onChange={(event) => setEditor((current) => ({ ...current, name: event.target.value }))} placeholder="Review writes" /></label>

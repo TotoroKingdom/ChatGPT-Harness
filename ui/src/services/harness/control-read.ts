@@ -4,7 +4,7 @@ import type { PolicyDecision, PolicyReason, RuntimeReadiness } from "@protocol/v
 
 export type ToolDiagnostic = {
   name: string;
-  availability: "available" | "unavailable_by_policy" | "unavailable_by_runtime" | "disabled";
+  availability: "available" | "available_with_approval" | "unavailable_by_policy" | "unavailable_by_runtime" | "disabled";
   decision: PolicyDecision;
 };
 export type RuntimeDiagnostics = {
@@ -77,7 +77,7 @@ export function parseTools(value: unknown): ToolDiagnostic[] {
     const tool = record(item);
     return {
       name: toolName(tool.name),
-      availability: enumeration(tool.availability, ["available", "unavailable_by_policy", "unavailable_by_runtime", "disabled"]),
+      availability: enumeration(tool.availability, ["available", "available_with_approval", "unavailable_by_policy", "unavailable_by_runtime", "disabled"]),
       decision: enumeration(tool.decision, decisions),
     };
   });

@@ -3,6 +3,7 @@ import type {
   ActivityEvent,
   ActivityListResult,
   AppConfig,
+  ApprovalsListResult,
   DiagnosticRun,
   PoliciesListResult,
   RuntimeState,
@@ -31,6 +32,7 @@ type ResourceState = {
   tools: AsyncState<ToolsListResult>;
   policies: AsyncState<PoliciesListResult>;
   activity: AsyncState<ActivityListResult>;
+  approvals: AsyncState<ApprovalsListResult>;
 };
 export type SaveResult = { ok: boolean; error?: HarnessClientError };
 
@@ -60,6 +62,7 @@ type ContextValue = ResourceState & {
   restartHarness: () => Promise<SaveResult>;
   appendActivity: (event: ActivityEvent) => void;
   subscribeToActivity: (listener: ActivityEventListener) => Promise<Unsubscribe>;
+  refreshApprovals: () => Promise<void>;
 };
 
 const initial: ResourceState = {
@@ -67,6 +70,7 @@ const initial: ResourceState = {
   tools: { status: "idle" },
   policies: { status: "idle" },
   activity: { status: "idle" },
+  approvals: { status: "idle" },
 };
 const Context = createContext<ContextValue | null>(null);
 
@@ -278,6 +282,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       tools: { status: "loading" },
       policies: { status: "loading" },
       activity: { status: "loading" },
+      approvals: { status: "loading" },
     });
     void Promise.all([
       load(() => client.harnessStatus(), () => false),
@@ -285,7 +290,8 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       load(() => client.toolsList(), (data) => data.items.length === 0),
       load(() => client.policiesList(), (data) => data.items.length === 0),
       load(() => client.activityList(), (data) => data.items.length === 0),
-    ]).then(([harnessResource, runtime, tools, policies, activity]) => {
+      load(() => client.approvalsList(), (data) => data.items.length === 0),
+    ]).then(([harnessResource, runtime, tools, policies, activity, approvals]) => {
       if (!mounted) return;
       if (harnessResource.status === "success" || harnessResource.status === "empty") {
         setHarness(harnessResource.data);
@@ -293,7 +299,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       }
       client.setComponentStates(runtime.components);
       setComponents(runtime.components);
-      setResources({ runtime: runtime.resource, tools, policies, activity });
+      setResources({ runtime: runtime.resource, tools, policies, activity, approvals });
       setActiveRevision(runtime.activeRevision);
       if (activity.status === "success" || activity.status === "empty") {
         activityCursorRef.current = activity.data.latestSequence;
@@ -352,17 +358,23 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   }, [client]);
 
   const refreshRuntimeResources = useCallback(async () => {
-    const [runtime, tools, policies, activity] = await Promise.all([
+    const [runtime, tools, policies, activity, approvals] = await Promise.all([
       load(() => client.runtimeStatus(), () => false),
       load(() => client.toolsList(), (data) => data.items.length === 0),
       load(() => client.policiesList(), (data) => data.items.length === 0),
       load(() => client.activityList(), (data) => data.items.length === 0),
+      load(() => client.approvalsList(), (data) => data.items.length === 0),
     ]);
 
     if (activity.status === "success" || activity.status === "empty") {
       activityCursorRef.current = activity.data.latestSequence;
     }
-    setResources({ runtime, tools, policies, activity });
+    setResources({ runtime, tools, policies, activity, approvals });
+  }, [client]);
+
+  const refreshApprovals = useCallback(async () => {
+    const approvals = await load(() => client.approvalsList(), (data) => data.items.length === 0);
+    setResources((current) => ({ ...current, approvals }));
   }, [client]);
 
   const startHarness = useCallback(async (): Promise<SaveResult> => {
@@ -486,6 +498,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       restartHarness,
       appendActivity,
       subscribeToActivity,
+      refreshApprovals,
     }),
     [
       activeRevision,
@@ -503,6 +516,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       refreshConfig,
       resetConfig,
       resources,
+      refreshApprovals,
       restartHarness,
       runDiagnostics,
       saveConfig,

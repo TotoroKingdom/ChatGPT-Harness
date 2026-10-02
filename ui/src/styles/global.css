@@ -142,3 +142,14 @@ h1, h2, p { margin: 0; } h1 { font-size: 27px; letter-spacing: -.04em; margin-to
 .policy-effective-status { display: flex; align-items: center; gap: 10px; margin: 18px 0; }
 .form-field select { border: 1px solid var(--border); background: rgba(0,0,0,.16); border-radius: 6px; padding: 10px; color: var(--text); font-size: 12px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.approval-card { display: grid; gap: 18px; }
+.approval-card-header, .approval-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.approval-title { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 18px; }
+.approval-facts, .approval-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
+.approval-facts span, .approval-detail-grid > div { display: grid; gap: 5px; min-width: 0; }
+.approval-facts small, .approval-detail-grid small, .approval-facts time { color: var(--dim); font-size: 11px; }
+.approval-detail-grid dl { display: grid; gap: 5px; margin: 5px 0 0; }
+.approval-detail-grid dl div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
+.approval-detail-grid dt { color: var(--dim); }
+.approval-detail-grid dd, .approval-detail-grid p { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .approval-facts, .approval-detail-grid { grid-template-columns: 1fr; } }

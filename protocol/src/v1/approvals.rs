@@ -12,10 +12,11 @@ pub enum ApprovalStatus {
     Expired,
     Cancelled,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalDecision {
     AllowOnce,
+    AllowForSession,
     Deny,
 }
 pub type SanitizedArguments = BTreeMap<String, String>;
@@ -24,8 +25,14 @@ pub type SanitizedArguments = BTreeMap<String, String>;
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalRequest {
     pub request_id: String,
+    pub runtime_id: String,
+    pub generation_id: String,
     pub tool: String,
     pub sanitized_arguments: SanitizedArguments,
+    pub scope_summary: String,
+    pub matched_rule_ids: Vec<String>,
+    pub policy_reason: super::policies::PolicyReason,
+    pub risk_level: super::tools::RiskLevel,
     pub created_at: String,
     pub expires_at: String,
     pub status: ApprovalStatus,

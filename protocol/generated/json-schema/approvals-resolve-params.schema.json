@@ -4,6 +4,7 @@
     "ApprovalDecision": {
       "enum": [
         "allow_once",
+        "allow_for_session",
         "deny"
       ],
       "type": "string"

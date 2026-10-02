@@ -69,3 +69,59 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
         Err(error) => execution_error(&error),
     }
 }
+
+pub(crate) async fn execute_async(
+    context: &McpExecutionContext,
+    arguments: Value,
+) -> CallToolResult {
+    let report = context
+        .execute_async(|| {
+            let arguments = serde_json::from_value::<GlobArguments>(arguments)
+                .map_err(|_| ExecutionError::InvalidArguments)?;
+            let mut request = GlobRequest::new(arguments.pattern);
+            if let Some(base_path) = arguments.base_path {
+                request = request.with_base_path(PathBuf::from(base_path));
+            }
+            Ok(request)
+        })
+        .await;
+    match report.result {
+        Ok(output) => {
+            let matches = output
+                .matches
+                .into_iter()
+                .map(|item| {
+                    json!({
+                        "path": item.path,
+                        "kind": match item.kind {
+                            GlobMatchKind::File => "file",
+                            GlobMatchKind::Directory => "directory",
+                        },
+                    })
+                })
+                .collect::<Vec<_>>();
+            let diagnostics = output
+                .diagnostics
+                .into_iter()
+                .map(|item| {
+                    json!({
+                        "path": item.path,
+                        "code": format!("{:?}", item.code),
+                        "message": item.message,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let mut result = CallToolResult::structured(json!({
+                "matches": matches,
+                "truncated": output.truncated,
+                "diagnostics": diagnostics,
+                "diagnosticsTruncated": output.diagnostics_truncated,
+            }));
+            result
+                .content
+                .push(ContentBlock::text("Listed workspace paths."));
+            result
+        }
+        Err(error) => execution_error(&error),
+    }
+}

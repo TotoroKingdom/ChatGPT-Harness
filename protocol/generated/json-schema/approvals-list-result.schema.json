@@ -4,6 +4,7 @@
     "ApprovalDecision": {
       "enum": [
         "allow_once",
+        "allow_for_session",
         "deny"
       ],
       "type": "string"
@@ -26,6 +27,18 @@
         "expiresAt": {
           "type": "string"
         },
+        "generationId": {
+          "type": "string"
+        },
+        "matchedRuleIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "policyReason": {
+          "$ref": "#/$defs/PolicyReason"
+        },
         "requestId": {
           "type": "string"
         },
@@ -35,11 +48,20 @@
             "null"
           ]
         },
+        "riskLevel": {
+          "$ref": "#/$defs/RiskLevel"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
         "sanitizedArguments": {
           "additionalProperties": {
             "type": "string"
           },
           "type": "object"
+        },
+        "scopeSummary": {
+          "type": "string"
         },
         "status": {
           "$ref": "#/$defs/ApprovalStatus"
@@ -50,8 +72,14 @@
       },
       "required": [
         "requestId",
+        "runtimeId",
+        "generationId",
         "tool",
         "sanitizedArguments",
+        "scopeSummary",
+        "matchedRuleIds",
+        "policyReason",
+        "riskLevel",
         "createdAt",
         "expiresAt",
         "status"
@@ -65,6 +93,27 @@
         "denied",
         "expired",
         "cancelled"
+      ],
+      "type": "string"
+    },
+    "PolicyReason": {
+      "description": "Reasons are typed because policy evidence is consumed by Runtime, control\nreads, activity, and the UI. They are not display-only log strings.",
+      "enum": [
+        "system_guardrail",
+        "matched_user_rules",
+        "tool_default",
+        "invalid_policy_snapshot",
+        "invalid_context",
+        "unsupported_capability",
+        "tool_disabled"
+      ],
+      "type": "string"
+    },
+    "RiskLevel": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
       ],
       "type": "string"
     }

@@ -73,6 +73,9 @@ fn every_state_pair_is_explicitly_allowed_or_rejected_without_mutation() {
         (PolicyEvaluating, AwaitingApproval),
         (PolicyEvaluating, Executing),
         (PolicyEvaluating, Failed),
+        (AwaitingApproval, Denied),
+        (AwaitingApproval, Executing),
+        (AwaitingApproval, Failed),
         (Executing, Completed),
         (Executing, Failed),
     ];

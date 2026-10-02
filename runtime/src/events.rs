@@ -37,6 +37,17 @@ impl ActivityEventInput {
             InternalAuditEventType::ExecutionFailed => ActivityEventType::ExecutionFailed,
             InternalAuditEventType::RequestDenied => ActivityEventType::ExecutionFailed,
             InternalAuditEventType::ApprovalRequired => ActivityEventType::ApprovalRequested,
+            InternalAuditEventType::ApprovalResolved => {
+                if event.approval_decision == Some(harness_control_protocol::ApprovalDecision::Deny)
+                {
+                    ActivityEventType::ApprovalDenied
+                } else {
+                    ActivityEventType::ApprovalResolved
+                }
+            }
+            InternalAuditEventType::ApprovalExpired => ActivityEventType::ApprovalExpired,
+            InternalAuditEventType::ApprovalCancelled => ActivityEventType::ApprovalCancelled,
+            InternalAuditEventType::SessionGrantMatched => ActivityEventType::ApprovalResolved,
         };
 
         let mut metadata = vec![("tool".into(), event.tool_name.clone())];
@@ -54,6 +65,19 @@ impl ActivityEventInput {
         }
         if let Some(reason) = event.policy_reason {
             metadata.push(("policyReason".into(), policy_reason_name(reason).into()));
+        }
+        if let Some(decision) = event.approval_decision {
+            metadata.push((
+                "approvalDecision".into(),
+                match decision {
+                    harness_control_protocol::ApprovalDecision::AllowOnce => "allow_once",
+                    harness_control_protocol::ApprovalDecision::AllowForSession => {
+                        "allow_for_session"
+                    }
+                    harness_control_protocol::ApprovalDecision::Deny => "deny",
+                }
+                .into(),
+            ));
         }
         if let Some(category) = event.failure_category {
             metadata.push((
@@ -117,10 +141,13 @@ fn activity_summary(event_type: ActivityEventType) -> &'static str {
         ActivityEventType::ExecutionCompleted => "Tool execution completed.",
         ActivityEventType::ExecutionFailed => "Tool execution failed.",
         ActivityEventType::ApprovalRequested => "Tool approval requested.",
+        ActivityEventType::ApprovalResolved => "Tool approval resolved.",
+        ActivityEventType::ApprovalDenied => "Tool approval denied.",
+        ActivityEventType::ApprovalExpired => "Tool approval expired.",
+        ActivityEventType::ApprovalCancelled => "Tool approval cancelled.",
         ActivityEventType::RuntimeStarted
         | ActivityEventType::RuntimeStopped
         | ActivityEventType::ValidationFailed
-        | ActivityEventType::ApprovalResolved
         | ActivityEventType::ExecutionTimedOut
         | ActivityEventType::ExecutionCancelled => "Runtime activity observed.",
     }
@@ -227,6 +254,7 @@ mod tests {
                 "M3_SECRET_CONTENT_SENTINEL".into(),
             ],
             policy_reason: Some(PolicyReason::MatchedUserRules),
+            approval_decision: None,
             outcome: AuditOutcome::InProgress,
             failure_category: None,
         })

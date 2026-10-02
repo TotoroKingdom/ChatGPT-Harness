@@ -50,3 +50,39 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
         Err(error) => execution_error(&error),
     }
 }
+
+pub(crate) async fn execute_async(
+    context: &McpExecutionContext,
+    arguments: Value,
+) -> CallToolResult {
+    let report = context
+        .execute_async(|| {
+            let arguments = serde_json::from_value::<ReadFileArguments>(arguments)
+                .map_err(|_| ExecutionError::InvalidArguments)?;
+            Ok(ReadFileRequest {
+                path: PathBuf::from(arguments.path),
+                offset: arguments.offset.unwrap_or(0),
+                limit: arguments.limit,
+            })
+        })
+        .await;
+    match report.result {
+        Ok(output) => {
+            let structured = json!({
+                "normalizedPath": output.normalized_path.to_string_lossy(),
+                "content": output.content,
+                "offset": output.offset,
+                "linesRead": output.lines_read,
+                "bytesRead": output.bytes_read,
+                "truncated": output.truncated,
+                "nextOffset": output.next_offset,
+            });
+            let mut result = CallToolResult::structured(structured);
+            result
+                .content
+                .push(ContentBlock::text("Read workspace file."));
+            result
+        }
+        Err(error) => execution_error(&error),
+    }
+}

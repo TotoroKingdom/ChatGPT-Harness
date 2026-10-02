@@ -43,3 +43,34 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
         Err(error) => execution_error(&error),
     }
 }
+
+pub(crate) async fn execute_async(
+    context: &McpExecutionContext,
+    arguments: Value,
+) -> CallToolResult {
+    let report = context
+        .execute_async(|| {
+            let arguments = serde_json::from_value::<WriteArguments>(arguments)
+                .map_err(|_| ExecutionError::InvalidArguments)?;
+            Ok(WriteRequest {
+                path: PathBuf::from(arguments.path),
+                content: arguments.content,
+            })
+        })
+        .await;
+    match report.result {
+        Ok(output) => {
+            let mut result = CallToolResult::structured(json!({
+                "normalizedPath": output.normalized_path.to_string_lossy().replace('\\', "/"),
+                "bytesWritten": output.bytes_written,
+                "created": output.created,
+                "overwritten": output.overwritten,
+            }));
+            result
+                .content
+                .push(ContentBlock::text("Wrote workspace file."));
+            result
+        }
+        Err(error) => execution_error(&error),
+    }
+}

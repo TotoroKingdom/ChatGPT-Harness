@@ -19,6 +19,13 @@ impl McpExecutionContext {
     ) -> ExecutionReport<E::Output> {
         self.pipeline.execute(prepare)
     }
+
+    pub(crate) async fn execute_async<E: ToolExecutor + Send>(
+        &self,
+        prepare: impl FnOnce() -> Result<E, ExecutionError>,
+    ) -> ExecutionReport<E::Output> {
+        self.pipeline.execute_async(prepare).await
+    }
     pub(crate) fn effective_tools(&self) -> Vec<EffectiveTool> {
         self.pipeline.effective_tools()
     }

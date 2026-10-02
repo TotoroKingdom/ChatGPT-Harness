@@ -144,6 +144,7 @@ pub struct ToolDiagnostic {
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticToolAvailability {
     Available,
+    AvailableWithApproval,
     UnavailableByPolicy,
     UnavailableByRuntime,
     Disabled,

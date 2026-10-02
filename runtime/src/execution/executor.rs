@@ -5,11 +5,21 @@ use crate::tools::{
     WriteOutput, WriteRequest,
 };
 use crate::workspace::{WorkspaceError, WorkspaceGuard};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 pub(crate) enum WorkspaceTarget<'a> {
     ExistingPath(&'a Path),
     WriteTarget(&'a Path),
+}
+
+/// Runtime-generated facts used to build a sanitized approval projection and
+/// an exact internal request binding. The fingerprint is never sent to the
+/// control plane or written to activity evidence.
+pub(crate) struct ToolApprovalFacts {
+    pub(crate) sanitized_arguments: BTreeMap<String, String>,
+    pub(crate) scope_summary: String,
+    pub(crate) fingerprint: String,
 }
 
 /// Each adapter provides typed validation and execution, never authorization.
@@ -22,6 +32,9 @@ pub(crate) trait ToolExecutor {
 
     fn validate(&self) -> Result<(), ExecutionError>;
     fn workspace_target(&self) -> WorkspaceTarget<'_>;
+    fn approval_facts(&self, _guard: &WorkspaceGuard) -> Result<ToolApprovalFacts, ExecutionError> {
+        Err(ExecutionError::ApprovalRequired)
+    }
     fn workspace_error(error: WorkspaceError) -> ExecutionError;
     fn execute(
         &self,
@@ -40,6 +53,29 @@ impl ToolExecutor for ReadFileRequest {
     }
     fn workspace_target(&self) -> WorkspaceTarget<'_> {
         WorkspaceTarget::ExistingPath(&self.path)
+    }
+    fn approval_facts(&self, guard: &WorkspaceGuard) -> Result<ToolApprovalFacts, ExecutionError> {
+        let approved = guard.approve(&self.path).map_err(|error| {
+            ExecutionError::ReadFile(crate::tools::ReadFileError::Workspace(error))
+        })?;
+        let scope = logical_path(guard.logical_relative_path(&self.path, &approved));
+        let mut sanitized_arguments = BTreeMap::new();
+        sanitized_arguments.insert("path".into(), scope.clone());
+        sanitized_arguments.insert("offset".into(), self.offset.to_string());
+        if let Some(limit) = self.limit {
+            sanitized_arguments.insert("limit".into(), limit.to_string());
+        }
+        Ok(ToolApprovalFacts {
+            sanitized_arguments,
+            scope_summary: scope.clone(),
+            fingerprint: serde_json::json!({
+                "tool": Self::TOOL_NAME,
+                "scope": scope,
+                "offset": self.offset,
+                "limit": self.limit,
+            })
+            .to_string(),
+        })
     }
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::ReadFile(crate::tools::ReadFileError::Workspace(error))
@@ -63,6 +99,38 @@ impl ToolExecutor for GlobRequest {
     }
     fn workspace_target(&self) -> WorkspaceTarget<'_> {
         WorkspaceTarget::ExistingPath(self.base_path.as_deref().unwrap_or_else(|| Path::new(".")))
+    }
+    fn approval_facts(&self, guard: &WorkspaceGuard) -> Result<ToolApprovalFacts, ExecutionError> {
+        let requested_base = self.base_path.as_deref().unwrap_or_else(|| Path::new("."));
+        let approved = guard
+            .approve(requested_base)
+            .map_err(|error| ExecutionError::Glob(crate::tools::GlobError::Workspace(error)))?;
+        let base = logical_path(guard.logical_relative_path(requested_base, &approved));
+        let scope = if base == "." {
+            format!("pattern:{}", self.pattern)
+        } else {
+            format!("base:{};pattern:{}", base, self.pattern)
+        };
+        let mut sanitized_arguments = BTreeMap::new();
+        sanitized_arguments.insert("pattern".into(), self.pattern.clone());
+        sanitized_arguments.insert(
+            "basePath".into(),
+            if base == "." {
+                ".".into()
+            } else {
+                base.clone()
+            },
+        );
+        Ok(ToolApprovalFacts {
+            sanitized_arguments,
+            scope_summary: scope.clone(),
+            fingerprint: serde_json::json!({
+                "tool": Self::TOOL_NAME,
+                "basePath": base,
+                "pattern": self.pattern,
+            })
+            .to_string(),
+        })
     }
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::Glob(crate::tools::GlobError::Workspace(error))
@@ -92,6 +160,25 @@ impl ToolExecutor for WriteRequest {
 
     fn workspace_target(&self) -> WorkspaceTarget<'_> {
         WorkspaceTarget::WriteTarget(&self.path)
+    }
+    fn approval_facts(&self, guard: &WorkspaceGuard) -> Result<ToolApprovalFacts, ExecutionError> {
+        let approved = guard
+            .approve_write_target(&self.path)
+            .map_err(|error| ExecutionError::Write(WriteError::Workspace(error)))?;
+        let scope = logical_path(guard.logical_relative_write_path(&self.path, &approved));
+        let mut sanitized_arguments = BTreeMap::new();
+        sanitized_arguments.insert("path".into(), scope.clone());
+        sanitized_arguments.insert("content".into(), "<redacted content>".into());
+        Ok(ToolApprovalFacts {
+            sanitized_arguments,
+            scope_summary: scope.clone(),
+            fingerprint: serde_json::json!({
+                "tool": Self::TOOL_NAME,
+                "scope": scope,
+                "content": self.content,
+            })
+            .to_string(),
+        })
     }
 
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
@@ -129,6 +216,27 @@ impl ToolExecutor for EditRequest {
     fn workspace_target(&self) -> WorkspaceTarget<'_> {
         WorkspaceTarget::ExistingPath(&self.path)
     }
+    fn approval_facts(&self, guard: &WorkspaceGuard) -> Result<ToolApprovalFacts, ExecutionError> {
+        let approved = guard
+            .approve(&self.path)
+            .map_err(|error| ExecutionError::Edit(EditError::Workspace(error)))?;
+        let scope = logical_path(guard.logical_relative_path(&self.path, &approved));
+        let mut sanitized_arguments = BTreeMap::new();
+        sanitized_arguments.insert("path".into(), scope.clone());
+        sanitized_arguments.insert("oldText".into(), "<redacted text>".into());
+        sanitized_arguments.insert("newText".into(), "<redacted text>".into());
+        Ok(ToolApprovalFacts {
+            sanitized_arguments,
+            scope_summary: scope.clone(),
+            fingerprint: serde_json::json!({
+                "tool": Self::TOOL_NAME,
+                "scope": scope,
+                "oldText": self.old_text,
+                "newText": self.new_text,
+            })
+            .to_string(),
+        })
+    }
 
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::Edit(EditError::Workspace(error))
@@ -141,5 +249,14 @@ impl ToolExecutor for EditRequest {
         _max_read_bytes: u32,
     ) -> Result<Self::Output, ExecutionError> {
         execute_edit(permit, guard, self).map_err(ExecutionError::Edit)
+    }
+}
+
+fn logical_path(path: std::path::PathBuf) -> String {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if value.is_empty() {
+        ".".into()
+    } else {
+        value
     }
 }

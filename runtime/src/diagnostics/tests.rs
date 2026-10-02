@@ -208,7 +208,7 @@ fn tool_statuses_are_exact_projections_of_the_existing_effective_catalog() {
             ToolRegistry::normal_mode(),
             policy(PolicyDecision::Ask),
             true,
-            DiagnosticToolAvailability::UnavailableByPolicy,
+            DiagnosticToolAvailability::AvailableWithApproval,
         ),
         (
             ToolRegistry::normal_mode(),
@@ -242,6 +242,10 @@ fn tool_statuses_are_exact_projections_of_the_existing_effective_catalog() {
     }
     for (state, serialized) in [
         (DiagnosticToolAvailability::Available, "available"),
+        (
+            DiagnosticToolAvailability::AvailableWithApproval,
+            "available_with_approval",
+        ),
         (
             DiagnosticToolAvailability::UnavailableByPolicy,
             "unavailable_by_policy",

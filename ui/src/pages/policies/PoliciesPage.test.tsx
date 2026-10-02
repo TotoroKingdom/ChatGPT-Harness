@@ -110,4 +110,15 @@ describe("M3 PoliciesPage", () => {
     await waitFor(() => expect(screen.getByLabelText("Desired default for write")).toHaveValue("allow"));
     expect(screen.queryByText("Unsaved policy changes")).not.toBeInTheDocument();
   });
+
+  it("opens an approval handoff as an unsaved broader tool-level draft", () => {
+    setup();
+    cleanup();
+    render(<PoliciesPage initialDraft={{ tool: "write", scope: "notes.txt", name: "Review write approvals", reason: "Review requests for write before allowing execution." }} />);
+    expect(screen.getByText("Approval handoff")).toBeInTheDocument();
+    expect(screen.getByText(/persistent M3 tool rule below is broader/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("User rule tool matcher")).toHaveValue("write");
+    expect(screen.getByLabelText("User rule name")).toHaveValue("Review write approvals");
+    expect(state.context.saveConfig).not.toHaveBeenCalled();
+  });
 });

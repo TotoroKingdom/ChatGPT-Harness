@@ -6,12 +6,13 @@ import { OverviewPage } from "./pages/overview/OverviewPage";
 import { ToolsPage } from "./pages/tools/ToolsPage";
 import { PoliciesPage } from "./pages/policies/PoliciesPage";
 import { ActivityPage } from "./pages/activity/ActivityPage";
+import { ApprovalsPage } from "./pages/approvals/ApprovalsPage";
 import { SettingsPage, FirstRunWizard } from "./pages/settings/SettingsPage";
 import "./styles/global.css";
 
 function RoutedContent() {
   const data = useHarnessData();
-  const { page, navigate } = useAppRouter();
+  const { page, navigate, policyDraft } = useAppRouter();
   const [setupComplete, setSetupComplete] = useState(false);
   const [setupActive, setSetupActive] = useState(false);
   const configBlocked = data.configError?.code === "CONFIG_INVALID";
@@ -27,7 +28,7 @@ function RoutedContent() {
       void data.refreshConfig();
     }} />;
   }
-  const content = page === "overview" ? <OverviewPage /> : page === "tools" ? <ToolsPage /> : page === "policies" ? <PoliciesPage /> : page === "activity" ? <ActivityPage /> : <SettingsPage />;
+  const content = page === "overview" ? <OverviewPage /> : page === "tools" ? <ToolsPage /> : page === "policies" ? <PoliciesPage initialDraft={policyDraft} /> : page === "activity" ? <ActivityPage /> : page === "approvals" ? <ApprovalsPage onNavigate={navigate} /> : <SettingsPage />;
   return <AppShell page={page} onNavigate={navigate}>{content}</AppShell>;
 }
 

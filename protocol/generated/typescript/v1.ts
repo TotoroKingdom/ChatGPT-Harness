@@ -63,7 +63,7 @@ export type EffectivePolicyTool = { tool: string, decision: PolicyDecision, matc
 export type PolicyEffectiveSnapshot = { valid: boolean, status: PolicySnapshotStatus, statusReason?: PolicyReason, systemRules: Array<EffectivePolicyRule>, userRules: Array<EffectivePolicyRule>, toolDefaults: ToolPolicyDefaults, perTool: Array<EffectivePolicyTool>, };
 export type PoliciesEffectiveResult = { snapshot: PolicyEffectiveSnapshot, };
 export type PoliciesListResult = { items: Array<PolicyRule>, effective?: PolicyEffectiveSnapshot, };
-export type ActivityEventType = "runtime_started" | "runtime_stopped" | "tool_requested" | "validation_failed" | "workspace_violation" | "policy_evaluated" | "approval_requested" | "approval_resolved" | "execution_started" | "execution_completed" | "execution_failed" | "execution_timed_out" | "execution_cancelled";
+export type ActivityEventType = "runtime_started" | "runtime_stopped" | "tool_requested" | "validation_failed" | "workspace_violation" | "policy_evaluated" | "approval_requested" | "approval_resolved" | "approval_denied" | "approval_expired" | "approval_cancelled" | "execution_started" | "execution_completed" | "execution_failed" | "execution_timed_out" | "execution_cancelled";
 export type ActivityEvent = { eventId: string, 
 /**
  * Runtime-local monotonically increasing sequence number.
@@ -78,8 +78,8 @@ export type ActivityListResult = { items: Array<ActivityEvent>, latestSequence: 
 export type ActivitySubscribeParams = { afterSequence?: string, };
 export type ActivitySubscribeResult = { latestSequence: string, };
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
-export type ApprovalDecision = "allow_once" | "deny";
-export type ApprovalRequest = { requestId: string, tool: string, sanitizedArguments: { [key in string]?: string }, createdAt: string, expiresAt: string, status: ApprovalStatus, resolvedAt?: string, decision?: ApprovalDecision, };
+export type ApprovalDecision = "allow_once" | "allow_for_session" | "deny";
+export type ApprovalRequest = { requestId: string, runtimeId: string, generationId: string, tool: string, sanitizedArguments: { [key in string]?: string }, scopeSummary: string, matchedRuleIds: Array<string>, policyReason: PolicyReason, riskLevel: RiskLevel, createdAt: string, expiresAt: string, status: ApprovalStatus, resolvedAt?: string, decision?: ApprovalDecision, };
 export type ApprovalsListParams = { status?: ApprovalStatus, };
 export type ApprovalsListResult = { items: Array<ApprovalRequest>, };
 export type ApprovalsResolveParams = { requestId: string, decision: ApprovalDecision, };

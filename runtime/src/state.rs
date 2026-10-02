@@ -1,8 +1,10 @@
 use crate::activity::{ActivityEntry, ActivityStore};
+use crate::approval::ApprovalManager;
 use crate::events::{ActivityEventInput, EventBus};
 use crate::execution::{ExecutionError, ExecutionPipeline, SecurityContext};
 use crate::mcp::{McpContextError, McpExecutionContext, McpService};
 use crate::policy::PolicyEngine;
+use crate::session_grant::SessionGrantStore;
 use crate::tools::{
     EditOutput, EditRequest, EffectiveTool, EffectiveToolCatalog, GlobOutput, GlobRequest,
     ReadFileOutput, ReadFileRequest, ToolRegistry, WriteOutput, WriteRequest,
@@ -38,19 +40,22 @@ pub struct RuntimeCore {
     tool_registry: Arc<ToolRegistry>,
     policy_engine: PolicyEngine,
     execution_pipeline: Option<Arc<ExecutionPipeline>>,
+    approval_manager: Arc<ApprovalManager>,
+    session_grants: Arc<SessionGrantStore>,
     activity: Arc<ActivityStore>,
     pub last_error: Option<RuntimeErrorSummary>,
 }
 
 impl RuntimeCore {
     pub fn new() -> Self {
+        let runtime_id = uuid::Uuid::new_v4().to_string();
         let tool_registry = Arc::new(ToolRegistry::normal_mode());
         let policy_engine = PolicyEngine::compile(
             &harness_control_protocol::PolicyConfig::default(),
             &tool_registry,
         );
         Self {
-            runtime_id: uuid::Uuid::new_v4().to_string(),
+            runtime_id: runtime_id.clone(),
             started_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             phase: Phase::WaitingInitialize,
             config: None,
@@ -62,6 +67,8 @@ impl RuntimeCore {
             tool_registry,
             policy_engine,
             execution_pipeline: None,
+            approval_manager: ApprovalManager::new(runtime_id.clone()),
+            session_grants: Arc::new(SessionGrantStore::new(runtime_id)),
             last_error: None,
         }
     }
@@ -78,6 +85,8 @@ impl RuntimeCore {
         let audit_sink: Arc<dyn crate::audit::AuditSink> = activity.clone();
         let events = EventBus::from_limits(&config.runtime_limits);
         let (activity_event_sender, activity_event_receiver) = mpsc::channel();
+        let approval_manager = ApprovalManager::new(self.runtime_id.clone());
+        let session_grants = Arc::new(SessionGrantStore::new(self.runtime_id.clone()));
 
         let pipeline = ExecutionPipeline::new(
             Arc::clone(&workspace_guard),
@@ -90,11 +99,14 @@ impl RuntimeCore {
             config.runtime_limits.max_read_bytes,
             Arc::clone(&self.mcp_readiness),
         )
+        .with_approval_state(Arc::clone(&approval_manager), Arc::clone(&session_grants))
         .with_audit_sink(audit_sink);
         let pipeline = pipeline.with_activity_event_sender(activity_event_sender);
         self.execution_pipeline = Some(Arc::new(pipeline));
         self.tool_registry = tool_registry;
         self.policy_engine = policy_engine;
+        self.approval_manager = approval_manager;
+        self.session_grants = session_grants;
         self.activity = activity;
         self.events = Some(events);
         self.activity_event_receiver = Some(activity_event_receiver);
@@ -110,6 +122,8 @@ impl RuntimeCore {
     /// start. Process identity is intentionally retained.
     pub(crate) fn rollback_initialize(&mut self) {
         self.mcp_readiness.store(false, Ordering::Release);
+        self.approval_manager.cancel_all();
+        self.session_grants.clear();
         self.phase = Phase::WaitingInitialize;
         self.config = None;
         self.events = None;
@@ -126,6 +140,8 @@ impl RuntimeCore {
             Arc::clone(&tool_registry),
         ));
         self.tool_registry = tool_registry;
+        self.approval_manager = ApprovalManager::new(self.runtime_id.clone());
+        self.session_grants = Arc::new(SessionGrantStore::new(self.runtime_id.clone()));
         self.last_error = None;
     }
 
@@ -219,6 +235,14 @@ impl RuntimeCore {
         self.mcp_context().map(McpService::new)
     }
 
+    pub(crate) fn approval_manager(&self) -> Arc<ApprovalManager> {
+        Arc::clone(&self.approval_manager)
+    }
+
+    pub(crate) fn session_grants(&self) -> Arc<SessionGrantStore> {
+        Arc::clone(&self.session_grants)
+    }
+
     #[allow(dead_code)]
     /// Typed internal calls use the same initialized enforcement snapshot as MCP.
     pub(crate) fn read_file(
@@ -247,6 +271,8 @@ impl RuntimeCore {
 
     pub fn stop(&mut self) -> Option<ActivityEvent> {
         self.mcp_readiness.store(false, Ordering::Release);
+        self.approval_manager.cancel_all();
+        self.session_grants.clear();
         if self.phase == Phase::Stopping {
             return None;
         }
@@ -308,6 +334,7 @@ impl RuntimeCore {
 
     pub fn status(&self) -> Option<RuntimeState> {
         let config = self.config.as_ref()?;
+        let pending_approvals = self.approval_manager.pending_count() as u32;
         let (lifecycle, readiness) = match self.phase {
             Phase::WaitingInitialize => {
                 (RuntimeLifecycle::Initializing, RuntimeReadiness::NotReady)
@@ -329,7 +356,7 @@ impl RuntimeCore {
             security_mode: config.security.mode.clone(),
             exposed_tool_catalog: self.tool_registry.exposed_catalog(),
             active_requests: 0,
-            pending_approvals: 0,
+            pending_approvals,
             running_executions: 0,
             last_error: self.last_error.clone(),
         })

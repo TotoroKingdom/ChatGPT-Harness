@@ -91,6 +91,7 @@ pub(crate) struct ToolDiagnostic {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DiagnosticToolAvailability {
     Available,
+    AvailableWithApproval,
     UnavailableByPolicy,
     UnavailableByRuntime,
     Disabled,
@@ -103,6 +104,9 @@ impl From<EffectiveTool> for ToolDiagnostic {
             declared_capability: tool.declared_capability,
             availability: match tool.availability {
                 ToolAvailability::Available => DiagnosticToolAvailability::Available,
+                ToolAvailability::AvailableWithApproval => {
+                    DiagnosticToolAvailability::AvailableWithApproval
+                }
                 ToolAvailability::UnavailableByPolicy => {
                     DiagnosticToolAvailability::UnavailableByPolicy
                 }
@@ -254,7 +258,13 @@ impl RuntimeDiagnosticsSnapshot {
                 declared_count: items.len(),
                 effective_count: items
                     .iter()
-                    .filter(|tool| tool.availability == DiagnosticToolAvailability::Available)
+                    .filter(|tool| {
+                        matches!(
+                            tool.availability,
+                            DiagnosticToolAvailability::Available
+                                | DiagnosticToolAvailability::AvailableWithApproval
+                        )
+                    })
                     .count(),
                 items,
             },

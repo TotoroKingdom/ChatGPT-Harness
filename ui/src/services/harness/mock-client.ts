@@ -40,7 +40,7 @@ function effectivePolicy(config: AppConfig["policies"]): PolicyEffectiveSnapshot
   });
   return { valid: true, status: "valid", systemRules, userRules, toolDefaults: config.toolDefaults, perTool };
 }
-const approvals: ApprovalRequest[] = [{requestId:"approval_mock_01",tool:"bash",sanitizedArguments:{command:"<redacted command>"},createdAt:"2026-09-02T00:03:00Z",expiresAt:"2026-09-02T00:08:00Z",status:"pending"}];
+const approvals: ApprovalRequest[] = [{requestId:"approval_mock_01",runtimeId:"runtime_mock_01",generationId:"generation_mock_01",tool:"write",sanitizedArguments:{path:"notes.txt",content:"<redacted content>"},scopeSummary:"notes.txt",matchedRuleIds:["review-writes"],policyReason:"matched_user_rules",riskLevel:"medium",createdAt:"2026-09-02T00:03:00Z",expiresAt:"2026-09-02T00:08:00Z",status:"pending"}];
 export class MockHarnessControlClient implements HarnessControlClient {
  readonly adapterKind = "mock" as const;
  private scenario: MockScenario; private config: AppConfig | null = completeConfig(); private activeTools: AppConfig["tools"] | null = completeConfig().tools; private activePolicies: AppConfig["policies"] = completeConfig().policies; private configured = true; private components: ComponentStates = {runtime:"ready",tunnel:"ready",mcp:"ready"}; private activeRevision = "7"; private nextSequence="4"; private activities: ActivityEvent[];
@@ -85,7 +85,7 @@ export class MockHarnessControlClient implements HarnessControlClient {
  }
  harnessStartEligibility(): Promise<StartEligibility> { return this.runtimeStartEligibility(); }
  localDiagnosticsRun():Promise<DiagnosticRun>{const checks=[{id:"workspace",status:"pass" as const,summary:"Workspace folder is accessible."},{id:"tunnel_id",status:"pass" as const,summary:"Tunnel ID is configured."},{id:"tunnel_client",status:this.config?.tunnel.tunnelClientPath?"pass" as const:"warning" as const,summary:this.config?.tunnel.tunnelClientPath?"Tunnel client found":"Choose or detect a tunnel-client package folder."},{id:"api_key",status:this.configured?"pass" as const:"warning" as const,summary:this.configured?"API Key is configured in the OS credential store.":"API Key is not configured."},{id:"security",status:"pass" as const,summary:"Security settings are consistent."}]; return this.respond({runId:"diagnostic_mock",startedAt:"2026-09-02T00:00:00Z",finishedAt:"2026-09-02T00:00:01Z",overallStatus:"warning",checks});}
- private runtime():RuntimeState{return {runtimeId:"runtime_mock_01",startedAt:"2026-09-02T00:00:00Z",lifecycle:this.components.runtime==="ready"?"ready":this.components.runtime==="stopping"?"stopping":"initializing",readiness:this.components.runtime==="ready"?"ready":this.components.runtime==="degraded"?"degraded":"not_ready",configRevision:this.activeRevision,activeWorkspace:this.config?.workspace.rootPath ?? "",securityMode:this.config?.security.mode ?? "normal",exposedToolCatalog:this.toolCatalog().filter(t=>t.exposed),activeRequests:0,pendingApprovals:1,runningExecutions:0};}
+ private runtime():RuntimeState{return {runtimeId:"runtime_mock_01",startedAt:"2026-09-02T00:00:00Z",lifecycle:this.components.runtime==="ready"?"ready":this.components.runtime==="stopping"?"stopping":"initializing",readiness:this.components.runtime==="ready"?"ready":this.components.runtime==="degraded"?"degraded":"not_ready",configRevision:this.activeRevision,activeWorkspace:this.config?.workspace.rootPath ?? "",securityMode:this.config?.security.mode ?? "normal",exposedToolCatalog:this.toolCatalog().filter(t=>t.exposed),activeRequests:0,pendingApprovals:approvals.filter((item) => item.status === "pending").length,runningExecutions:0};}
  async runtimeStart(){this.components={runtime:"starting",tunnel:"stopped",mcp:"stopped"}; await delay(90); this.components={runtime:"ready",tunnel:"starting",mcp:"stopped"}; await delay(90); this.components={runtime:"ready",tunnel:"ready",mcp:"starting"}; await delay(90); this.components={runtime:"ready",tunnel:"ready",mcp:"ready"}; this.activeTools=this.config?.tools ?? completeConfig().tools; this.activePolicies=this.config?.policies ?? completeConfig().policies; this.activeRevision=this.config?.configRevision??"1"; this.recordActivity("runtime_started","Runtime started in mock mode."); return this.respond(this.runtime());}
  runtimeStatus(){return this.respond(this.runtime());}
  runtimeProcessStatus():Promise<RuntimeProcessStatus>{const phase=this.components.runtime==="starting"?"starting":this.components.runtime==="stopping"?"stopping":this.components.runtime==="error"?"crashed":this.components.runtime==="stopped"?"stopped":"running";return this.respond({phase,last_error:null});}
@@ -99,6 +99,15 @@ export class MockHarnessControlClient implements HarnessControlClient {
  toolsList(){return this.respond({items:this.scenario==="empty"?[]:this.toolCatalog()});} policiesList(){return this.respond(this.scenario==="empty"?{items:[]}:{items:policies,effective:effectivePolicy(this.activePolicies)});}
  activityList():Promise<ActivityListResult>{return this.respond({items:this.activities,latestSequence:decrementDecimal(this.nextSequence)});}
  async activitySubscribe(listener:ActivityEventListener,_afterSequence?:string):Promise<Unsubscribe>{await this.respond<ActivitySubscribeResult>({latestSequence:decrementDecimal(this.nextSequence)});let active=true;const timer=window.setTimeout(()=>{if(active&&this.scenario==="ready"){listener(event(this.nextSequence,"execution_completed","Mock activity stream received a completion event.",{source:"mock-subscription"},"request_mock_02"));this.nextSequence=incrementDecimal(this.nextSequence);}},220);return()=>{active=false;window.clearTimeout(timer);};}
- approvalsList():Promise<ApprovalsListResult>{return this.respond({items:this.scenario==="empty"?[]:approvals});} approvalsResolve(_r:string,_d:ApprovalDecision){return Promise.reject(new HarnessClientError("error","Approval actions are not enabled until M8."));}
+ approvalsList(params: { status?: ApprovalRequest["status"] } = {}):Promise<ApprovalsListResult>{return this.respond({items:this.scenario==="empty"?[]:approvals.filter((item) => !params.status || item.status === params.status)});}
+ async approvalsResolve(requestId:string, decision:ApprovalDecision){
+  const item = approvals.find((approval) => approval.requestId === requestId);
+  if (!item) throw new HarnessClientError("error", "Approval request was not found.", undefined, "APPROVAL_NOT_FOUND");
+  if (item.status !== "pending") throw new HarnessClientError("error", "Approval request is already resolved.", undefined, "APPROVAL_ALREADY_RESOLVED");
+  item.status = decision === "deny" ? "denied" : "approved";
+  item.decision = decision;
+  item.resolvedAt = "2026-09-02T00:04:00Z";
+  return this.respond({ approval: { ...item } });
+ }
 }
 

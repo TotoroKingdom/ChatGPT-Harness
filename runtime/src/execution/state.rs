@@ -42,6 +42,7 @@ impl RequestLifecycle {
                     PolicyEvaluating,
                     Denied | AwaitingApproval | Executing | Failed
                 )
+                | (AwaitingApproval, Denied | Executing | Failed)
                 | (Executing, Completed | Failed)
         ) {
             return Err(TransitionError {

@@ -31,14 +31,19 @@ impl McpService {
         Self { context }
     }
 
-    /// Lists only currently callable tools from the Runtime effective catalog.
-    /// Declared tools that are unavailable by policy, runtime, or disabled state
-    /// are intentionally omitted from the MCP exposure boundary.
+    /// Lists tools that the current Runtime can call directly or can call
+    /// after a human approval. Disabled, denied, and unavailable tools remain
+    /// hidden from the MCP exposure boundary.
     pub fn tools(&self) -> Vec<Tool> {
         self.context
             .effective_tools()
             .into_iter()
-            .filter(|tool| tool.availability == ToolAvailability::Available)
+            .filter(|tool| {
+                matches!(
+                    tool.availability,
+                    ToolAvailability::Available | ToolAvailability::AvailableWithApproval
+                )
+            })
             .filter_map(tool_from_effective)
             .collect()
     }
@@ -54,6 +59,20 @@ impl McpService {
             GLOB => Ok(glob::execute(&self.context, arguments)),
             WRITE => Ok(write::execute(&self.context, arguments)),
             EDIT => Ok(edit::execute(&self.context, arguments)),
+            _ => Err(McpProtocolError::UnknownTool),
+        }
+    }
+
+    pub async fn call_tool_async(
+        &self,
+        name: &str,
+        arguments: Value,
+    ) -> Result<CallToolResult, McpProtocolError> {
+        match name {
+            READ_FILE => Ok(read_file::execute_async(&self.context, arguments).await),
+            GLOB => Ok(glob::execute_async(&self.context, arguments).await),
+            WRITE => Ok(write::execute_async(&self.context, arguments).await),
+            EDIT => Ok(edit::execute_async(&self.context, arguments).await),
             _ => Err(McpProtocolError::UnknownTool),
         }
     }
@@ -87,16 +106,19 @@ impl ServerHandler for McpService {
     ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>>
            + rmcp::service::MaybeSendFuture
            + '_ {
-        let result = self
-            .call_tool(
-                &request.name,
-                Value::Object(request.arguments.unwrap_or_default()),
-            )
-            .map(Into::into)
-            .map_err(|McpProtocolError::UnknownTool| {
-                ErrorData::new(ErrorCode::METHOD_NOT_FOUND, "unknown tool", None)
-            });
-        std::future::ready(result)
+        let service = self.clone();
+        async move {
+            service
+                .call_tool_async(
+                    &request.name,
+                    Value::Object(request.arguments.unwrap_or_default()),
+                )
+                .await
+                .map(Into::into)
+                .map_err(|McpProtocolError::UnknownTool| {
+                    ErrorData::new(ErrorCode::METHOD_NOT_FOUND, "unknown tool", None)
+                })
+        }
     }
 }
 
@@ -257,6 +279,16 @@ mod tests {
             .expect("structured error code")
     }
 
+    async fn wait_for_pending(core: &RuntimeCore, count: usize) {
+        for _ in 0..100 {
+            if core.approval_manager().pending_count() == count {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        panic!("timed out waiting for {count} pending approvals");
+    }
+
     #[test]
     fn context_is_unavailable_until_runtime_initializes() {
         let core = RuntimeCore::new();
@@ -264,6 +296,335 @@ mod tests {
             core.mcp_context(),
             Err(crate::mcp::McpContextError::RuntimeNotInitialized)
         ));
+    }
+
+    #[tokio::test]
+    async fn ask_call_stays_pending_and_allow_once_resumes_the_same_invocation() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = harness_control_protocol::PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        assert!(service.tools().iter().any(|tool| tool.name == WRITE));
+
+        let pending_call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(
+                        WRITE,
+                        json!({ "path": "approved.txt", "content": "approved" }),
+                    )
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        let pending = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].tool, WRITE);
+        assert_eq!(pending[0].scope_summary, "approved.txt");
+        assert_eq!(
+            pending[0].sanitized_arguments["content"],
+            "<redacted content>"
+        );
+
+        core.approval_manager()
+            .resolve(
+                &pending[0].request_id,
+                harness_control_protocol::ApprovalDecision::AllowOnce,
+            )
+            .expect("resolve pending approval");
+        let result = pending_call.await.expect("same invocation task");
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("approved.txt")).unwrap(),
+            "approved"
+        );
+    }
+
+    #[tokio::test]
+    async fn deny_wakes_exact_call_without_a_filesystem_side_effect() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = harness_control_protocol::PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let pending_call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(WRITE, json!({ "path": "denied.txt", "content": "secret" }))
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        let pending = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        core.approval_manager()
+            .resolve(
+                &pending[0].request_id,
+                harness_control_protocol::ApprovalDecision::Deny,
+            )
+            .expect("deny pending approval");
+        let result = pending_call.await.expect("same invocation task");
+        assert_eq!(error_code(&result), "APPROVAL_DENIED");
+        assert!(!workspace.root.join("denied.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn post_approval_workspace_revalidation_rejects_a_deleted_target() {
+        let workspace = TestWorkspace::new();
+        workspace.write("vanishing.txt", "content");
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.read_file = harness_control_protocol::PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(READ_FILE, json!({ "path": "vanishing.txt" }))
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        fs::remove_file(workspace.root.join("vanishing.txt")).expect("remove target");
+        let pending = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        core.approval_manager()
+            .resolve(
+                &pending[0].request_id,
+                harness_control_protocol::ApprovalDecision::AllowOnce,
+            )
+            .expect("allow original request");
+        let result = call.await.expect("call task");
+        assert_eq!(error_code(&result), "TARGET_NOT_FOUND");
+        assert!(!workspace.root.join("vanishing.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn runtime_stop_cancels_pending_call_and_clears_generation_grants() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = harness_control_protocol::PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(
+                        WRITE,
+                        json!({ "path": "stopped.txt", "content": "blocked" }),
+                    )
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        core.stop().expect("stop runtime");
+        assert_eq!(core.approval_manager().pending_count(), 0);
+        assert_eq!(core.session_grants().len(), 0);
+        let result = call.await.expect("call task");
+        assert_eq!(error_code(&result), "APPROVAL_CANCELLED");
+        assert!(!workspace.root.join("stopped.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn dropped_mcp_call_cancels_its_pending_approval() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = harness_control_protocol::PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(
+                        WRITE,
+                        json!({ "path": "disconnected.txt", "content": "blocked" }),
+                    )
+                    .await
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        call.abort();
+        let _ = call.await;
+        for _ in 0..20 {
+            if core.approval_manager().pending_count() == 0 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(core.approval_manager().pending_count(), 0);
+        assert_eq!(
+            core.approval_manager()
+                .list(Some(harness_control_protocol::ApprovalStatus::Cancelled))
+                .len(),
+            1
+        );
+        assert!(!workspace.root.join("disconnected.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn approval_for_request_a_cannot_wake_request_b() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = harness_control_protocol::PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let first = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(WRITE, json!({ "path": "first.txt", "content": "first" }))
+                    .await
+                    .expect("known tool")
+            }
+        });
+        let second = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(WRITE, json!({ "path": "second.txt", "content": "second" }))
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 2).await;
+        let pending = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        let first_request = pending
+            .iter()
+            .find(|request| request.scope_summary == "first.txt")
+            .expect("first request")
+            .request_id
+            .clone();
+        core.approval_manager()
+            .resolve(
+                &first_request,
+                harness_control_protocol::ApprovalDecision::AllowOnce,
+            )
+            .expect("resolve first request");
+        let first_result = first.await.expect("first task");
+        assert_eq!(first_result.is_error, Some(false));
+        assert!(workspace.root.join("first.txt").exists());
+        assert!(!workspace.root.join("second.txt").exists());
+        assert_eq!(core.approval_manager().pending_count(), 1);
+
+        let second_request = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending))[0]
+            .request_id
+            .clone();
+        core.approval_manager()
+            .resolve(
+                &second_request,
+                harness_control_protocol::ApprovalDecision::Deny,
+            )
+            .expect("resolve second request");
+        assert_eq!(
+            error_code(&second.await.expect("second task")),
+            "APPROVAL_DENIED"
+        );
+    }
+
+    #[tokio::test]
+    async fn allow_for_session_creates_a_narrow_grant_for_later_same_scope_calls() {
+        let workspace = TestWorkspace::new();
+        let mut config = config_for(&workspace.root);
+        config.policies.tool_defaults.write = harness_control_protocol::PolicyDecision::Ask;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let first = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(WRITE, json!({ "path": "session.txt", "content": "first" }))
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        let pending = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        let request_id = pending[0].request_id.clone();
+        let manager = core.approval_manager();
+        let grants = core.session_grants();
+        let decision = harness_control_protocol::ApprovalDecision::AllowForSession;
+        manager
+            .resolve_with(&request_id, decision, |approval, scope| {
+                grants.insert_from_approved_scope(
+                    &approval.generation_id,
+                    &approval.request_id,
+                    &approval.tool,
+                    scope,
+                    chrono::Utc::now(),
+                );
+            })
+            .expect("resolve for session");
+        assert_eq!(first.await.expect("first task").is_error, Some(false));
+        assert!(grants.matches(core.runtime_id.as_str(), WRITE, "session.txt"));
+
+        let second = service
+            .call_tool_async(WRITE, json!({ "path": "session.txt", "content": "second" }))
+            .await
+            .expect("known tool");
+        assert_eq!(second.is_error, Some(false));
+        assert_eq!(
+            fs::read_to_string(workspace.root.join("session.txt")).unwrap(),
+            "second"
+        );
+        assert_eq!(core.approval_manager().pending_count(), 0);
+
+        let different_scope = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(WRITE, json!({ "path": "other.txt", "content": "other" }))
+                    .await
+                    .expect("known tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        let other = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        core.approval_manager()
+            .resolve(
+                &other[0].request_id,
+                harness_control_protocol::ApprovalDecision::Deny,
+            )
+            .expect("deny different scope");
+        assert_eq!(
+            error_code(&different_scope.await.expect("different scope task")),
+            "APPROVAL_DENIED"
+        );
+        assert!(!workspace.root.join("other.txt").exists());
     }
 
     #[test]

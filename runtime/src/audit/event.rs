@@ -1,6 +1,6 @@
 use crate::execution::{PipelineEvent, RequestContext, RequestState};
 use crate::policy::PolicyEvaluationReason;
-use harness_control_protocol::{PolicyDecision, PolicyReason};
+use harness_control_protocol::{ApprovalDecision, PolicyDecision, PolicyReason};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -16,6 +16,10 @@ pub(crate) enum AuditEventType {
     ExecutionFailed,
     RequestDenied,
     ApprovalRequired,
+    ApprovalResolved,
+    ApprovalExpired,
+    ApprovalCancelled,
+    SessionGrantMatched,
 }
 
 /// A safe projection of the internal request lifecycle.
@@ -103,6 +107,8 @@ pub(crate) struct AuditEvent {
     pub(crate) matched_rule_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) policy_reason: Option<PolicyReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) approval_decision: Option<ApprovalDecision>,
     pub(crate) outcome: AuditOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) failure_category: Option<AuditFailureCategory>,
@@ -113,11 +119,12 @@ impl AuditEvent {
         context: &RequestContext,
         event: PipelineEvent,
     ) -> Option<Self> {
-        let (event_type, outcome, workspace_validation) = match event {
+        let (event_type, outcome, workspace_validation, approval_decision) = match event {
             PipelineEvent::RequestReceived => (
                 AuditEventType::RequestReceived,
                 AuditOutcome::InProgress,
                 WorkspaceValidation::NotAttempted,
+                None,
             ),
             PipelineEvent::WorkspaceValidated { passed } => (
                 AuditEventType::WorkspaceValidated,
@@ -131,36 +138,71 @@ impl AuditEvent {
                 } else {
                     WorkspaceValidation::Failed
                 },
+                None,
             ),
             PipelineEvent::PolicyDecision => (
                 AuditEventType::PolicyEvaluated,
                 AuditOutcome::InProgress,
                 WorkspaceValidation::Passed,
+                None,
             ),
             PipelineEvent::ExecutionStarted => (
                 AuditEventType::ExecutionStarted,
                 AuditOutcome::InProgress,
                 WorkspaceValidation::Passed,
+                None,
             ),
             PipelineEvent::ExecutionCompleted => (
                 AuditEventType::ExecutionCompleted,
                 AuditOutcome::Success,
                 WorkspaceValidation::Passed,
+                None,
             ),
             PipelineEvent::ExecutionFailed => (
                 AuditEventType::ExecutionFailed,
                 AuditOutcome::Failed,
                 WorkspaceValidation::Passed,
+                None,
             ),
             PipelineEvent::RequestDenied => (
                 AuditEventType::RequestDenied,
                 AuditOutcome::Denied,
                 WorkspaceValidation::Passed,
+                None,
             ),
             PipelineEvent::ApprovalRequired => (
                 AuditEventType::ApprovalRequired,
                 AuditOutcome::ApprovalRequired,
                 WorkspaceValidation::Passed,
+                None,
+            ),
+            PipelineEvent::ApprovalResolved { decision } => (
+                AuditEventType::ApprovalResolved,
+                if decision == ApprovalDecision::Deny {
+                    AuditOutcome::Denied
+                } else {
+                    AuditOutcome::InProgress
+                },
+                WorkspaceValidation::Passed,
+                Some(decision),
+            ),
+            PipelineEvent::ApprovalExpired => (
+                AuditEventType::ApprovalExpired,
+                AuditOutcome::Failed,
+                WorkspaceValidation::Passed,
+                None,
+            ),
+            PipelineEvent::ApprovalCancelled => (
+                AuditEventType::ApprovalCancelled,
+                AuditOutcome::Failed,
+                WorkspaceValidation::Passed,
+                None,
+            ),
+            PipelineEvent::SessionGrantMatched => (
+                AuditEventType::SessionGrantMatched,
+                AuditOutcome::InProgress,
+                WorkspaceValidation::Passed,
+                None,
             ),
             PipelineEvent::StateChanged { .. } | PipelineEvent::RequestFinished => return None,
         };
@@ -182,6 +224,7 @@ impl AuditEvent {
                 .map(|item| item.matched_rule_ids.clone())
                 .unwrap_or_default(),
             policy_reason: evaluation.map(|item| policy_reason(item.reason)),
+            approval_decision,
             outcome,
             failure_category: match event {
                 PipelineEvent::WorkspaceValidated { passed: false }

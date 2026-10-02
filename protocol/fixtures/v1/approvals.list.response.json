@@ -2,7 +2,7 @@
   "id": "approvals-1",
   "result": {
     "items": [
-      { "requestId": "approval_example_01", "tool": "bash", "sanitizedArguments": { "command": "<redacted command>" }, "createdAt": "2026-01-01T00:00:00Z", "expiresAt": "2026-01-01T00:05:00Z", "status": "pending" }
+      { "requestId": "approval_example_01", "runtimeId": "runtime_example_01", "generationId": "generation_example_01", "tool": "bash", "sanitizedArguments": { "command": "<redacted command>" }, "scopeSummary": "command: <redacted>", "matchedRuleIds": ["ask-bash"], "policyReason": "matched_user_rules", "riskLevel": "high", "createdAt": "2026-01-01T00:00:00Z", "expiresAt": "2026-01-01T00:05:00Z", "status": "pending" }
     ]
   }
 }

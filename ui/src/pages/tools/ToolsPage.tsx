@@ -45,6 +45,7 @@ function effectiveReason(tool: ToolDiagnostic | undefined, running: boolean): st
     case "disabled": return "Disabled by saved Runtime configuration.";
     case "unavailable_by_policy": return "Unavailable by Runtime policy.";
     case "unavailable_by_runtime": return "Runtime capability is unavailable.";
+    case "available_with_approval": return "Available after human approval.";
     case "available": return "Available in the current Runtime generation.";
   }
 }

@@ -1,4 +1,5 @@
 mod activity;
+mod approval;
 mod audit;
 mod control_read;
 mod diagnostics;
@@ -8,6 +9,7 @@ mod execution;
 mod mcp;
 mod policy;
 mod server;
+mod session_grant;
 mod state;
 mod tools;
 mod workspace;

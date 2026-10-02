@@ -59,7 +59,11 @@ impl ActivityEntry {
             AuditEventType::ExecutionStarted
             | AuditEventType::ExecutionCompleted
             | AuditEventType::ExecutionFailed => ActivityCategory::Execution,
-            AuditEventType::ApprovalRequired => ActivityCategory::Approval,
+            AuditEventType::ApprovalRequired
+            | AuditEventType::ApprovalResolved
+            | AuditEventType::ApprovalExpired
+            | AuditEventType::ApprovalCancelled
+            | AuditEventType::SessionGrantMatched => ActivityCategory::Approval,
         };
         // Do not copy arbitrary strings, paths, or future audit fields.
         // Registry lookup is metadata validation, not policy/exposure evaluation.
