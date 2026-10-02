@@ -1,6 +1,6 @@
 # M4 E2E Test Plan — Local Black-box Approval Workflow
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M4 — Human Approval Workflow  
 > Owner: Coding Agent / QA Agent  
 > Requirement: fully automated local black-box test against real compiled Runtime process.  
@@ -347,7 +347,7 @@ Approval request IDs
 Original MCP call identity/result
 Filesystem assertions
 Activity assertions
-E2E-01...E2E-18 PASS/FAIL/BLOCKED
+E2E-01...E2E-18 PASS/FAIL (final record: all PASS)
 LOCAL_M4_BLACK_BOX_E2E=PASS
 ```
 
@@ -366,3 +366,15 @@ Local Black-box E2E PASS要求：
 - no browser/Tunnel/External ChatGPT required。
 
 PASS后才进入 Manual Acceptance。
+
+## 9. Final Result / Evidence Retention
+
+```text
+Local Black-box E2E result: PASS
+Cases: E2E-01–E2E-18 all PASS (`LOCAL_M4_BLACK_BOX_E2E=PASS`)
+Implementation commit: 6ffbabaebec9fbc5b747450b9ff869115b0e25c5
+Test/evidence commit: f69de0289e3a0cd43e84893fd02fbe8e437a1948
+Evidence: retained from the existing M4 Local Black-box E2E run; no E2E was re-executed during final closeout.
+Manual Acceptance: PASS (confirmed by Human Reviewer on 2026-10-02)
+Final milestone status: M4 — ACCEPTED / FROZEN
+```

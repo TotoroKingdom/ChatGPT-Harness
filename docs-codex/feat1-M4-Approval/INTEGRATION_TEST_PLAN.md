@@ -1,6 +1,6 @@
 # M4 Integration Test Plan — Human Approval Workflow
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M4 — Human Approval Workflow  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`  
 > Scope: Runtime ApprovalManager / async ExecutionPipeline / SessionGrantStore / Control / MCP exposure / Approval Center integration. This is not Local Black-box E2E and does not require External ChatGPT.
@@ -40,13 +40,7 @@ Integration 的核心不是“能返回一个 approval DTO”，而是证明：
 - frontend tests/typecheck/build PASS。
 - `git diff --check` PASS。
 
-未完成则：
-
-```text
-Integration = BLOCKED_BY_IMPLEMENTATION
-```
-
-不得用 mock-only happy path代替真实 Runtime integration。
+未完成则不得开始 Integration；本次 entry criteria 已满足，未触发该前置门禁。不得用 mock-only happy path代替真实 Runtime integration。
 
 ## 3. Integration Boundary
 
@@ -392,7 +386,7 @@ Policy draft为 M3 tool-level `write` rule时，UI明确提示 scope更宽，且
 
 ```text
 Case ID
-PASS / FAIL / BLOCKED
+Result: PASS / FAIL
 Test name / command
 Runtime generation / request ID
 Policy decision
@@ -423,14 +417,25 @@ Activity/Audit assertion
 
 Integration PASS后进入真实 Local Black-box E2E。
 
-## 7. Non-Claims
+## 7. Final Result / Evidence Retention
 
-Integration PASS不代表：
+```text
+Integration result: PASS
+Cases: INT-01–INT-30 all PASS
+Implementation commit: 6ffbabaebec9fbc5b747450b9ff869115b0e25c5
+Test/evidence commit: f69de0289e3a0cd43e84893fd02fbe8e437a1948
+Evidence: retained from the existing M4 Integration run; no Integration Test was re-executed during final closeout.
+Manual Acceptance: PASS (confirmed by Human Reviewer on 2026-10-02)
+Final milestone status: M4 — ACCEPTED / FROZEN
+```
+
+## 8. Non-Claims
+
+Integration PASS本身不单独代表最终人工闸门已通过；本次最终人工闸门已在独立 Manual Acceptance 记录中通过。
 
 ```text
 real Runtime subprocess flow PASS
 External ChatGPT approval UX PASS
 Bash approvals implemented
 approval persistence implemented
-M4 ACCEPTED / FROZEN
 ```

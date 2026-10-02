@@ -1,5 +1,6 @@
 # M4 PLAN — Human Approval Workflow
 
+> Status: ACCEPTED / FROZEN
 > Input: `SPEC.md`  
 > Baseline: M3 ACCEPTED / FROZEN  
 > Goal: 将 M3 的 ASK no-execution transition升级为 Runtime-owned pending approval + same-request async resume。  
@@ -478,3 +479,7 @@ M0–M3 regression
 ```
 
 完成后独立执行 M4 Integration / Local Black-box E2E / Manual Acceptance。
+
+## Final Status
+
+M4 development、Integration、Local Black-box E2E 与 Manual Acceptance 均已完成并通过；本 milestone 已收口为 `M4 — ACCEPTED / FROZEN`。本次收口不修改 M4 产品逻辑，也不开始 M5。

@@ -1,6 +1,6 @@
 # M4 SPEC — Human Approval Workflow
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M4 — Human Approval Workflow  
 > Baseline: M3 — Configurable Policy, ACCEPTED / FROZEN  
 > Sources: `../ChatGPT-Harness_V3_PRD.md`, `../ChatGPT-Harness_V3_ARCHITECTURE.md`, `../ChatGPT-Harness_V3_ROADMAP.md`, M0–M3 milestone docs
@@ -819,3 +819,20 @@ M4可 ACCEPTED / FROZEN 前必须证明：
 ```
 
 局部 module/type命名可调整，但不得改变 Runtime ownership、same-request resume、narrow session grant、async wait、post-approval revalidation和 M5边界。
+
+## 27. Final Status / Evidence Retention
+
+```text
+Final status: M4 — ACCEPTED / FROZEN
+Manual Acceptance date: 2026-10-02 (Asia/Shanghai)
+Final closeout date: 2026-10-03 (Asia/Shanghai)
+Production implementation commit: 6ffbabaebec9fbc5b747450b9ff869115b0e25c5
+Test/evidence commit: f69de0289e3a0cd43e84893fd02fbe8e437a1948
+Integration: INT-01–INT-30 PASS
+Local Black-box E2E: E2E-01–E2E-18 PASS
+Manual Acceptance: PASS
+Acceptance artifact: artifacts/M4-Human-Approval/ChatGPT-Harness_0.1.1_x64-portable/
+Open blockers: none
+```
+
+上述 Development、Integration、E2E 与 Manual Acceptance evidence 均为已有 evidence 的收口引用；本次不重新执行完整 QA。Manual Acceptance 中观察到的 `glob` internal error 已作为非阻塞 observation 单独记录，不被隐藏或改写为 PASS。

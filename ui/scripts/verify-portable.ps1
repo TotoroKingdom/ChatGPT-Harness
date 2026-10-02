@@ -71,7 +71,7 @@ if ($null -eq $associatedIcon -or $associatedIcon.Width -le 1 -or $associatedIco
 $associatedIcon.Dispose()
 
 $requests = @(
-    (@{id=1;method='initialize';params=@{clientInfo=@{name='portable-verifier';title='Portable Verifier';version=$expectedVersion};protocolVersion=1;capabilities=@{activityReplay=$true};runtimeConfig=@{configRevision='1';workspace=@{rootPath=$repositoryRoot};security=@{mode='normal';developerTestMode=$false};runtimeLimits=@{maxConcurrentRequests=1;maxActivityEvents=100;maxReadBytes=1048576}}}} | ConvertTo-Json -Depth 8 -Compress),
+    (@{id=1;method='initialize';params=@{clientInfo=@{name='portable-verifier';title='Portable Verifier';version=$expectedVersion};protocolVersion=1;capabilities=@{activityReplay=$true};runtimeConfig=@{configRevision='1';workspace=@{rootPath=$repositoryRoot};security=@{mode='normal';developerTestMode=$false};runtimeLimits=@{maxConcurrentRequests=1;maxActivityEvents=100;maxReadBytes=1048576};tools=@{readFile=@{enabled=$true};glob=@{enabled=$true};write=@{enabled=$true};edit=@{enabled=$true};bash=@{enabled=$false}}}}} | ConvertTo-Json -Depth 8 -Compress),
     (@{method='initialized';params=@{}} | ConvertTo-Json -Depth 4 -Compress),
     (@{id=2;method='runtime.status';params=@{}} | ConvertTo-Json -Depth 4 -Compress),
     (@{id=3;method='runtime.stop';params=@{}} | ConvertTo-Json -Depth 4 -Compress)

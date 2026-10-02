@@ -1,6 +1,6 @@
 # M4 Manual Acceptance Checklist — Human Approval Workflow
 
-> Status: DRAFT / READY FOR FINAL HUMAN REVIEW  
+> Status: ACCEPTED / FROZEN
 > Milestone: M4 — Human Approval Workflow  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`, `INTEGRATION_TEST_PLAN.md`, `E2E_TEST_PLAN.md`  
 > Owner: Human Reviewer  
@@ -49,56 +49,67 @@ Local Black-box E2E
 
 ## 3. Build / Source Identity
 
-- [ ] 记录 M4 production implementation commit。
-- [ ] 记录 automated evidence commit。
-- [ ] 记录实际人工验收 build / Portable identity。
-- [ ] 确认之后没有未经验证的 Runtime approval production code变更。
+- [x] 记录 M4 production implementation commit。
+- [x] 记录 automated evidence commit。
+- [x] 记录实际人工验收 build / Portable identity。
+- [x] 确认之后没有未经验证的 Runtime approval production code变更。
 
 Evidence：
 
 ```text
-Production commit:
-Evidence commit:
-Acceptance build:
-Reviewer:
-Date:
+Production commit: `6ffbabaebec9fbc5b747450b9ff869115b0e25c5`
+Evidence commit: `f69de0289e3a0cd43e84893fd02fbe8e437a1948`
+Acceptance build: `artifacts/M4-Human-Approval/ChatGPT-Harness_0.1.1_x64-portable/`
+Reviewer: Human Reviewer
+Date: 2026-10-02 (Asia/Shanghai)
 ```
+
+Closeout record: Human Reviewer confirmed the complete Manual Acceptance PASS on 2026-10-02. This final closeout records the existing evidence and does not replay the full QA matrix.
+
+Manual Acceptance observations:
+
+- External ChatGPT / PDG 已连接当前 M4 Portable Runtime。
+- `read_file` 可正常执行。
+- 实际 Workspace：`C:\AI\HumanContext`。
+- 实际读取文件规范化路径：`\\?\C:\AI\HumanContext\README.md`。
+- M4 Approval 人工链路确认通过。
+- `glob` 本次出现 internal error；该 observation 属于非阻塞观察，不被隐藏，也不被改写为 PASS。它不阻塞本次 M4 Approval acceptance。
 
 ## 4. Automated Evidence Review
 
 ### 4.1 Development / Unit
 
-- [ ] T1 Protocol / ApprovalManager PASS。
-- [ ] T2 Async Pipeline / same-request resume PASS。
-- [ ] T3 Session Grants / Control / Shutdown PASS。
-- [ ] T4 Approval Center / Create Rule PASS。
-- [ ] T5 Regression PASS。
+- [x] T1 Protocol / ApprovalManager PASS。
+- [x] T2 Async Pipeline / same-request resume PASS。
+- [x] T3 Session Grants / Control / Shutdown PASS。
+- [x] T4 Approval Center / Create Rule PASS。
+- [x] T5 Regression PASS。
 
 ### 4.2 Integration
 
-- [ ] INT-01 ～ INT-30 PASS。
-- [ ] ASK = AvailableWithApproval。
-- [ ] exact request identity isolation PASS。
-- [ ] expiry/race/cancel PASS。
-- [ ] narrow session grant PASS。
-- [ ] grant cannot override DENY/System/disabled PASS。
-- [ ] post-approval revalidation PASS。
-- [ ] M0–M3 regression PASS。
+- [x] INT-01 ～ INT-30 PASS。
+- [x] ASK = AvailableWithApproval。
+- [x] exact request identity isolation PASS。
+- [x] expiry/race/cancel PASS。
+- [x] narrow session grant PASS。
+- [x] grant cannot override DENY/System/disabled PASS。
+- [x] post-approval revalidation PASS。
+- [x] M0–M3 regression PASS。
 
 ### 4.3 Local Black-box E2E
 
-- [ ] real release/final Runtime subprocess used。
-- [ ] real stdin/stdout Control RPC used。
-- [ ] real loopback MCP used。
-- [ ] original MCP call held Pending while Control remained responsive。
-- [ ] AllowOnce resumed original call。
-- [ ] Deny terminated original call。
-- [ ] AllowForSession + same-scope grant hit PASS。
-- [ ] different-path grant miss PASS。
-- [ ] Runtime stop cancelled pending call。
-- [ ] restart cleared grant/pending state。
-- [ ] Activity confidentiality PASS。
-- [ ] `LOCAL_M4_BLACK_BOX_E2E=PASS`。
+- [x] real release/final Runtime subprocess used。
+- [x] real stdin/stdout Control RPC used。
+- [x] real loopback MCP used。
+- [x] original MCP call held Pending while Control remained responsive。
+- [x] AllowOnce resumed original call。
+- [x] Deny terminated original call。
+- [x] AllowForSession + same-scope grant hit PASS。
+- [x] different-path grant miss PASS。
+- [x] Runtime stop cancelled pending call。
+- [x] restart cleared grant/pending state。
+- [x] Activity confidentiality PASS。
+- [x] `LOCAL_M4_BLACK_BOX_E2E=PASS`。
 
 ## 5. Approval Center UX
 
@@ -108,9 +119,9 @@ Date:
 
 在无 Pending approval时：
 
-- [ ] 页面明确显示无待审批请求。
-- [ ] 不显示伪造/mock approval。
-- [ ] Runtime stopped/not ready状态可理解。
+- [x] 页面明确显示无待审批请求。
+- [x] 不显示伪造/mock approval。
+- [x] Runtime stopped/not ready状态可理解。
 
 ### MA-02 — ASK tool visible to external ChatGPT
 
@@ -118,9 +129,9 @@ Date:
 
 在 External ChatGPT：
 
-- [ ] tool仍可发现/调用。
-- [ ] ChatGPT发起调用后不会立即得到普通 POLICY_DENIED。
-- [ ] Harness Approval Center出现 Pending。
+- [x] tool仍可发现/调用。
+- [x] ChatGPT发起调用后不会立即得到普通 POLICY_DENIED。
+- [x] Harness Approval Center出现 Pending。
 
 记录：
 
@@ -136,32 +147,32 @@ Approval request ID:
 
 Pending card至少能看见：
 
-- [ ] tool。
-- [ ] normalized target/scope。
-- [ ] sanitized arguments。
-- [ ] matched policy IDs。
-- [ ] reason。
-- [ ] risk。
-- [ ] created/expiry。
-- [ ] 不显示 raw secret。
-- [ ] write/edit raw content未被不必要展示。
+- [x] tool。
+- [x] normalized target/scope。
+- [x] sanitized arguments。
+- [x] matched policy IDs。
+- [x] reason。
+- [x] risk。
+- [x] created/expiry。
+- [x] 不显示 raw secret。
+- [x] write/edit raw content未被不必要展示。
 
 ### MA-04 — Allow once
 
 点击 Allow once：
 
-- [ ] Pending状态结束。
-- [ ] External ChatGPT原请求继续并收到成功结果。
-- [ ] 不需要用户在 ChatGPT重新发一遍同样请求。
-- [ ] filesystem结果正确。
-- [ ] Activity可看到同 request ID下 approval→execution链路。
+- [x] Pending状态结束。
+- [x] External ChatGPT原请求继续并收到成功结果。
+- [x] 不需要用户在 ChatGPT重新发一遍同样请求。
+- [x] filesystem结果正确。
+- [x] Activity可看到同 request ID下 approval→execution链路。
 
 ### MA-05 — Allow once is one-shot
 
 再次发同一 scope请求：
 
-- [ ] 如果 Policy仍 ASK，应再次出现 Pending。
-- [ ] 不因之前 Allow once自动执行。
+- [x] 如果 Policy仍 ASK，应再次出现 Pending。
+- [x] 不因之前 Allow once自动执行。
 
 ## 7. Deny User Path
 
@@ -171,10 +182,10 @@ Pending card至少能看见：
 
 点击 Deny：
 
-- [ ] External ChatGPT原请求以明确拒绝结束。
-- [ ] target无 mutation。
-- [ ] Approval Center显示 Denied/terminal状态。
-- [ ] Activity无 ExecutionCompleted success。
+- [x] External ChatGPT原请求以明确拒绝结束。
+- [x] target无 mutation。
+- [x] Approval Center显示 Denied/terminal状态。
+- [x] Activity无 ExecutionCompleted success。
 
 ## 8. Allow For Session User Path
 
@@ -188,22 +199,22 @@ write session-approval.txt
 
 点击 Allow for session：
 
-- [ ] 当前原请求成功。
-- [ ] UI明确这是 current Runtime/session scope，不是永久 Policy rule。
+- [x] 当前原请求成功。
+- [x] UI明确这是 current Runtime/session scope，不是永久 Policy rule。
 
 ### MA-08 — Same scope grant
 
 External ChatGPT再次调用同一 tool、同一 target：
 
-- [ ] 不再弹 approval。
-- [ ] 请求正常执行。
+- [x] 不再弹 approval。
+- [x] 请求正常执行。
 
 ### MA-09 — Different target does not inherit
 
 调用同 tool不同 target：
 
-- [ ] 再次产生 Pending。
-- [ ] 不被上一条 session grant静默放行。
+- [x] 再次产生 Pending。
+- [x] 不被上一条 session grant静默放行。
 
 这是 M4 session grant安全边界的人工关键检查。
 
@@ -215,8 +226,8 @@ External ChatGPT再次调用同一 tool、同一 target：
 
 再次调用 MA-07同 tool + same target：
 
-- [ ] 必须重新 ASK/Pending。
-- [ ] 不继承上一个 Runtime generation的 session grant。
+- [x] 必须重新 ASK/Pending。
+- [x] 不继承上一个 Runtime generation的 session grant。
 
 ## 10. Create Rule UX
 
@@ -224,11 +235,11 @@ External ChatGPT再次调用同一 tool、同一 target：
 
 产生一个 Pending approval，点击 Create Rule：
 
-- [ ] 打开/跳转 Policies editor draft。
-- [ ] rule matcher/tool预填合理。
-- [ ] 当前 approval仍 Pending。
-- [ ] 没有自动 AllowOnce/AllowForSession。
-- [ ] 没有自动保存。
+- [x] 打开/跳转 Policies editor draft。
+- [x] rule matcher/tool预填合理。
+- [x] 当前 approval仍 Pending。
+- [x] 没有自动 AllowOnce/AllowForSession。
+- [x] 没有自动保存。
 
 ### MA-12 — Scope widening warning
 
@@ -240,17 +251,17 @@ write one-file.txt
 
 而 draft是 tool-level `write` Policy：
 
-- [ ] UI明确提示 persistent rule比 exact approval scope更宽。
-- [ ] 用户必须显式确认并保存。
+- [x] UI明确提示 persistent rule比 exact approval scope更宽。
+- [x] 用户必须显式确认并保存。
 
 ### MA-13 — Saved rule follows M3 generation semantics
 
 若人工选择保存 rule：
 
-- [ ] configRevision变化。
-- [ ] 当前 Runtime不会被假装 hot reload。
-- [ ] Restart Required显示。
-- [ ] 下个 Runtime generation才应用。
+- [x] configRevision变化。
+- [x] 当前 Runtime不会被假装 hot reload。
+- [x] Restart Required显示。
+- [x] 下个 Runtime generation才应用。
 
 当前 Pending request仍需单独 resolve。
 
@@ -260,9 +271,9 @@ write one-file.txt
 
 review自动化 evidence并在 UI已有 terminal fixture/自然出现时确认：
 
-- [ ] Expired状态不可再次 resolve。
-- [ ] Cancelled状态不可再次 resolve。
-- [ ] stale approval错误不会显示 false success。
+- [x] Expired状态不可再次 resolve。
+- [x] Cancelled状态不可再次 resolve。
+- [x] stale approval错误不会显示 false success。
 
 若 UI无法在人工流程方便制造 Expired，可仅以 Integration自动化 evidence作为 acceptance依据。
 
@@ -276,21 +287,21 @@ review自动化 evidence并在 UI已有 terminal fixture/自然出现时确认�
 
 确认：
 
-- [ ] request ID贯穿。
-- [ ] Policy ASK可见。
-- [ ] approval decision可见。
-- [ ] execution结果可见。
-- [ ] session grant match有足够诊断信息。
-- [ ] raw mutation content/secret未泄露。
+- [x] request ID贯穿。
+- [x] Policy ASK可见。
+- [x] approval decision可见。
+- [x] execution结果可见。
+- [x] session grant match有足够诊断信息。
+- [x] raw mutation content/secret未泄露。
 
 ## 13. Regression Smoke
 
 人工只做高价值 smoke，不重复自动化矩阵：
 
-- [ ] 一个默认 ALLOW tool仍无需 approval。
-- [ ] 一个 explicit DENY tool不能通过 Approval Center绕过。
-- [ ] disabled tool不会产生可批准的 Pending。
-- [ ] M1 write/edit最终文件行为正常。
+- [x] 一个默认 ALLOW tool仍无需 approval。
+- [x] 一个 explicit DENY tool不能通过 Approval Center绕过。
+- [x] disabled tool不会产生可批准的 Pending。
+- [x] M1 write/edit最终文件行为正常。
 
 ## 14. Rejection Conditions
 
@@ -312,22 +323,26 @@ review自动化 evidence并在 UI已有 terminal fixture/自然出现时确认�
 
 全部满足后：
 
-- [ ] Development PASS
-- [ ] Unit PASS
-- [ ] Integration PASS
-- [ ] Local Black-box E2E PASS
-- [ ] Manual Acceptance PASS
-- [ ] M4 — ACCEPTED / FROZEN
+- [x] Development PASS
+- [x] Unit PASS
+- [x] Integration PASS
+- [x] Local Black-box E2E PASS
+- [x] Manual Acceptance PASS
+- [x] M4 — ACCEPTED / FROZEN
 
 最终记录：
 
 ```text
-M4 Decision:
-Reviewer:
-Date:
-Production commit:
-Acceptance build:
-Notes:
+M4 Decision: ACCEPTED / FROZEN
+Reviewer: Human Reviewer
+Date: 2026-10-02 (Asia/Shanghai)
+Production commit: 6ffbabaebec9fbc5b747450b9ff869115b0e25c5
+Acceptance build: artifacts/M4-Human-Approval/ChatGPT-Harness_0.1.1_x64-portable/
+Notes: Existing Development, Integration, Local Black-box E2E, and Manual Acceptance evidence retained; glob internal error recorded as non-blocking observation.
 ```
+
+Final status: `M4 — ACCEPTED / FROZEN`。
+
+Open blockers: none. M5 has not started.
 
 冻结后，M5才开始 Controlled Bash；不得在 M4 acceptance后继续偷偷扩展 approval scope/semantics而不重新验证。

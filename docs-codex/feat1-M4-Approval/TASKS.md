@@ -1,5 +1,6 @@
 # M4 TASKS — Human Approval Workflow
 
+> Status: ACCEPTED / FROZEN
 > Inputs: `SPEC.md`, `PLAN.md`  
 > Executor: Codex / Coding Agent  
 > Baseline: M3 ACCEPTED / FROZEN  
@@ -521,24 +522,26 @@ Unit / Integration / E2E由 Coding Agent自动完成；只有 Manual Acceptance�
 
 ## Development Completion Checklist
 
-- [ ] T1 Approval Protocol / Manager PASS
-- [ ] T2 Async Pipeline / ASK MCP Resume PASS
-- [ ] T3 Session Grants / Control / Shutdown PASS
-- [ ] T4 Approval Center / Create Rule UX PASS
-- [ ] T5 Regression PASS
-- [ ] ASK exposed as AvailableWithApproval
-- [ ] ASK same-call pending/resume
-- [ ] AllowOnce exact identity
-- [ ] AllowForSession narrow grant
-- [ ] Deny no side effect
-- [ ] expiry/cancel no side effect
-- [ ] duplicate resolve race-safe
-- [ ] post-approval revalidation
-- [ ] Runtime stop wakes pending
-- [ ] restart clears grants
-- [ ] Create Rule does not auto-resolve
-- [ ] M0–M3 regression PASS
-- [ ] cargo fmt/check/test PASS
-- [ ] frontend tests/typecheck/build PASS as applicable
-- [ ] git diff --check PASS
-- [ ] TASKS未声称 Integration/E2E/Manual Acceptance PASS
+- [x] T1 Approval Protocol / Manager PASS
+- [x] T2 Async Pipeline / ASK MCP Resume PASS
+- [x] T3 Session Grants / Control / Shutdown PASS
+- [x] T4 Approval Center / Create Rule UX PASS
+- [x] T5 Regression PASS
+- [x] ASK exposed as AvailableWithApproval
+- [x] ASK same-call pending/resume
+- [x] AllowOnce exact identity
+- [x] AllowForSession narrow grant
+- [x] Deny no side effect
+- [x] expiry/cancel no side effect
+- [x] duplicate resolve race-safe
+- [x] post-approval revalidation
+- [x] Runtime stop wakes pending
+- [x] restart clears grants
+- [x] Create Rule does not auto-resolve
+- [x] M0–M3 regression PASS
+- [x] cargo fmt/check/test PASS
+- [x] frontend tests/typecheck/build PASS as applicable
+- [x] git diff --check PASS
+- [x] TASKS仅记录 development scope；Integration/E2E/Manual Acceptance evidence 已在独立文档中保留
+
+Final status: `M4 — ACCEPTED / FROZEN`。
