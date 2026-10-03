@@ -97,6 +97,14 @@ describe("TauriHarnessControlClient", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("runtime_process_status", undefined);
   });
 
+  it("uses the native Bash picker as a desired-path source only", async () => {
+    tauri.invoke.mockResolvedValue("D:\\Git\\bin\\bash.exe");
+    const client = new TauriHarnessControlClient();
+
+    await expect(client.chooseBashExecutable()).resolves.toBe("D:\\Git\\bin\\bash.exe");
+    expect(tauri.invoke).toHaveBeenCalledWith("bash_executable_choose", undefined);
+  });
+
   it.each([
     ["starting", states("starting")],
     ["stopping", states("stopping")],

@@ -43,6 +43,7 @@ pub fn run() {
             crate::commands::secret_api_key_delete,
             crate::commands::workspace_choose,
             crate::commands::tunnel_client_choose,
+            crate::commands::bash_executable_choose,
             crate::commands::tunnel_client_detect,
             crate::commands::validate_path,
             crate::commands::local_diagnostics_run,

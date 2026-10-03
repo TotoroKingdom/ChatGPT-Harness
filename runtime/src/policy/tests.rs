@@ -1,9 +1,12 @@
 use super::*;
+use crate::bash::analyzer::{analyze, BashCommandAnalysis};
+use crate::bash::discovery::{BashExecutableSource, BashExecutableState};
 use crate::tools::ToolRegistry;
 use harness_control_protocol::{
     PolicyConfig, PolicyDecision, PolicyMatcherConfig, PolicyRule, PolicySource, SecurityMode,
-    UserPolicyRuleConfig,
+    ToolConfig, UserPolicyRuleConfig,
 };
+use std::path::PathBuf;
 
 fn rule(id: &str, decision: PolicyDecision, scope: &str) -> PolicyRule {
     PolicyRule {
@@ -61,6 +64,42 @@ fn evaluate_compiled(config: PolicyConfig, tool: &str) -> PolicyEvaluation {
     compiled(config).evaluate(
         &PolicyContext::new(tool, SecurityMode::Normal, "active_workspace"),
         &ToolRegistry::normal_mode(),
+    )
+}
+
+fn bash_registry() -> ToolRegistry {
+    let mut config = ToolConfig::default();
+    config.bash.enabled = true;
+    let state = BashExecutableState::Ready {
+        canonical_path: PathBuf::from("C:/Git/bin/bash.exe"),
+        source: BashExecutableSource::Manual,
+    };
+    ToolRegistry::from_config_with_bash(&config, &state)
+}
+
+fn bash_rule(
+    id: &str,
+    decision: PolicyDecision,
+    matcher: PolicyMatcherConfig,
+) -> UserPolicyRuleConfig {
+    UserPolicyRuleConfig {
+        id: id.into(),
+        name: format!("Rule {id}"),
+        enabled: true,
+        decision,
+        matcher,
+        reason: "Bash policy test".into(),
+    }
+}
+
+fn evaluate_bash(config: PolicyConfig, command: &str) -> PolicyEvaluation {
+    let registry = bash_registry();
+    let engine = PolicyEngine::compile(&config, &registry);
+    let analysis = analyze(command);
+    engine.evaluate(
+        &PolicyContext::new("bash", SecurityMode::DeveloperTest, "active_workspace")
+            .with_bash_analysis(&analysis),
+        &registry,
     )
 }
 
@@ -375,7 +414,11 @@ fn outside_workspace_is_denied_for_every_registered_tool_in_both_modes() {
     ));
     let engine = PolicyEngine::new(rules);
     for mode in [SecurityMode::Normal, SecurityMode::DeveloperTest] {
-        for tool in registry.list() {
+        for tool in registry
+            .list()
+            .into_iter()
+            .filter(|tool| tool.name != "bash")
+        {
             let result = engine.evaluate(
                 &PolicyContext::new(&tool.name, mode.clone(), "outside_active_workspace"),
                 &registry,
@@ -403,7 +446,11 @@ fn developer_mode_preserves_read_only_defaults_and_does_not_match_test_scope() {
     ));
     let engine = PolicyEngine::new(rules);
     let registry = ToolRegistry::normal_mode();
-    for tool in registry.list() {
+    for tool in registry
+        .list()
+        .into_iter()
+        .filter(|tool| tool.name != "bash")
+    {
         let result = engine.evaluate(
             &PolicyContext::new(&tool.name, SecurityMode::DeveloperTest, "active_workspace"),
             &registry,
@@ -456,7 +503,11 @@ fn runtime_workspace_alias_matches_m0_scope_in_both_directions() {
             assert_eq!(result.decision, PolicyDecision::Allow);
         }
     }
-    for tool in registry.list() {
+    for tool in registry
+        .list()
+        .into_iter()
+        .filter(|tool| tool.name != "bash")
+    {
         assert_eq!(
             PolicyEngine::new(PolicyEngine::system_rules())
                 .evaluate(
@@ -470,7 +521,7 @@ fn runtime_workspace_alias_matches_m0_scope_in_both_directions() {
 }
 
 #[test]
-fn m3_defaults_are_fallbacks_and_bash_remains_unimplemented() {
+fn m3_defaults_are_fallbacks_and_bash_is_not_ready_by_default() {
     let mut config = PolicyConfig::default();
     config.tool_defaults.write = PolicyDecision::Allow;
     assert_eq!(
@@ -485,7 +536,7 @@ fn m3_defaults_are_fallbacks_and_bash_remains_unimplemented() {
     assert_eq!(
         ToolRegistry::normal_mode().capability("bash"),
         None,
-        "persisting bash's ASK default must not register an executor capability"
+        "Bash remains unavailable until it is enabled and Runtime validates an executable"
     );
 }
 
@@ -689,4 +740,198 @@ fn system_baseline_is_fixed_and_repeatable() {
     assert_eq!(engine.evaluate(&context, &registry), first);
     assert_eq!(registry.list(), before);
     assert_eq!(rules, PolicyEngine::system_rules());
+}
+
+#[test]
+fn bash_tool_matcher_is_supported_in_developer_mode_and_keeps_default_ask() {
+    let registry = bash_registry();
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "bash-allow",
+        PolicyDecision::Allow,
+        PolicyMatcherConfig::tool("bash"),
+    ));
+    let engine = PolicyEngine::compile(&config, &registry);
+    let catalog = engine.evaluate(
+        &PolicyContext::new("bash", SecurityMode::DeveloperTest, "active_workspace"),
+        &registry,
+    );
+    assert_eq!(catalog.decision, PolicyDecision::Allow);
+    assert_eq!(catalog.matched_rule_ids, ["bash-allow"]);
+}
+
+#[test]
+fn bash_command_matcher_requires_exact_executable_and_argv_prefix() {
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "git-status",
+        PolicyDecision::Allow,
+        PolicyMatcherConfig::bash_command("git.exe", vec!["status".into()]),
+    ));
+    assert_eq!(
+        evaluate_bash(config.clone(), "git status --short"),
+        PolicyEvaluation {
+            decision: PolicyDecision::Allow,
+            matched_rule_ids: vec!["git-status".into()],
+            reason: PolicyEvaluationReason::MatchedUserRules,
+        }
+    );
+    assert_eq!(
+        evaluate_bash(config.clone(), "git statusx").decision,
+        PolicyDecision::Ask
+    );
+    assert_eq!(
+        evaluate_bash(config, "git stash").decision,
+        PolicyDecision::Ask
+    );
+}
+
+#[test]
+fn bash_compound_policy_aggregates_highest_segment_severity_and_stable_ids() {
+    let mut config = PolicyConfig::default();
+    config.user_rules = vec![
+        bash_rule(
+            "git-status-allow",
+            PolicyDecision::Allow,
+            PolicyMatcherConfig::bash_command("git", vec!["status".into()]),
+        ),
+        bash_rule(
+            "git-push-ask",
+            PolicyDecision::Ask,
+            PolicyMatcherConfig::bash_command("git", vec!["push".into()]),
+        ),
+    ];
+    let result = evaluate_bash(config, "git status && git push");
+    assert_eq!(result.decision, PolicyDecision::Ask);
+    assert_eq!(
+        result.matched_rule_ids,
+        ["git-push-ask", "git-status-allow"]
+    );
+    assert_eq!(result.reason, PolicyEvaluationReason::MatchedUserRules);
+}
+
+#[test]
+fn bash_command_with_no_match_uses_bash_default_ask() {
+    assert_eq!(
+        evaluate_bash(PolicyConfig::default(), "git status").decision,
+        PolicyDecision::Ask
+    );
+}
+
+#[test]
+fn broad_bash_allow_cannot_lower_unclassified_command_floor() {
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "bash-allow",
+        PolicyDecision::Allow,
+        PolicyMatcherConfig::tool("bash"),
+    ));
+    let result = evaluate_bash(config, "echo $(whoami)");
+    assert_eq!(result.decision, PolicyDecision::Ask);
+    assert_eq!(result.matched_rule_ids, ["bash-allow"]);
+}
+
+#[test]
+fn explicit_bash_deny_remains_deny_above_unclassified_floor() {
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "bash-deny",
+        PolicyDecision::Deny,
+        PolicyMatcherConfig::tool("bash"),
+    ));
+    let result = evaluate_bash(config, "echo $(whoami)");
+    assert_eq!(result.decision, PolicyDecision::Deny);
+    assert_eq!(result.matched_rule_ids, ["bash-deny"]);
+}
+
+#[test]
+fn enabled_invalid_bash_matcher_invalidates_the_whole_snapshot() {
+    let registry = bash_registry();
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "invalid-bash",
+        PolicyDecision::Allow,
+        PolicyMatcherConfig::bash_command("git status", vec![]),
+    ));
+    let engine = PolicyEngine::compile(&config, &registry);
+    assert!(!engine.is_valid());
+    let result = evaluate_bash(config, "git status");
+    assert_eq!(result.decision, PolicyDecision::Deny);
+    assert_eq!(result.reason, PolicyEvaluationReason::InvalidRuleSet);
+}
+
+#[test]
+fn concrete_bash_request_without_or_with_empty_facts_fails_closed() {
+    let registry = bash_registry();
+    let engine = PolicyEngine::compile(&PolicyConfig::default(), &registry);
+    let missing = engine.evaluate(
+        &PolicyContext::new("bash", SecurityMode::DeveloperTest, "active_workspace")
+            .require_bash_analysis(),
+        &registry,
+    );
+    assert_eq!(missing.decision, PolicyDecision::Deny);
+    assert_eq!(missing.reason, PolicyEvaluationReason::InvalidContext);
+
+    let empty = BashCommandAnalysis {
+        segments: Vec::new(),
+        operators: Vec::new(),
+        classification: crate::bash::analyzer::BashClassification::Classified,
+    };
+    let empty_result = engine.evaluate(
+        &PolicyContext::new("bash", SecurityMode::DeveloperTest, "active_workspace")
+            .with_bash_analysis(&empty),
+        &registry,
+    );
+    assert_eq!(empty_result.decision, PolicyDecision::Deny);
+    assert_eq!(empty_result.reason, PolicyEvaluationReason::InvalidContext);
+}
+
+#[test]
+fn bash_effective_catalog_uses_tool_policy_without_command_rule_matches() {
+    let registry = bash_registry();
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "git-status-allow",
+        PolicyDecision::Allow,
+        PolicyMatcherConfig::bash_command("git", vec!["status".into()]),
+    ));
+    let engine = PolicyEngine::compile(&config, &registry);
+    let bash = engine
+        .effective_snapshot(&registry)
+        .per_tool
+        .into_iter()
+        .find(|tool| tool.tool == "bash")
+        .expect("bash catalog row");
+    assert_eq!(bash.decision, PolicyDecision::Ask);
+    assert!(bash.matched_rule_ids.is_empty());
+    assert_eq!(
+        bash.availability,
+        harness_control_protocol::PolicyToolAvailability::AvailableWithApproval
+    );
+}
+
+#[test]
+fn bash_effective_catalog_reports_unready_runtime_separately_from_policy() {
+    let mut config = PolicyConfig::default();
+    config.tool_defaults.bash = PolicyDecision::Allow;
+    config.user_rules.push(bash_rule(
+        "bash-allow",
+        PolicyDecision::Allow,
+        PolicyMatcherConfig::tool("bash"),
+    ));
+    let registry = ToolRegistry::from_config(&ToolConfig {
+        bash: harness_control_protocol::ToolEnabledConfig { enabled: true },
+        ..ToolConfig::default()
+    });
+    let engine = PolicyEngine::compile(&config, &registry);
+    let bash = engine
+        .effective_snapshot(&registry)
+        .per_tool
+        .into_iter()
+        .find(|tool| tool.tool == "bash")
+        .expect("bash catalog row");
+    assert_eq!(
+        bash.availability,
+        harness_control_protocol::PolicyToolAvailability::UnavailableByRuntime
+    );
 }

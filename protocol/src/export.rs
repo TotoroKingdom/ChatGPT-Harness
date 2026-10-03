@@ -35,6 +35,7 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         PolicyConfig,
         ToolEnabledConfig,
         ToolConfig,
+        BashConfig,
         WorkspaceConfig,
         TunnelConfig,
         SecretReference,
@@ -64,6 +65,7 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         PolicyRule,
         PolicyMatcherType,
         ToolMatcherConfig,
+        BashCommandMatcherConfig,
         PolicyMatcherConfig,
         UserPolicyRuleConfig,
         PolicySnapshotStatus,
@@ -82,6 +84,12 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         ActivitySubscribeResult,
         ApprovalStatus,
         ApprovalDecision,
+        BashClassification,
+        BashRiskFlag,
+        BashWorkingDirectory,
+        BashApprovalSegment,
+        BashApprovalDetails,
+        BashSessionGrantUnavailableReason,
         ApprovalRequest,
         ApprovalsListParams,
         ApprovalsListResult,
@@ -121,7 +129,11 @@ pub fn generate_json_schema(root: &Path) -> io::Result<()> {
 }
 
 fn append_decl<T: TS>(content: &mut String) {
-    let declaration = T::decl();
+    let declaration = T::decl()
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
     content.push_str(&declaration.replacen("type ", "export type ", 1));
     content.push('\n');
 }

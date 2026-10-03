@@ -4,7 +4,7 @@
 export type RpcRequest = { id: number | string, method: string, params?: unknown, };
 export type RpcResponse = { id: number | string, result: unknown, };
 export type RpcNotification = { method: string, params?: unknown, };
-export type RpcErrorData = { 
+export type RpcErrorData = {
 /**
  * Stable machine-readable error code. Do not parse `message`.
  */
@@ -12,14 +12,15 @@ code: MachineErrorCode, details?: string, };
 export type RpcError = { code: number, message: string, data: RpcErrorData, };
 export type RpcErrorResponse = { id: number | string, error: RpcError, };
 export type RpcMessage = RpcErrorResponse | RpcResponse | RpcRequest | RpcNotification;
-export type MachineErrorCode = "NOT_INITIALIZED" | "ALREADY_INITIALIZED" | "PROTOCOL_VERSION_MISMATCH" | "RUNTIME_NOT_READY" | "INVALID_ARGUMENT" | "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_RESOLVED" | "INTERNAL_ERROR";
+export type MachineErrorCode = "NOT_INITIALIZED" | "ALREADY_INITIALIZED" | "PROTOCOL_VERSION_MISMATCH" | "RUNTIME_NOT_READY" | "INVALID_ARGUMENT" | "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_RESOLVED" | "APPROVAL_SESSION_GRANT_UNAVAILABLE" | "BASH_UNAVAILABLE" | "BASH_INVALID_COMMAND" | "BASH_COMMAND_TOO_LONG" | "BASH_TIMEOUT" | "BASH_OUTPUT_LIMIT" | "BASH_CONCURRENCY_LIMIT" | "BASH_SPAWN_FAILED" | "BASH_CANCELLED" | "BASH_PROCESS_FAILED" | "INTERNAL_ERROR";
 export type EmptyParams = Record<string, never>;
 export type PolicyDecision = "deny" | "ask" | "allow";
-export type AppConfig = { schemaVersion: number, configRevision: string, workspace: WorkspaceConfig, tunnel: TunnelConfig, security: SecurityConfig, ui: UiConfig, tools: ToolConfig, policies: PolicyConfig, };
+export type AppConfig = { schemaVersion: number, configRevision: string, workspace: WorkspaceConfig, tunnel: TunnelConfig, security: SecurityConfig, ui: UiConfig, tools: ToolConfig, bash: BashConfig, policies: PolicyConfig, };
 export type ToolPolicyDefaults = { readFile: PolicyDecision, glob: PolicyDecision, write: PolicyDecision, edit: PolicyDecision, bash: PolicyDecision, };
 export type PolicyConfig = { toolDefaults: ToolPolicyDefaults, userRules: Array<UserPolicyRuleConfig>, };
 export type ToolEnabledConfig = { enabled: boolean, };
 export type ToolConfig = { readFile: ToolEnabledConfig, glob: ToolEnabledConfig, write: ToolEnabledConfig, edit: ToolEnabledConfig, bash: ToolEnabledConfig, };
+export type BashConfig = { autoDetect: boolean, executablePath?: string, };
 export type WorkspaceConfig = { rootPath: string, };
 export type TunnelConfig = { tunnelId: string, controlPlaneHttpProxy?: string, tunnelClientPath?: string, autoDetect: boolean, apiKeyRef?: SecretReference, };
 export type SecretReference = { provider: string, key: string, };
@@ -28,7 +29,7 @@ export type SecurityConfig = { mode: SecurityMode, developerTestMode: boolean, }
 export type UiConfig = { theme?: string, };
 export type StartEligibilityStatus = "setup_required" | "configuration_invalid" | "runtime_distribution_invalid" | "tunnel_id_required" | "api_key_required" | "tunnel_distribution_invalid" | "ready_to_start" | "runtime_already_running" | "harness_already_running" | "lifecycle_conflict";
 export type StartEligibility = { status: StartEligibilityStatus, canStart: boolean, message: string, };
-export type RuntimeConfigSnapshot = { configRevision: string, workspace: WorkspaceConfig, security: SecurityConfig, runtimeLimits: RuntimeLimits, tools: ToolConfig, policies: PolicyConfig, };
+export type RuntimeConfigSnapshot = { configRevision: string, workspace: WorkspaceConfig, security: SecurityConfig, runtimeLimits: RuntimeLimits, tools: ToolConfig, bash: BashConfig, policies: PolicyConfig, };
 export type RuntimeLimits = { maxConcurrentRequests: number, maxActivityEvents: number, maxReadBytes: number, };
 export type ClientInfo = { name: string, title: string, version: string, };
 export type ServerInfo = { name: string, title: string, version: string, };
@@ -38,7 +39,7 @@ export type InitializedParams = Record<string, never>;
 export type RuntimeLifecycle = "initializing" | "ready" | "stopping" | "error";
 export type RuntimeReadiness = "not_ready" | "initializing" | "ready" | "degraded";
 export type RuntimeErrorSummary = { code: string, message: string, };
-export type RuntimeState = { runtimeId: string, 
+export type RuntimeState = { runtimeId: string,
 /**
  * RFC3339 UTC timestamp.
  */
@@ -51,24 +52,25 @@ export type ToolDescriptor = { name: string, description: string, implemented: b
 export type ToolsListResult = { items: Array<ToolDescriptor>, };
 export type PolicySource = "system" | "user";
 export type PolicyRule = { id: string, name: string, decision: PolicyDecision, scope: string, reason: string, source: PolicySource, editable: boolean, enabled: boolean, };
-export type PolicyMatcherType = "tool";
+export type PolicyMatcherType = "tool" | "bash_command";
 export type ToolMatcherConfig = { tool: string, };
-export type PolicyMatcherConfig = { type: PolicyMatcherType, tool: string, };
+export type BashCommandMatcherConfig = { executable: string, argvPrefix: Array<string>, };
+export type PolicyMatcherConfig = { "type": "tool", tool: string, } | { "type": "bash_command", executable: string, argvPrefix: Array<string>, };
 export type UserPolicyRuleConfig = { id: string, name: string, enabled: boolean, decision: PolicyDecision, matcher: PolicyMatcherConfig, reason: string, };
 export type PolicySnapshotStatus = "valid" | "invalid";
 export type PolicyReason = "system_guardrail" | "matched_user_rules" | "tool_default" | "invalid_policy_snapshot" | "invalid_context" | "unsupported_capability" | "tool_disabled";
 export type EffectivePolicyRule = { id: string, name: string, decision: PolicyDecision, matcher?: PolicyMatcherConfig, reason: string, source: PolicySource, editable: boolean, enabled: boolean, };
-export type PolicyToolAvailability = "available" | "unavailable_by_policy" | "unavailable_by_runtime" | "disabled";
+export type PolicyToolAvailability = "available" | "available_with_approval" | "unavailable_by_policy" | "unavailable_by_runtime" | "disabled";
 export type EffectivePolicyTool = { tool: string, decision: PolicyDecision, matchedRuleIds: Array<string>, reason: PolicyReason, availability: PolicyToolAvailability, };
 export type PolicyEffectiveSnapshot = { valid: boolean, status: PolicySnapshotStatus, statusReason?: PolicyReason, systemRules: Array<EffectivePolicyRule>, userRules: Array<EffectivePolicyRule>, toolDefaults: ToolPolicyDefaults, perTool: Array<EffectivePolicyTool>, };
 export type PoliciesEffectiveResult = { snapshot: PolicyEffectiveSnapshot, };
 export type PoliciesListResult = { items: Array<PolicyRule>, effective?: PolicyEffectiveSnapshot, };
 export type ActivityEventType = "runtime_started" | "runtime_stopped" | "tool_requested" | "validation_failed" | "workspace_violation" | "policy_evaluated" | "approval_requested" | "approval_resolved" | "approval_denied" | "approval_expired" | "approval_cancelled" | "execution_started" | "execution_completed" | "execution_failed" | "execution_timed_out" | "execution_cancelled";
-export type ActivityEvent = { eventId: string, 
+export type ActivityEvent = { eventId: string,
 /**
  * Runtime-local monotonically increasing sequence number.
  */
-sequence: string, eventType: ActivityEventType, requestId?: string, 
+sequence: string, eventType: ActivityEventType, requestId?: string,
 /**
  * RFC3339 UTC timestamp.
  */
@@ -79,7 +81,38 @@ export type ActivitySubscribeParams = { afterSequence?: string, };
 export type ActivitySubscribeResult = { latestSequence: string, };
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type ApprovalDecision = "allow_once" | "allow_for_session" | "deny";
-export type ApprovalRequest = { requestId: string, runtimeId: string, generationId: string, tool: string, sanitizedArguments: { [key in string]?: string }, scopeSummary: string, matchedRuleIds: Array<string>, policyReason: PolicyReason, riskLevel: RiskLevel, createdAt: string, expiresAt: string, status: ApprovalStatus, resolvedAt?: string, decision?: ApprovalDecision, };
+export type BashClassification = "classified" | "unclassified_high_risk";
+export type BashRiskFlag = "command_substitution" | "backticks" | "eval" | "nested_shell" | "interpreter_inline_code" | "redirection" | "dynamic_expansion" | "malformed_quoting" | "unsupported_grammar";
+export type BashWorkingDirectory = "active_workspace";
+export type BashApprovalSegment = {
+/**
+ * Sanitized normalized executable identity.  This is never a raw shell
+ * source fragment or a canonical filesystem path.
+ */
+executable: string,
+/**
+ * Logical argv suitable for display only.  A value of `true` in
+ * `argv_redacted` means this vector cannot be used to create an exact
+ * BashCommand matcher draft.
+ */
+argv: Array<string>, argvRedacted: boolean, };
+export type BashApprovalDetails = {
+/**
+ * Bounded, shell-display-safe preview; it is never the raw command.
+ */
+commandPreview: string, classification: BashClassification, normalizedSegments: Array<BashApprovalSegment>, riskFlags: Array<BashRiskFlag>, cwd: BashWorkingDirectory, previewRedacted: boolean, previewTruncated: boolean, };
+export type BashSessionGrantUnavailableReason = "unclassified_high_risk";
+export type ApprovalRequest = { requestId: string, runtimeId: string, generationId: string, tool: string, sanitizedArguments: { [key in string]?: string }, scopeSummary: string, matchedRuleIds: Array<string>, policyReason: PolicyReason, riskLevel: RiskLevel,
+/**
+ * Optional M5 Bash projection.  Omitted for existing file-tool approval
+ * records so older consumers retain their current wire shape.
+ */
+bashDetails?: BashApprovalDetails,
+/**
+ * `None` is the legacy/non-Bash value.  Bash always supplies `Some` so
+ * unclassified commands can explicitly disable session grants.
+ */
+allowForSessionEligible?: boolean, allowForSessionUnavailableReason?: BashSessionGrantUnavailableReason, createdAt: string, expiresAt: string, status: ApprovalStatus, resolvedAt?: string, decision?: ApprovalDecision, };
 export type ApprovalsListParams = { status?: ApprovalStatus, };
 export type ApprovalsListResult = { items: Array<ApprovalRequest>, };
 export type ApprovalsResolveParams = { requestId: string, decision: ApprovalDecision, };

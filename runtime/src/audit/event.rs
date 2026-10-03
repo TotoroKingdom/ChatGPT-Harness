@@ -84,6 +84,15 @@ pub(crate) enum AuditFailureCategory {
     WorkspaceViolation,
     InvalidArguments,
     ExecutionFailed,
+    BashUnavailable,
+    BashInvalidCommand,
+    BashCommandTooLong,
+    BashTimeout,
+    BashOutputLimit,
+    BashConcurrencyLimit,
+    BashSpawnFailed,
+    BashCancelled,
+    BashProcessFailed,
 }
 
 /// Structured, serde-serializable audit evidence for one pipeline observation.
@@ -112,6 +121,8 @@ pub(crate) struct AuditEvent {
     pub(crate) outcome: AuditOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) failure_category: Option<AuditFailureCategory>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) bash: Option<harness_control_protocol::control_read::BashActivityEvidence>,
 }
 
 impl AuditEvent {
@@ -158,7 +169,7 @@ impl AuditEvent {
                 WorkspaceValidation::Passed,
                 None,
             ),
-            PipelineEvent::ExecutionFailed => (
+            PipelineEvent::ExecutionFailed | PipelineEvent::ExecutionCancelled => (
                 AuditEventType::ExecutionFailed,
                 AuditOutcome::Failed,
                 WorkspaceValidation::Passed,
@@ -207,6 +218,18 @@ impl AuditEvent {
             PipelineEvent::StateChanged { .. } | PipelineEvent::RequestFinished => return None,
         };
 
+        let workspace_validation = if context.tool_name == "bash"
+            && workspace_validation == WorkspaceValidation::Passed
+            && !context.policy.has_workspace_scope()
+        {
+            if context.failure_category == Some(AuditFailureCategory::WorkspaceViolation) {
+                WorkspaceValidation::Failed
+            } else {
+                WorkspaceValidation::NotAttempted
+            }
+        } else {
+            workspace_validation
+        };
         let evaluation = context.policy_evaluation.as_ref();
         Some(Self {
             event_id: Uuid::new_v4(),
@@ -229,10 +252,70 @@ impl AuditEvent {
             failure_category: match event {
                 PipelineEvent::WorkspaceValidated { passed: false }
                 | PipelineEvent::ExecutionFailed => context.failure_category,
+                PipelineEvent::ExecutionCancelled => Some(if context.tool_name == "bash" {
+                    AuditFailureCategory::BashCancelled
+                } else {
+                    AuditFailureCategory::ExecutionFailed
+                }),
                 _ => None,
             },
+            bash: bash_evidence(context),
         })
     }
+}
+
+fn bash_evidence(
+    context: &RequestContext,
+) -> Option<harness_control_protocol::control_read::BashActivityEvidence> {
+    if context.tool_name != "bash" {
+        return None;
+    }
+    use harness_control_protocol::{BashRiskFlag as Flag, BashWorkingDirectory, SecurityMode};
+    let details = context.bash_details.as_ref();
+    let flags = [
+        Flag::CommandSubstitution,
+        Flag::Backticks,
+        Flag::Eval,
+        Flag::NestedShell,
+        Flag::InterpreterInlineCode,
+        Flag::Redirection,
+        Flag::DynamicExpansion,
+        Flag::MalformedQuoting,
+        Flag::UnsupportedGrammar,
+    ];
+    let risk_flags = flags
+        .into_iter()
+        .filter(|flag| details.is_some_and(|facts| facts.risk_flags.contains(flag)))
+        .collect();
+    let command_preview = details.map(|facts| {
+        // The Pipeline supplies an analyzer-sanitized display projection. Never
+        // copy logical argv or the private normalized grant scope into audit.
+        let text = &facts.command_preview;
+        let mut end = text.len().min(1027);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text[..end].to_owned()
+    });
+    Some(
+        harness_control_protocol::control_read::BashActivityEvidence {
+            mode: context.security.mode.clone(),
+            mode_eligible: context.security.mode == SecurityMode::DeveloperTest,
+            capability: harness_control_protocol::control_read::ToolCapability::DeveloperShell,
+            cwd: BashWorkingDirectory::ActiveWorkspace,
+            command_preview,
+            classification: details.map(|facts| facts.classification.clone()),
+            risk_flags,
+            approval_request_id: context
+                .approval_request_id
+                .as_ref()
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .map(|id| id.to_string()),
+            session_grant_hit: context.session_grant_hit,
+            exit_code: context.bash_exit_code,
+            duration_ms: context.bash_duration_ms,
+        },
+    )
 }
 
 fn policy_reason(reason: PolicyEvaluationReason) -> PolicyReason {
@@ -248,5 +331,110 @@ fn policy_reason(reason: PolicyEvaluationReason) -> PolicyReason {
         PolicyEvaluationReason::InvalidContext => PolicyReason::InvalidContext,
         PolicyEvaluationReason::UnsupportedCapability => PolicyReason::UnsupportedCapability,
         PolicyEvaluationReason::ToolDisabled => PolicyReason::ToolDisabled,
+    }
+}
+
+#[cfg(test)]
+mod bash_evidence_tests {
+    use super::*;
+    use harness_control_protocol::{
+        BashApprovalDetails, BashApprovalSegment, BashClassification, BashRiskFlag,
+        BashWorkingDirectory, SecurityMode,
+    };
+
+    fn facts() -> BashApprovalDetails {
+        BashApprovalDetails {
+            command_preview: "git '<redacted>'".into(),
+            classification: BashClassification::UnclassifiedHighRisk,
+            normalized_segments: vec![BashApprovalSegment {
+                executable: "PRIVATE_EXECUTABLE_PATH".into(),
+                argv: vec!["PRIVATE_ARGV_SECRET".into()],
+                argv_redacted: true,
+            }],
+            risk_flags: vec![
+                BashRiskFlag::DynamicExpansion,
+                BashRiskFlag::DynamicExpansion,
+            ],
+            cwd: BashWorkingDirectory::ActiveWorkspace,
+            preview_redacted: true,
+            preview_truncated: false,
+        }
+    }
+
+    #[test]
+    fn bash_audit_retains_correlation_and_scalars_without_copying_argv_or_output() {
+        let mut context = RequestContext::for_evidence_test("bash", SecurityMode::DeveloperTest);
+        context.bash_details = Some(facts());
+        context.bash_exit_code = Some(7);
+        context.bash_duration_ms = Some(123);
+        context.approval_request_id = Some(context.request_id.to_string());
+        context.session_grant_hit = true;
+        let event =
+            AuditEvent::from_pipeline_event(&context, PipelineEvent::ExecutionCompleted).unwrap();
+        let serialized = serde_json::to_value(&event).unwrap();
+        let bash = &serialized["bash"];
+        assert_eq!(event.request_id, context.request_id);
+        assert_eq!(bash["approvalRequestId"], context.request_id.to_string());
+        assert_eq!(bash["exitCode"], 7);
+        assert_eq!(bash["durationMs"], 123);
+        assert_eq!(bash["sessionGrantHit"], true);
+        assert_eq!(bash["riskFlags"], serde_json::json!(["dynamic_expansion"]));
+        assert_eq!(bash["cwd"], "active_workspace");
+        let text = serialized.to_string();
+        for forbidden in [
+            "PRIVATE_",
+            "normalizedSegments",
+            "argv",
+            "stdout",
+            "stderr",
+            "fingerprint",
+            "grantScope",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "unexpected private evidence field: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn mode_rejection_does_not_invent_workspace_or_analyzer_success() {
+        let mut context = RequestContext::for_evidence_test("bash", SecurityMode::Normal);
+        context.failure_category = Some(AuditFailureCategory::BashUnavailable);
+        let event =
+            AuditEvent::from_pipeline_event(&context, PipelineEvent::ExecutionFailed).unwrap();
+        assert_eq!(
+            event.workspace_validation,
+            WorkspaceValidation::NotAttempted
+        );
+        let bash = event.bash.unwrap();
+        assert!(!bash.mode_eligible);
+        assert_eq!(bash.command_preview, None);
+        assert_eq!(bash.classification, None);
+        assert!(bash.risk_flags.is_empty());
+    }
+
+    #[test]
+    fn file_tool_wire_shape_does_not_gain_bash_evidence() {
+        let mut context = RequestContext::for_evidence_test("write", SecurityMode::Normal);
+        context.bash_details = Some(facts());
+        let event =
+            AuditEvent::from_pipeline_event(&context, PipelineEvent::RequestReceived).unwrap();
+        assert!(event.bash.is_none());
+        assert!(serde_json::to_value(event).unwrap().get("bash").is_none());
+    }
+
+    #[test]
+    fn invalid_approval_identity_is_dropped_and_preview_is_utf8_bounded() {
+        let mut context = RequestContext::for_evidence_test("bash", SecurityMode::DeveloperTest);
+        let mut details = facts();
+        details.command_preview = "界".repeat(2000);
+        context.bash_details = Some(details);
+        context.approval_request_id = Some("PRIVATE_APPROVAL_SECRET".into());
+        let event =
+            AuditEvent::from_pipeline_event(&context, PipelineEvent::PolicyDecision).unwrap();
+        let bash = event.bash.unwrap();
+        assert!(bash.command_preview.unwrap().len() <= 1027);
+        assert!(bash.approval_request_id.is_none());
     }
 }

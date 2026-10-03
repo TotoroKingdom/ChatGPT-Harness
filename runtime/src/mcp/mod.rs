@@ -3,6 +3,7 @@
 //! This module defines metadata, argument/result mapping, and error mapping.
 //! It deliberately owns no transport and performs no filesystem access.
 
+mod bash;
 mod context;
 mod edit;
 mod errors;

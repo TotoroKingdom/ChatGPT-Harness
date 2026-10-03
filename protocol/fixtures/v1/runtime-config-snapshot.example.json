@@ -3,6 +3,7 @@
   "workspace": { "rootPath": "<workspace>" },
   "security": { "mode": "normal", "developerTestMode": false },
   "runtimeLimits": { "maxConcurrentRequests": 4, "maxActivityEvents": 1000, "maxReadBytes": 1048576 },
+  "bash": { "autoDetect": true },
   "tools": {
     "readFile": { "enabled": true },
     "glob": { "enabled": true },

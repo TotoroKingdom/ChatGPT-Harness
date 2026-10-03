@@ -1,6 +1,7 @@
 mod activity;
 mod approval;
 mod audit;
+mod bash;
 mod control_read;
 mod diagnostics;
 mod events;
@@ -16,6 +17,12 @@ mod workspace;
 
 #[cfg(test)]
 mod m3_integration;
+#[cfg(test)]
+mod m5_analyzer_security;
+#[cfg(all(test, windows))]
+mod m5_bash_pipeline_tests;
+#[cfg(test)]
+mod m5_output_security;
 
 fn main() {
     if let Err(error) = server::run() {

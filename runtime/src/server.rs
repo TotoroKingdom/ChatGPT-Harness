@@ -390,6 +390,9 @@ fn handle_request<W: Write>(
             let decision = params.decision;
             let result = manager.resolve_with(&params.request_id, decision, |approval, scope| {
                 if decision == harness_control_protocol::ApprovalDecision::AllowForSession {
+                    let Some(scope) = scope else {
+                        return;
+                    };
                     grants.insert_from_approved_scope(
                         &approval.generation_id,
                         &approval.request_id,
@@ -425,6 +428,13 @@ fn handle_request<W: Write>(
                     error_codes::INTERNAL_ERROR,
                     MachineErrorCode::InternalError,
                     "Approval request could not be resolved.",
+                )?,
+                Err(crate::approval::ApprovalManagerError::SessionGrantNotEligible) => write_error(
+                    output,
+                    id,
+                    error_codes::INVALID_PARAMS,
+                    MachineErrorCode::ApprovalSessionGrantUnavailable,
+                    "AllowForSession is unavailable for this Bash request.",
                 )?,
             }
             Ok(false)
@@ -661,6 +671,7 @@ mod tests {
                 max_read_bytes: 1_048_576,
             },
             tools: ToolConfig::default(),
+            bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
@@ -808,7 +819,21 @@ mod tests {
             panic!("expected tools.list response");
         };
         let result: ToolsListResult = serde_json::from_value(response.result.clone()).unwrap();
-        assert_eq!(result.items, RuntimeCore::new().tool_registry().list());
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["read_file", "glob", "write", "edit", "bash"]
+        );
+        let bash = result
+            .items
+            .iter()
+            .find(|tool| tool.name == "bash")
+            .unwrap();
+        assert!(!bash.enabled);
+        assert_eq!(bash.risk_level, harness_control_protocol::RiskLevel::High);
     }
 
     #[test]
@@ -1116,6 +1141,9 @@ mod tests {
                 sanitized_arguments: [("path".into(), "notes.txt".into())].into_iter().collect(),
                 scope_summary: "notes.txt".into(),
                 fingerprint: "write|notes.txt|secret-is-internal-only".into(),
+                grant_scope: Some("notes.txt".into()),
+                bash_details: None,
+                allow_for_session_eligible: None,
                 matched_rule_ids: vec!["review-writes".into()],
                 policy_reason: harness_control_protocol::PolicyReason::MatchedUserRules,
                 risk_level: harness_control_protocol::RiskLevel::Medium,

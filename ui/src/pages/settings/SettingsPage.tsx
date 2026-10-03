@@ -4,6 +4,7 @@ import { Card, SectionHeading, StatusBadge } from "@/components/common/primitive
 import { useHarnessData } from "@/app/providers/HarnessDataProvider";
 
 const emptyConfig: AppConfig = {
+  bash: { autoDetect: true },
   schemaVersion: 1,
   configRevision: "0",
   workspace: { rootPath: "" },

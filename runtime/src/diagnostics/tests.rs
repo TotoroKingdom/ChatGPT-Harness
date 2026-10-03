@@ -32,6 +32,7 @@ impl Fixture {
                 max_read_bytes: 4096,
             },
             tools: ToolConfig::default(),
+            bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
@@ -72,13 +73,23 @@ fn snapshot_exists_before_runtime_state_and_does_not_claim_ready() {
         snapshot.security.execution_pipeline,
         PipelineState::NotInitialized
     );
-    assert_eq!(snapshot.tools.declared_count, 4);
+    assert_eq!(snapshot.tools.declared_count, 5);
     assert_eq!(snapshot.tools.effective_count, 0);
     assert!(snapshot
         .tools
         .items
         .iter()
+        .filter(|tool| tool.name != "bash")
         .all(|tool| tool.availability == DiagnosticToolAvailability::UnavailableByRuntime));
+    assert_eq!(
+        snapshot
+            .tools
+            .items
+            .iter()
+            .find(|tool| tool.name == "bash")
+            .map(|tool| tool.availability),
+        Some(DiagnosticToolAvailability::UnavailableByMode)
+    );
 }
 
 #[test]
@@ -247,6 +258,10 @@ fn tool_statuses_are_exact_projections_of_the_existing_effective_catalog() {
             "available_with_approval",
         ),
         (
+            DiagnosticToolAvailability::UnavailableByMode,
+            "unavailable_by_mode",
+        ),
+        (
             DiagnosticToolAvailability::UnavailableByPolicy,
             "unavailable_by_policy",
         ),
@@ -324,9 +339,13 @@ fn recorded_known_error_preserves_only_an_allowlisted_code() {
 }
 
 #[test]
-fn v1_json_shape_is_frozen_and_local_readiness_never_establishes_tunnel_readiness() {
+fn v1_file_shape_is_preserved_with_additive_bash_observations_and_no_tunnel_claim() {
     let fixture = Fixture::new();
-    let core = fixture.ready_core();
+    let mut config = fixture.config();
+    config.bash.auto_detect = false;
+    let mut core = RuntimeCore::new();
+    core.initialize(config).unwrap();
+    core.acknowledge().unwrap();
     let snapshot = core.diagnostics();
     let value = serde_json::to_value(&snapshot).unwrap();
     assert_eq!(
@@ -348,13 +367,16 @@ fn v1_json_shape_is_frozen_and_local_readiness_never_establishes_tunnel_readines
                 "executionPipeline": "ready"
             },
             "tools": {
-                "declaredCount": 4,
+                "declaredCount": 5,
                 "effectiveCount": 4,
                 "items": [
                     {"name":"read_file", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow"},
                     {"name":"glob", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow"},
                     {"name":"write", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow"},
-                    {"name":"edit", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow"}
+                    {"name":"edit", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow"},
+                    {"name":"bash", "declaredCapability":"developer_shell", "availability":"unavailable_by_mode", "decision":"deny",
+                     "readiness":"unavailable", "reason":"DeveloperShell is available only in Developer/Test mode",
+                     "readinessReason":"Git Bash auto-detection is disabled and no manual executable was configured."}
                 ]
             },
             "requests": {"observation":"not_instrumented", "activeCount":null},

@@ -6,11 +6,25 @@ describe("MockHarnessControlClient", () => {
   it("identifies the test adapter", () => {
     expect(new MockHarnessControlClient().adapterKind).toBe("mock");
   });
-  it("returns M0-shaped normal-mode tools", async () => {
+  it("returns the stable M5 catalog, including the mode-gated Bash row", async () => {
     const client = new MockHarnessControlClient();
     const result = await client.toolsList();
-    expect(result.items.map((tool) => tool.name)).toEqual(["read_file", "glob", "write", "edit"]);
+    expect(result.items.map((tool) => tool.name)).toEqual(["read_file", "glob", "write", "edit", "bash"]);
     expect(result.items.filter((tool) => tool.exposed).map((tool) => tool.name)).toEqual(["read_file", "glob", "write", "edit"]);
+  });
+
+  it("reports Bash mode, disabled, and Runtime observations separately", async () => {
+    const client = new MockHarnessControlClient();
+    await expect(client.runtimeGetEffectiveTools()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "bash", availability: "unavailable_by_mode", readiness: "unavailable" }),
+    ]));
+    const config = await client.configGet();
+    await client.configSave({ ...config!, security: { mode: "developer_test", developerTestMode: true }, tools: { ...config!.tools, bash: { enabled: true } } });
+    await client.runtimeStop();
+    await client.runtimeStart();
+    await expect(client.runtimeGetEffectiveTools()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "bash", availability: "unavailable_by_runtime", readiness: "unavailable" }),
+    ]));
   });
 
   it("cleans up activity subscriptions", async () => {
@@ -32,6 +46,7 @@ const testConfig = (): AppConfig => ({
   security: { mode: "normal", developerTestMode: false },
   ui: {},
   tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
+  bash: { autoDetect: true },
   policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
 });
 

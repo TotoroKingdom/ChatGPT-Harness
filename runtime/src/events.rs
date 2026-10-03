@@ -34,7 +34,15 @@ impl ActivityEventInput {
             InternalAuditEventType::PolicyEvaluated => ActivityEventType::PolicyEvaluated,
             InternalAuditEventType::ExecutionStarted => ActivityEventType::ExecutionStarted,
             InternalAuditEventType::ExecutionCompleted => ActivityEventType::ExecutionCompleted,
-            InternalAuditEventType::ExecutionFailed => ActivityEventType::ExecutionFailed,
+            InternalAuditEventType::ExecutionFailed => match event.failure_category {
+                Some(crate::audit::AuditFailureCategory::BashTimeout) => {
+                    ActivityEventType::ExecutionTimedOut
+                }
+                Some(crate::audit::AuditFailureCategory::BashCancelled) => {
+                    ActivityEventType::ExecutionCancelled
+                }
+                _ => ActivityEventType::ExecutionFailed,
+            },
             InternalAuditEventType::RequestDenied => ActivityEventType::ExecutionFailed,
             InternalAuditEventType::ApprovalRequired => ActivityEventType::ApprovalRequested,
             InternalAuditEventType::ApprovalResolved => {
@@ -84,6 +92,13 @@ impl ActivityEventInput {
                 "failureCategory".into(),
                 failure_category_name(category).into(),
             ));
+        }
+        if event.tool_name == "bash" {
+            if let Some(bash) = &event.bash {
+                if let Ok(value) = serde_json::to_string(bash) {
+                    metadata.push(("bash".into(), value));
+                }
+            }
         }
 
         let summary = activity_summary(event_type.clone());
@@ -145,11 +160,11 @@ fn activity_summary(event_type: ActivityEventType) -> &'static str {
         ActivityEventType::ApprovalDenied => "Tool approval denied.",
         ActivityEventType::ApprovalExpired => "Tool approval expired.",
         ActivityEventType::ApprovalCancelled => "Tool approval cancelled.",
+        ActivityEventType::ExecutionTimedOut => "Bash execution timed out.",
+        ActivityEventType::ExecutionCancelled => "Bash execution cancelled.",
         ActivityEventType::RuntimeStarted
         | ActivityEventType::RuntimeStopped
-        | ActivityEventType::ValidationFailed
-        | ActivityEventType::ExecutionTimedOut
-        | ActivityEventType::ExecutionCancelled => "Runtime activity observed.",
+        | ActivityEventType::ValidationFailed => "Runtime activity observed.",
     }
 }
 
@@ -162,6 +177,15 @@ fn failure_category_name(category: crate::audit::AuditFailureCategory) -> &'stat
         crate::audit::AuditFailureCategory::WorkspaceViolation => "workspace_violation",
         crate::audit::AuditFailureCategory::InvalidArguments => "invalid_arguments",
         crate::audit::AuditFailureCategory::ExecutionFailed => "execution_failed",
+        crate::audit::AuditFailureCategory::BashUnavailable => "bash_unavailable",
+        crate::audit::AuditFailureCategory::BashInvalidCommand => "bash_invalid_command",
+        crate::audit::AuditFailureCategory::BashCommandTooLong => "bash_command_too_long",
+        crate::audit::AuditFailureCategory::BashTimeout => "bash_timeout",
+        crate::audit::AuditFailureCategory::BashOutputLimit => "bash_output_limit",
+        crate::audit::AuditFailureCategory::BashConcurrencyLimit => "bash_concurrency_limit",
+        crate::audit::AuditFailureCategory::BashSpawnFailed => "bash_spawn_failed",
+        crate::audit::AuditFailureCategory::BashCancelled => "bash_cancelled",
+        crate::audit::AuditFailureCategory::BashProcessFailed => "bash_process_failed",
     }
 }
 
@@ -257,6 +281,7 @@ mod tests {
             approval_decision: None,
             outcome: AuditOutcome::InProgress,
             failure_category: None,
+            bash: None,
         })
         .expect("policy audit event projects to activity");
 

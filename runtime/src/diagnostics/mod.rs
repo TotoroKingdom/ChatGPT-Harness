@@ -85,6 +85,12 @@ pub(crate) struct ToolDiagnostic {
     pub declared_capability: Option<ToolCapability>,
     pub availability: DiagnosticToolAvailability,
     pub decision: PolicyDecision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<harness_control_protocol::ToolReadiness>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness_reason: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -92,6 +98,7 @@ pub(crate) struct ToolDiagnostic {
 pub(crate) enum DiagnosticToolAvailability {
     Available,
     AvailableWithApproval,
+    UnavailableByMode,
     UnavailableByPolicy,
     UnavailableByRuntime,
     Disabled,
@@ -99,6 +106,7 @@ pub(crate) enum DiagnosticToolAvailability {
 
 impl From<EffectiveTool> for ToolDiagnostic {
     fn from(tool: EffectiveTool) -> Self {
+        let reason = (tool.name == "bash").then(|| tool.reason.clone());
         Self {
             name: tool.name,
             declared_capability: tool.declared_capability,
@@ -106,6 +114,9 @@ impl From<EffectiveTool> for ToolDiagnostic {
                 ToolAvailability::Available => DiagnosticToolAvailability::Available,
                 ToolAvailability::AvailableWithApproval => {
                     DiagnosticToolAvailability::AvailableWithApproval
+                }
+                ToolAvailability::UnavailableByMode => {
+                    DiagnosticToolAvailability::UnavailableByMode
                 }
                 ToolAvailability::UnavailableByPolicy => {
                     DiagnosticToolAvailability::UnavailableByPolicy
@@ -116,6 +127,9 @@ impl From<EffectiveTool> for ToolDiagnostic {
                 ToolAvailability::UnavailableDisabled => DiagnosticToolAvailability::Disabled,
             },
             decision: tool.decision,
+            reason,
+            readiness: tool.readiness,
+            readiness_reason: tool.readiness_reason,
         }
     }
 }

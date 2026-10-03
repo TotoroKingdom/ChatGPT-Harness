@@ -148,6 +148,10 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     return this.call<string | null>("tunnel_client_choose");
   }
 
+  chooseBashExecutable() {
+    return this.call<string | null>("bash_executable_choose");
+  }
+
   detectTunnelClient() {
     return this.call<string | null>("tunnel_client_detect");
   }

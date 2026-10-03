@@ -1,13 +1,21 @@
 use crate::activity::{ActivityEntry, ActivityStore};
 use crate::approval::ApprovalManager;
-use crate::events::{ActivityEventInput, EventBus};
-use crate::execution::{ExecutionError, ExecutionPipeline, SecurityContext};
+use crate::audit::{
+    AuditEvent, AuditEventType, AuditFailureCategory, AuditLifecycleState, AuditOutcome, AuditSink,
+    WorkspaceValidation,
+};
+use crate::bash::{resolve_bash, BashExecutableState, BashRuntime};
+use crate::events::{ActivityEventInput, ActivityEventSender, EventBus};
+use crate::execution::{
+    BashCancellationKind, BashCancellationObserver, BashEvidenceSnapshot, ExecutionError,
+    ExecutionPipeline, SecurityContext,
+};
 use crate::mcp::{McpContextError, McpExecutionContext, McpService};
 use crate::policy::PolicyEngine;
 use crate::session_grant::SessionGrantStore;
 use crate::tools::{
     EditOutput, EditRequest, EffectiveTool, EffectiveToolCatalog, GlobOutput, GlobRequest,
-    ReadFileOutput, ReadFileRequest, ToolRegistry, WriteOutput, WriteRequest,
+    ReadFileOutput, ReadFileRequest, ToolAvailability, ToolRegistry, WriteOutput, WriteRequest,
 };
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
@@ -28,11 +36,75 @@ pub enum Phase {
     Stopping,
 }
 
+struct RuntimeBashCancellationObserver {
+    audit_sink: Arc<dyn AuditSink>,
+    activity_sender: ActivityEventSender,
+}
+
+impl BashCancellationObserver for RuntimeBashCancellationObserver {
+    fn on_bash_cancelled(&self, snapshot: BashEvidenceSnapshot, kind: BashCancellationKind) {
+        let approval_wait = matches!(kind, BashCancellationKind::ApprovalWait);
+        let bash = snapshot.details.map(|details| {
+            harness_control_protocol::control_read::BashActivityEvidence {
+                mode: snapshot.mode.clone(),
+                mode_eligible: snapshot.mode
+                    == harness_control_protocol::SecurityMode::DeveloperTest,
+                capability: harness_control_protocol::control_read::ToolCapability::DeveloperShell,
+                cwd: details.cwd,
+                command_preview: Some(details.command_preview),
+                classification: Some(details.classification),
+                risk_flags: details.risk_flags,
+                approval_request_id: snapshot.approval_request_id.clone(),
+                session_grant_hit: snapshot.session_grant_hit,
+                exit_code: snapshot.exit_code,
+                duration_ms: snapshot.duration_ms,
+            }
+        });
+        let event = AuditEvent {
+            event_id: uuid::Uuid::new_v4(),
+            request_id: snapshot.request_id,
+            timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            event_type: if approval_wait {
+                AuditEventType::ApprovalCancelled
+            } else {
+                AuditEventType::ExecutionFailed
+            },
+            tool_name: "bash".into(),
+            lifecycle_state: AuditLifecycleState::Failed,
+            workspace_id: "active".into(),
+            workspace_validation: WorkspaceValidation::NotAttempted,
+            policy_decision: snapshot
+                .policy_evaluation
+                .as_ref()
+                .map(|evaluation| evaluation.decision.clone()),
+            matched_rule_ids: snapshot
+                .policy_evaluation
+                .as_ref()
+                .map(|evaluation| evaluation.matched_rule_ids.clone())
+                .unwrap_or_default(),
+            policy_reason: snapshot
+                .policy_evaluation
+                .as_ref()
+                .map(|evaluation| crate::policy::to_wire_reason(evaluation.reason)),
+            approval_decision: None,
+            outcome: AuditOutcome::Failed,
+            failure_category: (!approval_wait).then_some(AuditFailureCategory::BashCancelled),
+            bash,
+        };
+        self.audit_sink.on_audit_event(&event);
+        if let Some(input) = ActivityEventInput::from_audit(&event) {
+            let _ = self.activity_sender.send(input);
+        }
+    }
+}
+
 pub struct RuntimeCore {
     pub runtime_id: String,
     pub started_at: String,
     pub phase: Phase,
     pub config: Option<RuntimeConfigSnapshot>,
+    bash_executable: BashExecutableState,
+    bash_runtime: Option<Arc<BashRuntime>>,
     pub events: Option<EventBus>,
     activity_event_receiver: Option<Receiver<ActivityEventInput>>,
     workspace_guard: Option<Arc<WorkspaceGuard>>,
@@ -59,6 +131,10 @@ impl RuntimeCore {
             started_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             phase: Phase::WaitingInitialize,
             config: None,
+            bash_executable: BashExecutableState::unavailable(
+                crate::bash::discovery::BashUnavailableReason::AutoDetectDisabled,
+            ),
+            bash_runtime: None,
             events: None,
             activity_event_receiver: None,
             workspace_guard: None,
@@ -76,7 +152,19 @@ impl RuntimeCore {
     pub fn initialize(&mut self, config: RuntimeConfigSnapshot) -> Result<(), WorkspaceError> {
         let workspace = Workspace::new(&config.workspace.root_path)?;
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
-        let tool_registry = Arc::new(ToolRegistry::from_config(&config.tools));
+        let bash_executable = resolve_bash(&config.bash);
+        let workspace_root = workspace_guard
+            .validate_workspace_root()
+            .map_err(|error| error)?
+            .to_path_buf();
+        let bash_runtime = Arc::new(BashRuntime::new(
+            bash_executable.canonical_path().map(ToOwned::to_owned),
+            workspace_root,
+        ));
+        let tool_registry = Arc::new(ToolRegistry::from_config_with_bash(
+            &config.tools,
+            &bash_executable,
+        ));
         let policy_engine = PolicyEngine::compile(&config.policies, &tool_registry);
         let activity = Arc::new(ActivityStore::with_previous_entries(
             &self.activity,
@@ -85,6 +173,10 @@ impl RuntimeCore {
         let audit_sink: Arc<dyn crate::audit::AuditSink> = activity.clone();
         let events = EventBus::from_limits(&config.runtime_limits);
         let (activity_event_sender, activity_event_receiver) = mpsc::channel();
+        let bash_cancellation_observer = Arc::new(RuntimeBashCancellationObserver {
+            audit_sink: Arc::clone(&audit_sink),
+            activity_sender: activity_event_sender.clone(),
+        });
         let approval_manager = ApprovalManager::new(self.runtime_id.clone());
         let session_grants = Arc::new(SessionGrantStore::new(self.runtime_id.clone()));
 
@@ -99,11 +191,15 @@ impl RuntimeCore {
             config.runtime_limits.max_read_bytes,
             Arc::clone(&self.mcp_readiness),
         )
+        .with_bash_runtime(Arc::clone(&bash_runtime))
+        .with_bash_cancellation_observer(bash_cancellation_observer)
         .with_approval_state(Arc::clone(&approval_manager), Arc::clone(&session_grants))
         .with_audit_sink(audit_sink);
         let pipeline = pipeline.with_activity_event_sender(activity_event_sender);
         self.execution_pipeline = Some(Arc::new(pipeline));
         self.tool_registry = tool_registry;
+        self.bash_executable = bash_executable;
+        self.bash_runtime = Some(bash_runtime);
         self.policy_engine = policy_engine;
         self.approval_manager = approval_manager;
         self.session_grants = session_grants;
@@ -123,9 +219,16 @@ impl RuntimeCore {
     pub(crate) fn rollback_initialize(&mut self) {
         self.mcp_readiness.store(false, Ordering::Release);
         self.approval_manager.cancel_all();
+        if let Some(runtime) = &self.bash_runtime {
+            runtime.stop();
+        }
         self.session_grants.clear();
         self.phase = Phase::WaitingInitialize;
         self.config = None;
+        self.bash_executable = BashExecutableState::unavailable(
+            crate::bash::discovery::BashUnavailableReason::AutoDetectDisabled,
+        );
+        self.bash_runtime = None;
         self.events = None;
         self.activity_event_receiver = None;
         self.workspace_guard = None;
@@ -183,6 +286,12 @@ impl RuntimeCore {
 
     pub fn tool_registry(&self) -> &ToolRegistry {
         &self.tool_registry
+    }
+
+    /// Runtime-owned executable readiness for the current immutable
+    /// generation.  The path is never sourced directly from persisted config.
+    pub(crate) fn bash_executable(&self) -> &BashExecutableState {
+        &self.bash_executable
     }
 
     /// Returns the current generation's Runtime-owned effective policy
@@ -243,6 +352,10 @@ impl RuntimeCore {
         Arc::clone(&self.session_grants)
     }
 
+    pub(crate) fn bash_runtime(&self) -> Option<Arc<BashRuntime>> {
+        self.bash_runtime.as_ref().map(Arc::clone)
+    }
+
     #[allow(dead_code)]
     /// Typed internal calls use the same initialized enforcement snapshot as MCP.
     pub(crate) fn read_file(
@@ -272,6 +385,9 @@ impl RuntimeCore {
     pub fn stop(&mut self) -> Option<ActivityEvent> {
         self.mcp_readiness.store(false, Ordering::Release);
         self.approval_manager.cancel_all();
+        if let Some(runtime) = &self.bash_runtime {
+            runtime.stop();
+        }
         self.session_grants.clear();
         if self.phase == Phase::Stopping {
             return None;
@@ -359,12 +475,35 @@ impl RuntimeCore {
             config_revision: config.config_revision,
             active_workspace: config.workspace.root_path.clone(),
             security_mode: config.security.mode.clone(),
-            exposed_tool_catalog: self.tool_registry.exposed_catalog(),
+            exposed_tool_catalog: self.exposed_tool_catalog(),
             active_requests: 0,
             pending_approvals,
             running_executions: 0,
             last_error: self.last_error.clone(),
         })
+    }
+
+    fn exposed_tool_catalog(&self) -> Vec<harness_control_protocol::ToolDescriptor> {
+        let mut catalog = self.tool_registry.exposed_catalog();
+        let bash_exposed = self
+            .execution_pipeline
+            .as_ref()
+            .and_then(|pipeline| {
+                pipeline
+                    .effective_tools()
+                    .into_iter()
+                    .find(|tool| tool.name == "bash")
+            })
+            .is_some_and(|tool| {
+                matches!(
+                    tool.availability,
+                    ToolAvailability::Available | ToolAvailability::AvailableWithApproval
+                )
+            });
+        if !bash_exposed {
+            catalog.retain(|tool| tool.name != "bash");
+        }
+        catalog
     }
 }
 
@@ -421,6 +560,7 @@ mod tests {
                 max_read_bytes: 1_048_576,
             },
             tools: ToolConfig::default(),
+            bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
@@ -450,9 +590,14 @@ mod tests {
         assert!(core.workspace_guard().is_some());
         assert_eq!(core.phase, Phase::InitializedPendingAck);
         assert!(!core.mcp_is_ready());
+        let catalog = core.status().unwrap().exposed_tool_catalog;
+        assert!(!catalog.iter().any(|tool| tool.name == "bash"));
         assert_eq!(
-            core.status().unwrap().exposed_tool_catalog,
-            core.tool_registry().exposed_catalog()
+            catalog
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["read_file", "glob", "write", "edit"]
         );
     }
 
@@ -464,13 +609,22 @@ mod tests {
         assert!(core
             .effective_tools()
             .iter()
+            .filter(|tool| tool.name != "bash")
             .all(|tool| tool.availability == crate::tools::ToolAvailability::UnavailableByRuntime));
+        assert_eq!(
+            core.effective_tools()
+                .iter()
+                .find(|tool| tool.name == "bash")
+                .map(|tool| tool.availability.clone()),
+            Some(crate::tools::ToolAvailability::UnavailableByMode)
+        );
 
         core.initialize(config_for(&workspace.root))
             .expect("initialize runtime");
         assert!(core
             .effective_tools()
             .iter()
+            .filter(|tool| tool.name != "bash")
             .all(|tool| tool.availability == crate::tools::ToolAvailability::UnavailableByRuntime));
 
         core.acknowledge().expect("acknowledge runtime");
@@ -480,22 +634,33 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit"]
+            ["read_file", "glob", "write", "edit", "bash"]
         );
-        assert!(effective.iter().all(|tool| {
-            tool.availability == crate::tools::ToolAvailability::Available
-                && tool.decision == harness_control_protocol::PolicyDecision::Allow
-        }));
+        assert!(effective
+            .iter()
+            .filter(|tool| tool.name != "bash")
+            .all(|tool| {
+                tool.availability == crate::tools::ToolAvailability::Available
+                    && tool.decision == harness_control_protocol::PolicyDecision::Allow
+            }));
+        assert_eq!(
+            effective
+                .iter()
+                .find(|tool| tool.name == "bash")
+                .map(|tool| tool.availability.clone()),
+            Some(crate::tools::ToolAvailability::UnavailableByMode)
+        );
 
         core.stop().expect("stop runtime");
         assert!(core
             .effective_tools()
             .iter()
+            .filter(|tool| tool.name != "bash")
             .all(|tool| tool.availability == crate::tools::ToolAvailability::UnavailableByRuntime));
     }
 
     #[test]
-    fn initialized_registry_uses_snapshot_tool_state_without_registering_bash() {
+    fn initialized_registry_uses_snapshot_tool_state_and_registers_bash_last() {
         let workspace = TestWorkspace::new();
         let mut config = config_for(&workspace.root);
         config.tools.read_file.enabled = false;
@@ -514,12 +679,17 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit"]
+            ["read_file", "glob", "write", "edit", "bash"]
         );
         assert!(!descriptors[0].enabled);
         assert!(!descriptors[1].enabled);
         assert!(!descriptors[2].enabled);
         assert!(descriptors[3].enabled);
+        assert!(descriptors[4].enabled);
+        assert_eq!(
+            core.tool_registry().declared_capability("bash"),
+            Some(crate::tools::ToolCapability::DeveloperShell)
+        );
         assert_eq!(
             core.tool_registry().declared_capability("write"),
             Some(crate::tools::ToolCapability::WorkspaceWrite)
@@ -537,6 +707,7 @@ mod tests {
                 crate::tools::ToolAvailability::UnavailableDisabled,
                 crate::tools::ToolAvailability::UnavailableDisabled,
                 crate::tools::ToolAvailability::Available,
+                crate::tools::ToolAvailability::UnavailableByMode,
             ]
         );
     }
@@ -634,10 +805,14 @@ mod tests {
             snapshot.status,
             harness_control_protocol::PolicySnapshotStatus::Invalid
         );
-        assert!(snapshot.per_tool.iter().all(|tool| {
-            tool.decision == PolicyDecision::Deny
-                && tool.reason == harness_control_protocol::PolicyReason::InvalidPolicySnapshot
-        }));
+        assert!(snapshot
+            .per_tool
+            .iter()
+            .filter(|tool| tool.tool != "bash")
+            .all(|tool| {
+                tool.decision == PolicyDecision::Deny
+                    && tool.reason == harness_control_protocol::PolicyReason::InvalidPolicySnapshot
+            }));
     }
 
     #[test]

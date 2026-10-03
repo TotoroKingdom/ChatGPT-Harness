@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub enum ToolAvailability {
     Available,
     AvailableWithApproval,
+    UnavailableByMode,
     UnavailableByPolicy,
     UnavailableByRuntime,
     UnavailableDisabled,
@@ -24,6 +25,10 @@ pub struct EffectiveTool {
     pub matched_rule_ids: Vec<String>,
     pub policy_reason: PolicyReason,
     pub declared_capability: Option<ToolCapability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<ToolReadiness>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness_reason: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -50,6 +55,10 @@ impl EffectiveToolCatalog {
                     matched_rule_ids: Vec::new(),
                     policy_reason: PolicyReason::UnsupportedCapability,
                     declared_capability: capability,
+                    readiness: (descriptor.name == "bash").then(|| descriptor.readiness.clone()),
+                    readiness_reason: (descriptor.name == "bash")
+                        .then(|| registry.readiness_reason(&descriptor.name))
+                        .flatten(),
                 };
                 if descriptor.name.trim().is_empty()
                     || descriptor.description.trim().is_empty()
@@ -60,6 +69,15 @@ impl EffectiveToolCatalog {
                     effective.reason = "tool metadata or declared capability is missing".into();
                     return effective;
                 }
+                if capability == Some(ToolCapability::DeveloperShell)
+                    && matches!(&security_mode, SecurityMode::Normal)
+                {
+                    effective.availability = ToolAvailability::UnavailableByMode;
+                    effective.reason =
+                        "DeveloperShell is available only in Developer/Test mode".into();
+                    effective.policy_reason = PolicyReason::UnsupportedCapability;
+                    return effective;
+                }
                 if !descriptor.enabled || !descriptor.exposed {
                     effective.availability = ToolAvailability::UnavailableDisabled;
                     effective.reason = "tool is disabled or not exposed".into();
@@ -67,6 +85,11 @@ impl EffectiveToolCatalog {
                     return effective;
                 }
                 if !runtime_ready || descriptor.readiness != ToolReadiness::Ready {
+                    if descriptor.readiness != ToolReadiness::Ready {
+                        effective.reason = registry
+                            .readiness_reason(&descriptor.name)
+                            .unwrap_or_else(|| "runtime capability is unavailable".into());
+                    }
                     return effective;
                 }
                 let evaluation = policy.evaluate(
@@ -136,6 +159,9 @@ mod tests {
             SecurityMode::Normal,
             ready,
         )
+        .into_iter()
+        .filter(|tool| tool.name != "bash")
+        .collect()
     }
     #[test]
     fn allow_exposes_all_declared_tools() {
@@ -219,7 +245,10 @@ mod tests {
             &PolicyEngine::new(PolicyEngine::system_rules()),
             SecurityMode::Normal,
             true,
-        );
+        )
+        .into_iter()
+        .filter(|tool| tool.name != "bash")
+        .collect::<Vec<_>>();
         assert_eq!(
             tools
                 .iter()
@@ -243,6 +272,103 @@ mod tests {
                 EffectiveToolCatalog::compute(&reg, &p, SecurityMode::Normal, true),
                 first
             );
+        }
+    }
+
+    #[test]
+    fn normal_mode_marks_developer_shell_unavailable_by_mode() {
+        let tools = EffectiveToolCatalog::compute(
+            &ToolRegistry::normal_mode(),
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::Normal,
+            true,
+        );
+        let bash = tools.iter().find(|tool| tool.name == "bash").unwrap();
+        assert_eq!(bash.availability, ToolAvailability::UnavailableByMode);
+        assert_eq!(bash.decision, PolicyDecision::Deny);
+    }
+
+    #[test]
+    fn developer_mode_distinguishes_disabled_and_unready_bash() {
+        let disabled = EffectiveToolCatalog::compute(
+            &ToolRegistry::normal_mode(),
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::DeveloperTest,
+            true,
+        );
+        let bash = disabled.iter().find(|tool| tool.name == "bash").unwrap();
+        assert_eq!(bash.availability, ToolAvailability::UnavailableDisabled);
+
+        let mut config = harness_control_protocol::ToolConfig::default();
+        config.bash.enabled = true;
+        let unready = EffectiveToolCatalog::compute(
+            &ToolRegistry::from_config(&config),
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::DeveloperTest,
+            true,
+        );
+        let bash = unready.iter().find(|tool| tool.name == "bash").unwrap();
+        assert_eq!(bash.availability, ToolAvailability::UnavailableByRuntime);
+    }
+
+    #[test]
+    fn bash_executable_observation_remains_separate_from_mode_and_enablement() {
+        let mut config = harness_control_protocol::ToolConfig::default();
+        config.bash.enabled = true;
+        let executable = crate::bash::discovery::BashExecutableState::Ready {
+            canonical_path: std::path::PathBuf::from(r"C:\Git\bin\bash.exe"),
+            source: crate::bash::discovery::BashExecutableSource::Manual,
+        };
+        let registry = ToolRegistry::from_config_with_bash(&config, &executable);
+        let policy = PolicyEngine::compile(
+            &harness_control_protocol::PolicyConfig::default(),
+            &registry,
+        );
+        let normal = EffectiveToolCatalog::compute(&registry, &policy, SecurityMode::Normal, true);
+        let bash = normal.into_iter().find(|tool| tool.name == "bash").unwrap();
+        assert_eq!(bash.availability, ToolAvailability::UnavailableByMode);
+        let observation =
+            serde_json::to_value(crate::diagnostics::ToolDiagnostic::from(bash)).unwrap();
+        assert_eq!(observation["availability"], "unavailable_by_mode");
+        assert_eq!(observation["readiness"], "ready");
+        assert!(observation["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Developer/Test"));
+
+        config.bash.enabled = false;
+        let registry = ToolRegistry::from_config_with_bash(&config, &executable);
+        let tools =
+            EffectiveToolCatalog::compute(&registry, &policy, SecurityMode::DeveloperTest, true);
+        let bash = tools.into_iter().find(|tool| tool.name == "bash").unwrap();
+        assert_eq!(bash.availability, ToolAvailability::UnavailableDisabled);
+        assert_eq!(bash.readiness, Some(ToolReadiness::Ready));
+    }
+
+    #[test]
+    fn bash_readiness_remediation_is_observed_without_disclosing_desired_path() {
+        let registry = ToolRegistry::normal_mode();
+        let tools = EffectiveToolCatalog::compute(
+            &registry,
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::Normal,
+            true,
+        );
+        for tool in tools {
+            let name = tool.name.clone();
+            let observation =
+                serde_json::to_value(crate::diagnostics::ToolDiagnostic::from(tool)).unwrap();
+            if name == "bash" {
+                assert_eq!(observation["readiness"], "unavailable");
+                assert!(observation["readinessReason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("manual"));
+            } else {
+                assert!(observation.get("readiness").is_none());
+                assert!(observation.get("reason").is_none());
+                assert!(observation.get("readinessReason").is_none());
+            }
         }
     }
 }

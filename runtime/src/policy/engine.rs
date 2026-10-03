@@ -1,8 +1,12 @@
-use crate::tools::{ToolCapability, ToolRegistry};
+use crate::{
+    bash::analyzer::BashCommandAnalysis,
+    tools::{ToolCapability, ToolRegistry},
+};
 use harness_control_protocol::{
-    EffectivePolicyRule, EffectivePolicyTool, PolicyConfig, PolicyDecision,
-    PolicyEffectiveSnapshot, PolicyReason, PolicyRule, PolicySnapshotStatus, PolicySource,
-    PolicyToolAvailability, SecurityMode, ToolPolicyDefaults, UserPolicyRuleConfig,
+    normalize_bash_executable, EffectivePolicyRule, EffectivePolicyTool, PolicyConfig,
+    PolicyDecision, PolicyEffectiveSnapshot, PolicyMatcherConfig, PolicyReason, PolicyRule,
+    PolicySnapshotStatus, PolicySource, PolicyToolAvailability, SecurityMode, ToolPolicyDefaults,
+    UserPolicyRuleConfig,
 };
 use std::collections::BTreeSet;
 
@@ -35,6 +39,8 @@ pub(crate) struct PolicyContext<'a> {
     pub(crate) tool_name: &'a str,
     pub(crate) security_mode: SecurityMode,
     scope: Option<PolicyScope>,
+    bash_analysis: Option<&'a BashCommandAnalysis>,
+    require_bash_analysis: bool,
 }
 
 impl<'a> PolicyContext<'a> {
@@ -43,7 +49,32 @@ impl<'a> PolicyContext<'a> {
             tool_name,
             security_mode,
             scope: PolicyScope::parse(scope),
+            bash_analysis: None,
+            require_bash_analysis: false,
         }
+    }
+
+    /// Attach analyzer facts to a concrete Bash request.  The original raw
+    /// command is deliberately absent; the execution pipeline retains it
+    /// separately and this context carries only non-secret policy facts.
+    pub(crate) fn with_bash_analysis(mut self, analysis: &'a BashCommandAnalysis) -> Self {
+        self.bash_analysis = Some(analysis);
+        self.require_bash_analysis = true;
+        self
+    }
+
+    /// Mark a Bash context as a concrete request even before analysis is
+    /// available.  Runtime then fails closed instead of falling back to the
+    /// catalog-level Bash default.
+    pub(crate) fn require_bash_analysis(mut self) -> Self {
+        self.require_bash_analysis = true;
+        self
+    }
+
+    /// Observational only: RequestContext sets this scope after WorkspaceGuard
+    /// validation. This method supplies no execution authorization.
+    pub(crate) fn has_workspace_scope(&self) -> bool {
+        self.scope == Some(PolicyScope::ActiveWorkspace)
     }
 }
 
@@ -86,7 +117,18 @@ impl PolicyEvaluation {
 #[derive(Clone)]
 struct CompiledUserRule {
     config: UserPolicyRuleConfig,
-    tool: String,
+    matcher: CompiledMatcher,
+}
+
+#[derive(Clone)]
+enum CompiledMatcher {
+    Tool {
+        tool: String,
+    },
+    BashCommand {
+        executable: String,
+        argv_prefix: Vec<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -140,26 +182,44 @@ impl PolicyEngine {
                 continue;
             }
             let id = rule.id.trim();
-            let tool = rule.matcher.tool.trim();
-            let well_formed = !id.is_empty()
+            let base_well_formed = !id.is_empty()
                 && !rule.name.trim().is_empty()
                 && !rule.reason.trim().is_empty()
                 && ids.insert(id.to_owned())
-                && matches!(
-                    rule.matcher.matcher_type,
-                    harness_control_protocol::PolicyMatcherType::Tool
-                )
-                && !tool.is_empty()
-                // `declared_capability` includes configured-but-disabled
-                // built-ins, while excluding future unimplemented bash.
-                && registry.declared_capability(tool).is_some();
-            if !well_formed {
+                && rule.matcher.validate().is_ok();
+            let matcher = match &rule.matcher {
+                PolicyMatcherConfig::Tool { tool } => {
+                    let tool = tool.trim();
+                    // `declared_capability` includes configured-but-disabled
+                    // built-ins, so a persisted rule can be compiled before
+                    // the next generation becomes ready.
+                    base_well_formed
+                        .then(|| registry.declared_capability(tool).is_some())
+                        .and_then(|known| {
+                            known.then(|| CompiledMatcher::Tool {
+                                tool: tool.to_owned(),
+                            })
+                        })
+                }
+                PolicyMatcherConfig::BashCommand {
+                    executable,
+                    argv_prefix,
+                } => base_well_formed
+                    .then(|| normalize_bash_executable(executable))
+                    .flatten()
+                    .filter(|_| registry.declared_capability("bash").is_some())
+                    .map(|executable| CompiledMatcher::BashCommand {
+                        executable,
+                        argv_prefix: argv_prefix.clone(),
+                    }),
+            };
+            if matcher.is_none() {
                 valid = false;
                 continue;
             }
             enabled_user_rules.push(CompiledUserRule {
                 config: rule.clone(),
-                tool: tool.to_owned(),
+                matcher: matcher.expect("matcher checked above"),
             });
         }
 
@@ -307,14 +367,43 @@ impl PolicyEngine {
                     reason: PolicyEvaluationReason::SystemGuardrail,
                 }
             }
-            // Typed M3 user rules do not create developer/test capabilities.
+            (
+                SecurityMode::DeveloperTest,
+                ToolCapability::DeveloperShell,
+                PolicyScope::ActiveWorkspace,
+            ) => {}
+            (
+                SecurityMode::Normal,
+                ToolCapability::DeveloperShell,
+                PolicyScope::ActiveWorkspace,
+            ) => return PolicyEvaluation::denied(PolicyEvaluationReason::UnsupportedCapability),
+            (
+                SecurityMode::DeveloperTest,
+                ToolCapability::DeveloperShell,
+                PolicyScope::OutsideActiveWorkspace,
+            ) => {
+                return PolicyEvaluation {
+                    decision: PolicyDecision::Deny,
+                    matched_rule_ids: vec!["system-deny-outside".into()],
+                    reason: PolicyEvaluationReason::SystemGuardrail,
+                }
+            }
+            // Typed user rules do not create capabilities for other modes or
+            // unknown logical scopes.
             _ => return PolicyEvaluation::denied(PolicyEvaluationReason::UnsupportedCapability),
+        }
+
+        if context.tool_name == "bash" && context.require_bash_analysis {
+            let Some(analysis) = context.bash_analysis else {
+                return PolicyEvaluation::denied(PolicyEvaluationReason::InvalidContext);
+            };
+            return Self::evaluate_bash_request(snapshot, analysis);
         }
 
         let mut matched = snapshot
             .enabled_user_rules
             .iter()
-            .filter(|rule| rule.tool == context.tool_name)
+            .filter(|rule| matches_tool(&rule.matcher, context.tool_name))
             .collect::<Vec<_>>();
         matched.sort_unstable_by(|left, right| left.config.id.cmp(&right.config.id));
         if let Some(decisive) = matched
@@ -335,6 +424,72 @@ impl PolicyEngine {
             decision,
             matched_rule_ids: Vec::new(),
             reason: PolicyEvaluationReason::ToolDefault,
+        }
+    }
+
+    fn evaluate_bash_request(
+        snapshot: &CompiledPolicySnapshot,
+        analysis: &BashCommandAnalysis,
+    ) -> PolicyEvaluation {
+        if analysis.segments.is_empty()
+            || analysis.operators.len().saturating_add(1) != analysis.segments.len()
+            || analysis
+                .segments
+                .iter()
+                .any(|segment| segment.executable.is_empty())
+        {
+            return PolicyEvaluation::denied(PolicyEvaluationReason::InvalidContext);
+        }
+        let mut matched_ids = BTreeSet::new();
+        let mut aggregate = PolicyDecision::Allow;
+        let mut any_explicit = false;
+
+        for segment in &analysis.segments {
+            let mut segment_decision: Option<PolicyDecision> = None;
+            for rule in &snapshot.enabled_user_rules {
+                let matched = match &rule.matcher {
+                    CompiledMatcher::Tool { tool } => tool == "bash",
+                    CompiledMatcher::BashCommand {
+                        executable,
+                        argv_prefix,
+                    } => {
+                        segment.executable == *executable
+                            && argv_prefix.len() <= segment.argv.len()
+                            && argv_prefix
+                                .iter()
+                                .zip(&segment.argv)
+                                .all(|(expected, actual)| expected == actual)
+                    }
+                };
+                if matched {
+                    any_explicit = true;
+                    matched_ids.insert(rule.config.id.clone());
+                    segment_decision =
+                        Some(max_decision(segment_decision, rule.config.decision.clone()));
+                }
+            }
+            let decision = segment_decision
+                .or_else(|| snapshot.defaults.decision_for("bash"))
+                .unwrap_or(PolicyDecision::Deny);
+            let decision = if matches!(
+                analysis.classification,
+                crate::bash::analyzer::BashClassification::UnclassifiedHighRisk
+            ) {
+                max_decision(Some(decision), PolicyDecision::Ask)
+            } else {
+                decision
+            };
+            aggregate = max_decision(Some(aggregate), decision);
+        }
+
+        PolicyEvaluation {
+            decision: aggregate,
+            matched_rule_ids: matched_ids.into_iter().collect(),
+            reason: if any_explicit {
+                PolicyEvaluationReason::MatchedUserRules
+            } else {
+                PolicyEvaluationReason::ToolDefault
+            },
         }
     }
 
@@ -383,9 +538,7 @@ impl PolicyEngine {
                 id: rule.id.clone(),
                 name: rule.name.clone(),
                 decision: rule.decision.clone(),
-                matcher: Some(harness_control_protocol::PolicyMatcherConfig::tool(
-                    rule.matcher.tool.clone(),
-                )),
+                matcher: Some(rule.matcher.clone()),
                 reason: rule.reason.clone(),
                 source: PolicySource::User,
                 editable: true,
@@ -406,13 +559,29 @@ impl PolicyEngine {
                         availability: PolicyToolAvailability::Disabled,
                     };
                 }
+                if descriptor.name == "bash"
+                    && descriptor.readiness != harness_control_protocol::ToolReadiness::Ready
+                {
+                    return EffectivePolicyTool {
+                        tool: descriptor.name,
+                        decision: PolicyDecision::Deny,
+                        matched_rule_ids: Vec::new(),
+                        reason: PolicyReason::UnsupportedCapability,
+                        availability: PolicyToolAvailability::UnavailableByRuntime,
+                    };
+                }
                 let evaluation = if valid {
+                    let mode = if descriptor.name == "bash" {
+                        // Policy projection is mode-independent for catalog
+                        // rows; DeveloperTest evaluates the Bash default and
+                        // Tool-level rules without treating Normal-mode
+                        // exposure as a policy denial.
+                        SecurityMode::DeveloperTest
+                    } else {
+                        SecurityMode::Normal
+                    };
                     self.evaluate(
-                        &PolicyContext::new(
-                            &descriptor.name,
-                            SecurityMode::Normal,
-                            &descriptor.scope,
-                        ),
+                        &PolicyContext::new(&descriptor.name, mode, &descriptor.scope),
                         registry,
                     )
                 } else {
@@ -420,6 +589,9 @@ impl PolicyEngine {
                 };
                 let availability = match evaluation.decision {
                     PolicyDecision::Allow => PolicyToolAvailability::Available,
+                    PolicyDecision::Ask if descriptor.name == "bash" => {
+                        PolicyToolAvailability::AvailableWithApproval
+                    }
                     PolicyDecision::Ask | PolicyDecision::Deny => {
                         PolicyToolAvailability::UnavailableByPolicy
                     }
@@ -458,7 +630,7 @@ impl PolicyEngine {
                     id: rule.id.clone(),
                     name: rule.name.clone(),
                     decision: rule.decision.clone(),
-                    scope: format!("tool:{}", rule.matcher.tool),
+                    scope: legacy_scope(&rule.matcher),
                     reason: rule.reason.clone(),
                     source: PolicySource::User,
                     editable: true,
@@ -481,6 +653,31 @@ fn user_config_from_legacy(rule: &PolicyRule) -> UserPolicyRuleConfig {
         decision: rule.decision.clone(),
         matcher: harness_control_protocol::PolicyMatcherConfig::tool(rule.scope.clone()),
         reason: rule.reason.clone(),
+    }
+}
+
+fn matches_tool(matcher: &CompiledMatcher, tool: &str) -> bool {
+    matches!(matcher, CompiledMatcher::Tool { tool: matcher_tool } if matcher_tool == tool)
+}
+
+fn max_decision(current: Option<PolicyDecision>, candidate: PolicyDecision) -> PolicyDecision {
+    match current {
+        Some(current) if severity(&current) >= severity(&candidate) => current,
+        _ => candidate,
+    }
+}
+
+fn legacy_scope(matcher: &PolicyMatcherConfig) -> String {
+    match matcher {
+        PolicyMatcherConfig::Tool { tool } => format!("tool:{tool}"),
+        PolicyMatcherConfig::BashCommand {
+            executable,
+            argv_prefix,
+        } => format!(
+            "bash_command:{}:{}",
+            executable,
+            serde_json::to_string(argv_prefix).unwrap_or_else(|_| "[]".into())
+        ),
     }
 }
 

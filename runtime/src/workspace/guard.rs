@@ -40,6 +40,35 @@ impl WorkspaceGuard {
         }
     }
 
+    /// Revalidates the active canonical workspace root for tools such as Bash
+    /// that have no single filesystem target.  This is only cwd validation;
+    /// it does not authorize paths used inside the shell command.
+    pub(crate) fn validate_workspace_root(&self) -> Result<&Path, WorkspaceError> {
+        let root = self.workspace.canonical_root();
+        let metadata = fs::symlink_metadata(root).map_err(|error| {
+            WorkspaceError::CanonicalizationFailure {
+                path: root.to_path_buf(),
+                kind: error.kind(),
+            }
+        })?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+            return Err(WorkspaceError::InvalidWorkspaceRoot {
+                path: root.to_path_buf(),
+            });
+        }
+        let canonical =
+            fs::canonicalize(root).map_err(|error| WorkspaceError::CanonicalizationFailure {
+                path: root.to_path_buf(),
+                kind: error.kind(),
+            })?;
+        if canonical != *root {
+            return Err(WorkspaceError::InvalidWorkspaceRoot {
+                path: root.to_path_buf(),
+            });
+        }
+        Ok(root)
+    }
+
     pub fn approve(
         &self,
         requested_path: impl AsRef<Path>,
@@ -200,6 +229,19 @@ fn normalize_relative(path: &Path) -> PathBuf {
 
 fn is_within_workspace(workspace_root: &Path, resolved_path: &Path) -> bool {
     resolved_path == workspace_root || resolved_path.strip_prefix(workspace_root).is_ok()
+}
+
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        false
+    }
 }
 
 #[cfg(test)]

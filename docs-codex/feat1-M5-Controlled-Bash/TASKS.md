@@ -1,6 +1,8 @@
 # M5 TASKS — Controlled Bash
 
 > Inputs: `SPEC.md`, `PLAN.md`  
+> Status: M5 Development Complete
+> Evidence: `DEVELOPMENT_REPORT.md`
 > Executor: Codex / Coding Agent  
 > Baseline: M4 ACCEPTED / FROZEN  
 > 每个 Task 必须包含实现 + Unit Test / code-level automated verification。  
@@ -871,34 +873,34 @@ Unit / Integration / E2E由 Coding Agent自动完成；Manual Acceptance才需�
 
 ## Development Completion Checklist
 
-- [ ] T1 Bash Config / Discovery / Registry PASS
-- [ ] T2 Command Analyzer / Bash Policy PASS
-- [ ] T3 Bash Runtime / Process Tree / Limits PASS
-- [ ] T4 Pipeline / MCP / Approval / Evidence PASS
-- [ ] T5 Tools / Policies / Approval UI PASS
-- [ ] T6 Regression PASS
-- [ ] Bash default OFF
-- [ ] Bash default ASK
-- [ ] Normal Mode = UnavailableByMode / not MCP exposed
-- [ ] DeveloperTest + enabled + ready works
-- [ ] Git Bash manual/auto detection
-- [ ] typed BashCommand matcher
-- [ ] compound severity
-- [ ] unclassified risk floor ASK
-- [ ] broad ALLOW cannot bypass floor
-- [ ] M4 same-request Approval reused
-- [ ] classified exact session grant
-- [ ] unclassified no reusable session grant
-- [ ] timeout hard kill
-- [ ] output-limit hard kill
-- [ ] concurrency limit
-- [ ] cancellation cleanup
-- [ ] descendant process-tree cleanup
-- [ ] Runtime shutdown cleanup
-- [ ] Bash MCP metadata truthful
-- [ ] no fake sandbox claim
-- [ ] M0–M4 regression PASS
-- [ ] cargo fmt/check/test PASS
-- [ ] frontend checks PASS
-- [ ] git diff --check PASS
-- [ ] TASKS未声称 Integration/E2E/Manual Acceptance PASS
+- [x] T1 Bash Config / Discovery / Registry PASS
+- [x] T2 Command Analyzer / Bash Policy PASS
+- [x] T3 Bash Runtime / Process Tree / Limits PASS
+- [x] T4 Pipeline / MCP / Approval / Evidence PASS
+- [x] T5 Tools / Policies / Approval UI PASS
+- [x] T6 Regression PASS
+- [x] Bash default OFF
+- [x] Bash default ASK
+- [x] Normal Mode = UnavailableByMode / not MCP exposed
+- [x] DeveloperTest + enabled + ready works
+- [x] Git Bash manual/auto detection
+- [x] typed BashCommand matcher
+- [x] compound severity
+- [x] unclassified risk floor ASK
+- [x] broad ALLOW cannot bypass floor
+- [x] M4 same-request Approval reused
+- [x] classified exact session grant
+- [x] unclassified no reusable session grant
+- [x] timeout hard kill
+- [x] output-limit hard kill
+- [x] concurrency limit
+- [x] cancellation cleanup
+- [x] descendant process-tree cleanup
+- [x] Runtime shutdown cleanup
+- [x] Bash MCP metadata truthful
+- [x] no fake sandbox claim
+- [x] M0–M4 regression PASS
+- [x] cargo fmt/check/test PASS
+- [x] frontend checks PASS
+- [x] git diff --check PASS
+- [x] TASKS未声称 Integration/E2E/Manual Acceptance PASS

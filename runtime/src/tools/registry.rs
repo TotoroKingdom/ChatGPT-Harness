@@ -1,3 +1,4 @@
+use crate::bash::discovery::BashExecutableState;
 use harness_control_protocol::{
     PolicyDecision, RiskLevel, ToolConfig, ToolDescriptor, ToolReadiness,
 };
@@ -18,12 +19,14 @@ pub struct ToolRegistry {
 pub enum ToolCapability {
     WorkspaceRead,
     WorkspaceWrite,
+    DeveloperShell,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RegisteredTool {
     descriptor: ToolDescriptor,
     capability: ToolCapability,
+    readiness_reason: Option<String>,
 }
 
 impl ToolRegistry {
@@ -32,6 +35,13 @@ impl ToolRegistry {
         self.entries
             .iter()
             .find_map(|entry| (entry.descriptor.name == name).then_some(entry.capability))
+    }
+
+    pub(crate) fn readiness_reason(&self, name: &str) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|entry| entry.descriptor.name == name)
+            .and_then(|entry| entry.readiness_reason.clone())
     }
 
     pub fn capability(&self, name: &str) -> Option<ToolCapability> {
@@ -55,90 +65,117 @@ impl ToolRegistry {
 
     /// Build the Normal Mode catalog in its stable, protocol-visible order.
     pub fn normal_mode() -> Self {
-        Self {
-            entries: vec![
-                RegisteredTool {
-                    capability: ToolCapability::WorkspaceRead,
-                    descriptor: ToolDescriptor {
-                        name: "read_file".into(),
-                        description: "Read a workspace file.".into(),
-                        implemented: true,
-                        enabled: true,
-                        exposed: true,
-                        effective_policy: PolicyDecision::Allow,
-                        scope: WORKSPACE_SCOPE.into(),
-                        readiness: ToolReadiness::Ready,
-                        risk_level: RiskLevel::Low,
-                    },
+        Self::from_config_with_bash(
+            &ToolConfig::default(),
+            &BashExecutableState::unavailable(
+                crate::bash::discovery::BashUnavailableReason::AutoDetectDisabled,
+            ),
+        )
+    }
+
+    /// Build a generation-specific registry with Runtime-authoritative Bash
+    /// readiness.  The executable state is intentionally not inferred from
+    /// persisted configuration or UI picker input.
+    pub fn from_config_with_bash(config: &ToolConfig, bash_state: &BashExecutableState) -> Self {
+        let mut entries = vec![
+            RegisteredTool {
+                capability: ToolCapability::WorkspaceRead,
+                readiness_reason: None,
+                descriptor: ToolDescriptor {
+                    name: "read_file".into(),
+                    description: "Read a workspace file.".into(),
+                    implemented: true,
+                    enabled: config.read_file.enabled,
+                    exposed: true,
+                    effective_policy: PolicyDecision::Allow,
+                    scope: WORKSPACE_SCOPE.into(),
+                    readiness: ToolReadiness::Ready,
+                    risk_level: RiskLevel::Low,
                 },
-                RegisteredTool {
-                    capability: ToolCapability::WorkspaceRead,
-                    descriptor: ToolDescriptor {
-                        name: "glob".into(),
-                        description: "Find workspace paths.".into(),
-                        implemented: true,
-                        enabled: true,
-                        exposed: true,
-                        effective_policy: PolicyDecision::Allow,
-                        scope: WORKSPACE_SCOPE.into(),
-                        readiness: ToolReadiness::Ready,
-                        risk_level: RiskLevel::Low,
-                    },
+            },
+            RegisteredTool {
+                capability: ToolCapability::WorkspaceRead,
+                readiness_reason: None,
+                descriptor: ToolDescriptor {
+                    name: "glob".into(),
+                    description: "Find workspace paths.".into(),
+                    implemented: true,
+                    enabled: config.glob.enabled,
+                    exposed: true,
+                    effective_policy: PolicyDecision::Allow,
+                    scope: WORKSPACE_SCOPE.into(),
+                    readiness: ToolReadiness::Ready,
+                    risk_level: RiskLevel::Low,
                 },
-                RegisteredTool {
-                    capability: ToolCapability::WorkspaceWrite,
-                    descriptor: ToolDescriptor {
-                        name: "write".into(),
-                        description: "Write a workspace file.".into(),
-                        implemented: true,
-                        enabled: true,
-                        exposed: true,
-                        effective_policy: PolicyDecision::Allow,
-                        scope: WORKSPACE_SCOPE.into(),
-                        readiness: ToolReadiness::Ready,
-                        risk_level: RiskLevel::Medium,
-                    },
+            },
+            RegisteredTool {
+                capability: ToolCapability::WorkspaceWrite,
+                readiness_reason: None,
+                descriptor: ToolDescriptor {
+                    name: "write".into(),
+                    description: "Write a workspace file.".into(),
+                    implemented: true,
+                    enabled: config.write.enabled,
+                    exposed: true,
+                    effective_policy: PolicyDecision::Allow,
+                    scope: WORKSPACE_SCOPE.into(),
+                    readiness: ToolReadiness::Ready,
+                    risk_level: RiskLevel::Medium,
                 },
-                RegisteredTool {
-                    capability: ToolCapability::WorkspaceWrite,
-                    descriptor: ToolDescriptor {
-                        name: "edit".into(),
-                        description: "Edit a workspace text file.".into(),
-                        implemented: true,
-                        enabled: true,
-                        exposed: true,
-                        effective_policy: PolicyDecision::Allow,
-                        scope: WORKSPACE_SCOPE.into(),
-                        readiness: ToolReadiness::Ready,
-                        risk_level: RiskLevel::Medium,
-                    },
+            },
+            RegisteredTool {
+                capability: ToolCapability::WorkspaceWrite,
+                readiness_reason: None,
+                descriptor: ToolDescriptor {
+                    name: "edit".into(),
+                    description: "Edit a workspace text file.".into(),
+                    implemented: true,
+                    enabled: config.edit.enabled,
+                    exposed: true,
+                    effective_policy: PolicyDecision::Allow,
+                    scope: WORKSPACE_SCOPE.into(),
+                    readiness: ToolReadiness::Ready,
+                    risk_level: RiskLevel::Medium,
                 },
-            ],
-        }
+            },
+        ];
+
+        let (readiness, readiness_reason) = if bash_state.is_ready() {
+            (ToolReadiness::Ready, None)
+        } else {
+            (
+                ToolReadiness::Unavailable,
+                Some(bash_state.reason_message()),
+            )
+        };
+        entries.push(RegisteredTool {
+            capability: ToolCapability::DeveloperShell,
+            readiness_reason,
+            descriptor: ToolDescriptor {
+                name: "bash".into(),
+                description: "Run a controlled Git Bash command from the active Workspace. Bash is not an OS filesystem sandbox.".into(),
+                implemented: true,
+                enabled: config.bash.enabled,
+                exposed: true,
+                effective_policy: PolicyDecision::Ask,
+                scope: WORKSPACE_SCOPE.into(),
+                readiness,
+                risk_level: RiskLevel::High,
+            },
+        });
+        Self { entries }
     }
 
     /// Build a generation-specific registry from the immutable Runtime
     /// configuration snapshot. Built-in definitions and order remain owned by
     /// this registry; configuration only supplies the desired enabled state.
     pub fn from_config(config: &ToolConfig) -> Self {
-        let mut registry = Self::normal_mode();
-        for (name, enabled) in [
-            ("read_file", config.read_file.enabled),
-            ("glob", config.glob.enabled),
-            ("write", config.write.enabled),
-            ("edit", config.edit.enabled),
-        ] {
-            if let Some(entry) = registry
-                .entries
-                .iter_mut()
-                .find(|entry| entry.descriptor.name == name)
-            {
-                entry.descriptor.enabled = enabled;
-            }
-        }
-        // `bash` is intentionally a persisted future field only. It is not
-        // registered here until its M5 implementation exists.
-        registry
+        Self::from_config_with_bash(
+            config,
+            &BashExecutableState::unavailable(
+                crate::bash::discovery::BashUnavailableReason::AutoDetectDisabled,
+            ),
+        )
     }
 
     #[cfg(test)]
@@ -155,6 +192,12 @@ impl ToolRegistry {
     #[cfg(test)]
     pub(crate) fn with_test_enabled(mut self, index: usize, enabled: bool) -> Self {
         self.entries[index].descriptor.enabled = enabled;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_readiness(mut self, index: usize, readiness: ToolReadiness) -> Self {
+        self.entries[index].descriptor.readiness = readiness;
         self
     }
 
@@ -178,6 +221,7 @@ impl ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn normal_mode_registry_contains_the_stable_m0_tool_order() {
@@ -189,9 +233,9 @@ mod tests {
                 .iter()
                 .map(|descriptor| descriptor.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit"]
+            ["read_file", "glob", "write", "edit", "bash"]
         );
-        let forbidden = ["bash", "tree", "list_files", "git", "database"];
+        let forbidden = ["tree", "list_files", "git", "database"];
         assert!(!registry
             .list()
             .iter()
@@ -301,7 +345,7 @@ mod tests {
                 .iter()
                 .map(|descriptor| descriptor.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit"]
+            ["read_file", "glob", "write", "edit", "bash"]
         );
         assert_eq!(
             registry.declared_capability("write"),
@@ -330,17 +374,46 @@ mod tests {
                 .list()
                 .iter()
                 .enumerate()
-                .all(|(other_index, tool)| other_index == index || tool.enabled));
+                .all(|(other_index, tool)| {
+                    other_index == index || tool.name == "bash" || tool.enabled
+                }));
         }
     }
 
     #[test]
-    fn bash_desired_state_does_not_register_an_executor_or_catalog_entry() {
+    fn bash_desired_state_registers_a_high_risk_developer_shell_entry() {
         let mut config = ToolConfig::default();
         config.bash.enabled = true;
         let registry = ToolRegistry::from_config(&config);
 
         assert_eq!(registry.capability("bash"), None);
-        assert!(!registry.list().iter().any(|tool| tool.name == "bash"));
+        let bash = registry
+            .list()
+            .into_iter()
+            .find(|tool| tool.name == "bash")
+            .expect("bash descriptor");
+        assert!(bash.implemented);
+        assert!(bash.enabled);
+        assert_eq!(bash.risk_level, RiskLevel::High);
+        assert_eq!(bash.readiness, ToolReadiness::Unavailable);
+        assert_eq!(
+            registry.declared_capability("bash"),
+            Some(ToolCapability::DeveloperShell)
+        );
+    }
+
+    #[test]
+    fn ready_bash_entry_exposes_the_developer_shell_capability() {
+        let mut config = ToolConfig::default();
+        config.bash.enabled = true;
+        let state = BashExecutableState::Ready {
+            canonical_path: PathBuf::from(r"C:\Git\bin\bash.exe"),
+            source: crate::bash::discovery::BashExecutableSource::Manual,
+        };
+        let registry = ToolRegistry::from_config_with_bash(&config, &state);
+        assert_eq!(
+            registry.capability("bash"),
+            Some(ToolCapability::DeveloperShell)
+        );
     }
 }

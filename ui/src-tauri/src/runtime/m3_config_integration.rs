@@ -180,7 +180,10 @@ fn int_03(fixture: &Fixture) -> QaResult<()> {
     check!(rule.id == "crud-rule");
     check!(rule.name == "edited name" && rule.reason == "edited reason");
     check!(rule.decision == PolicyDecision::Ask && !rule.enabled);
-    check!(rule.matcher.tool == "edit");
+    check!(matches!(
+        rule.matcher,
+        harness_control_protocol::PolicyMatcherConfig::Tool { ref tool } if tool == "edit"
+    ));
     let wire = serde_json::to_value(&edited).unwrap();
     check!(wire["policies"]["userRules"][0].get("source").is_none());
     check!(wire["policies"]["userRules"][0].get("editable").is_none());

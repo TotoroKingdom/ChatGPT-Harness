@@ -938,6 +938,7 @@ fn runtime_config_snapshot(config: &AppConfig) -> RuntimeConfigSnapshot {
             max_read_bytes: DEFAULT_MAX_READ_BYTES,
         },
         tools: config.tools.clone(),
+        bash: config.bash.clone(),
         policies: config.policies.clone(),
     }
 }
@@ -1219,6 +1220,20 @@ fn machine_code(code: &harness_control_protocol::MachineErrorCode) -> &'static s
         harness_control_protocol::MachineErrorCode::ApprovalAlreadyResolved => {
             "APPROVAL_ALREADY_RESOLVED"
         }
+        harness_control_protocol::MachineErrorCode::ApprovalSessionGrantUnavailable => {
+            "APPROVAL_SESSION_GRANT_UNAVAILABLE"
+        }
+        harness_control_protocol::MachineErrorCode::BashUnavailable => "BASH_UNAVAILABLE",
+        harness_control_protocol::MachineErrorCode::BashInvalidCommand => "BASH_INVALID_COMMAND",
+        harness_control_protocol::MachineErrorCode::BashCommandTooLong => "BASH_COMMAND_TOO_LONG",
+        harness_control_protocol::MachineErrorCode::BashTimeout => "BASH_TIMEOUT",
+        harness_control_protocol::MachineErrorCode::BashOutputLimit => "BASH_OUTPUT_LIMIT",
+        harness_control_protocol::MachineErrorCode::BashConcurrencyLimit => {
+            "BASH_CONCURRENCY_LIMIT"
+        }
+        harness_control_protocol::MachineErrorCode::BashSpawnFailed => "BASH_SPAWN_FAILED",
+        harness_control_protocol::MachineErrorCode::BashCancelled => "BASH_CANCELLED",
+        harness_control_protocol::MachineErrorCode::BashProcessFailed => "BASH_PROCESS_FAILED",
         harness_control_protocol::MachineErrorCode::InternalError => "INTERNAL_ERROR",
     }
 }
@@ -1261,6 +1276,7 @@ mod tests {
             },
             ui: UiConfig::default(),
             tools: ToolConfig::default(),
+            bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
         }
     }
@@ -1284,6 +1300,7 @@ mod tests {
         assert!(snapshot.tools.read_file.enabled);
         assert!(snapshot.tools.glob.enabled);
         assert!(!snapshot.tools.bash.enabled);
+        assert_eq!(snapshot.bash, config.bash);
         assert_eq!(
             snapshot.policies.tool_defaults.write,
             harness_control_protocol::PolicyDecision::Ask

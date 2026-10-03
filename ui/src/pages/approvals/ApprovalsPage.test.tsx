@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ApprovalRequest } from "@protocol/v1";
+import type { ApprovalRequest, BashApprovalDetails } from "@protocol/v1";
 import { ApprovalsPage } from "./ApprovalsPage";
 
 const state = vi.hoisted(() => ({ context: undefined as any }));
@@ -22,6 +22,34 @@ function approval(status: ApprovalRequest["status"] = "pending"): ApprovalReques
     expiresAt: "2026-10-02T00:05:00Z",
     status,
     decision: status === "approved" ? "allow_once" : undefined,
+  };
+}
+
+function bashApproval(classification: BashApprovalDetails["classification"]): ApprovalRequest {
+  return {
+    requestId: "bash_request_01",
+    runtimeId: "runtime_01",
+    generationId: "generation_01",
+    tool: "bash",
+    sanitizedArguments: { command: "git status --short" },
+    scopeSummary: "git status --short",
+    matchedRuleIds: ["bash-review"],
+    policyReason: "matched_user_rules",
+    riskLevel: "high",
+    bashDetails: {
+      commandPreview: classification === "classified" ? "git status --short" : "git $(dynamic) --short",
+      classification,
+      normalizedSegments: [{ executable: "git", argv: classification === "classified" ? ["status", "--short"] : [], argvRedacted: classification !== "classified" }],
+      riskFlags: classification === "classified" ? [] : ["command_substitution"],
+      cwd: "active_workspace",
+      previewRedacted: false,
+      previewTruncated: false,
+    },
+    allowForSessionEligible: classification === "classified",
+    allowForSessionUnavailableReason: classification === "classified" ? undefined : "unclassified_high_risk",
+    createdAt: "2026-10-02T00:00:00Z",
+    expiresAt: "2026-10-02T00:05:00Z",
+    status: "pending",
   };
 }
 
@@ -99,5 +127,60 @@ describe("M4 Approval Center", () => {
     expect(screen.getByText("EXPIRED")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create rule" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Allow once" })).not.toBeInTheDocument();
+  });
+
+  it("shows classified Bash evidence and creates an exact command matcher draft", () => {
+    const request = bashApproval("classified");
+    const { navigate, approvalsResolve } = setup(request);
+    expect(screen.getAllByText("git status --short").length).toBeGreaterThan(0);
+    expect(screen.getByText("active_workspace")).toBeInTheDocument();
+    expect(screen.getByText("Allow for session")).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
+    expect(approvalsResolve).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith("policies", {
+      policyDraft: expect.objectContaining({
+        tool: "bash",
+        matcher: { type: "bash_command", executable: "git", argvPrefix: ["status", "--short"] },
+      }),
+    });
+  });
+
+  it("keeps Runtime-eligible session approval enabled when Bash display facts are redacted or truncated", () => {
+    const base = bashApproval("classified");
+    const request: ApprovalRequest = {
+      ...base,
+      bashDetails: {
+        ...base.bashDetails!,
+        previewRedacted: true,
+        previewTruncated: true,
+      },
+      allowForSessionEligible: true,
+    };
+    const { navigate, approvalsResolve } = setup(request);
+    expect(screen.getByRole("button", { name: "Allow for session" })).toBeEnabled();
+    expect(screen.getByText(/Display facts are redacted and truncated/)).toBeInTheDocument();
+    expect(screen.queryByText(/reusable command scope is unavailable/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
+    expect(approvalsResolve).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith("policies", {
+      policyDraft: expect.objectContaining({
+        tool: "bash",
+        matcher: { type: "tool", tool: "bash" },
+      }),
+    });
+  });
+
+  it("keeps Allow for session disabled for unclassified Bash", () => {
+    const request = bashApproval("unclassified_high_risk");
+    const { navigate } = setup(request);
+    expect(screen.getByRole("button", { name: "Allow for session" })).toBeDisabled();
+    expect(screen.getByText(/disabled for unclassified high-risk commands/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create rule" }));
+    expect(navigate).toHaveBeenCalledWith("policies", {
+      policyDraft: expect.objectContaining({
+        tool: "bash",
+        matcher: { type: "tool", tool: "bash" },
+      }),
+    });
   });
 });

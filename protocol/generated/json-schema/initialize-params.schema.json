@@ -1,6 +1,22 @@
 {
   "$comment": "GENERATED FILE — DO NOT EDIT",
   "$defs": {
+    "BashConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "autoDetect": {
+          "default": true,
+          "type": "boolean"
+        },
+        "executablePath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ClientInfo": {
       "properties": {
         "name": {
@@ -56,32 +72,60 @@
       "type": "string"
     },
     "PolicyMatcherConfig": {
-      "additionalProperties": false,
-      "description": "Persisted typed matcher. Its wire shape is `{ \"type\": \"tool\", \"tool\":\n\"write\" }`, while the closed discriminator prevents arbitrary matcher\nexpressions from becoming authorization input.",
-      "properties": {
-        "tool": {
-          "type": "string"
+      "description": "Persisted tagged matcher.  The internally tagged representation keeps the\nM3 wire shape (`{\"type\":\"tool\",\"tool\":\"write\"}`) while adding the\nM5 command matcher (`{\"type\":\"bash_command\",...}`).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool"
+          ],
+          "type": "object"
         },
-        "type": {
-          "$ref": "#/$defs/PolicyMatcherType"
+        {
+          "additionalProperties": false,
+          "properties": {
+            "argvPrefix": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "executable": {
+              "type": "string"
+            },
+            "type": {
+              "const": "bash_command",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "executable",
+            "argvPrefix"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "type",
-        "tool"
-      ],
-      "type": "object"
-    },
-    "PolicyMatcherType": {
-      "description": "The matcher type discriminator is intentionally closed in M3. Future\nmatcher kinds can be added as new tagged variants without making the\npersisted user rule shape free-form again.",
-      "enum": [
-        "tool"
-      ],
-      "type": "string"
+      ]
     },
     "RuntimeConfigSnapshot": {
       "description": "The non-secret, immutable-at-startup configuration consumed by a Runtime.",
       "properties": {
+        "bash": {
+          "$ref": "#/$defs/BashConfig",
+          "default": {
+            "autoDetect": true
+          }
+        },
         "configRevision": {
           "$ref": "#/$defs/DecimalU64"
         },

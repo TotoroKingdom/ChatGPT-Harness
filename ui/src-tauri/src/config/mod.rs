@@ -1,6 +1,6 @@
 use harness_control_protocol::{
-    AppConfig, DecimalU64, PolicyConfig, SecurityConfig, SecurityMode, ToolConfig, TunnelConfig,
-    UiConfig, WorkspaceConfig,
+    AppConfig, BashConfig, DecimalU64, PolicyConfig, SecurityConfig, SecurityMode, ToolConfig,
+    TunnelConfig, UiConfig, WorkspaceConfig,
 };
 use serde::Serialize;
 use std::{
@@ -103,6 +103,7 @@ impl ConfigStore {
             },
             ui: UiConfig::default(),
             tools: ToolConfig::default(),
+            bash: BashConfig::default(),
             policies: PolicyConfig::default(),
         }
     }
@@ -242,8 +243,8 @@ fn replace_file(tmp: &Path, target: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use harness_control_protocol::{
-        AppConfig, PolicyConfig, PolicyDecision, PolicyMatcherConfig, SecurityConfig, SecurityMode,
-        TunnelConfig, UiConfig, UserPolicyRuleConfig, WorkspaceConfig,
+        AppConfig, BashConfig, PolicyConfig, PolicyDecision, PolicyMatcherConfig, SecurityConfig,
+        SecurityMode, TunnelConfig, UiConfig, UserPolicyRuleConfig, WorkspaceConfig,
     };
     fn c() -> AppConfig {
         AppConfig {
@@ -265,6 +266,7 @@ mod tests {
             },
             ui: UiConfig::default(),
             tools: ToolConfig::default(),
+            bash: BashConfig::default(),
             policies: PolicyConfig::default(),
         }
     }
@@ -328,6 +330,48 @@ mod tests {
         assert_eq!(policies.tool_defaults.read_file, PolicyDecision::Allow);
         assert_eq!(policies.tool_defaults.bash, PolicyDecision::Ask);
         assert!(policies.user_rules.is_empty());
+    }
+
+    #[test]
+    fn legacy_schema_v1_without_bash_loads_safe_bash_defaults() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value.as_object_mut().unwrap().remove("bash");
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let bash = ConfigStore::new(d.path().into())
+            .load()
+            .unwrap()
+            .unwrap()
+            .bash;
+        assert_eq!(bash, BashConfig::default());
+    }
+
+    #[test]
+    fn bash_config_round_trips_and_semantic_revision_is_stable() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let first = store.save(c()).unwrap();
+        assert_eq!(first.config_revision, DecimalU64::new(1));
+        assert_eq!(
+            store.save(first.clone()).unwrap().config_revision,
+            DecimalU64::new(1)
+        );
+
+        let mut changed = first.clone();
+        changed.bash.auto_detect = false;
+        changed.bash.executable_path = Some(r"C:\Git\bin\bash.exe".into());
+        let changed = store.save(changed).unwrap();
+        assert_eq!(changed.config_revision, DecimalU64::new(2));
+        assert_eq!(store.load().unwrap().unwrap().bash, changed.bash);
+        assert_eq!(
+            store.save(changed).unwrap().config_revision,
+            DecimalU64::new(2)
+        );
     }
 
     #[test]
@@ -412,8 +456,8 @@ mod tests {
             name: "Bad tool".into(),
             enabled: true,
             decision: PolicyDecision::Allow,
-            matcher: PolicyMatcherConfig::tool("bash"),
-            reason: "bash is not implemented in M3".into(),
+            matcher: PolicyMatcherConfig::tool("not_a_tool"),
+            reason: "unknown tool must remain rejected".into(),
         });
         assert!(
             matches!(store.save(config), Err(ConfigError::Invalid(message)) if message.contains("unknown or unavailable tool"))

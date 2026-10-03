@@ -1,8 +1,10 @@
 use super::{
-    RequestContext, RequestState, SecurityContext, ToolExecutor, TransitionError, WorkspaceTarget,
+    BashEvidenceSnapshot, RequestContext, RequestState, SecurityContext, ToolExecutor,
+    TransitionError, WorkspaceTarget,
 };
 use crate::approval::{ApprovalFacts, ApprovalManager, ApprovalResolution};
 use crate::audit::{AuditEvent, AuditFailureCategory, AuditSink};
+use crate::bash::{BashRuntime, BashRuntimeError};
 use crate::events::{ActivityEventInput, ActivityEventSender};
 use crate::policy::PolicyEngine;
 use crate::session_grant::SessionGrantStore;
@@ -16,6 +18,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -34,6 +37,8 @@ pub(crate) enum ExecutionError {
     Glob(GlobError),
     Write(crate::tools::WriteError),
     Edit(crate::tools::EditError),
+    BashWorkspace(crate::workspace::WorkspaceError),
+    BashRuntime(BashRuntimeError),
 }
 
 /// No public constructor or Clone/Default. Only this module grants execution.
@@ -70,12 +75,31 @@ pub(crate) enum PipelineEvent {
     },
     ApprovalExpired,
     ApprovalCancelled,
+    ExecutionCancelled,
     SessionGrantMatched,
     RequestFinished,
 }
 
 pub(crate) trait ExecutionHook: Send + Sync {
     fn on_event(&self, context: &RequestContext, event: PipelineEvent);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BashCancellationKind {
+    ApprovalWait,
+    ExecutionWait,
+}
+
+/// Optional Runtime-owned sink for the one cancellation path where an MCP
+/// future is dropped before `execute_async` can emit its normal terminal event.
+/// The observer receives only the owned sanitized snapshot.
+pub(crate) trait BashCancellationObserver: Send + Sync {
+    fn on_bash_cancelled(&self, snapshot: BashEvidenceSnapshot, kind: BashCancellationKind);
+}
+
+struct NoopBashCancellationObserver;
+impl BashCancellationObserver for NoopBashCancellationObserver {
+    fn on_bash_cancelled(&self, _snapshot: BashEvidenceSnapshot, _kind: BashCancellationKind) {}
 }
 
 struct NoopHook;
@@ -104,6 +128,8 @@ pub(crate) struct ExecutionPipeline {
     activity_event_sender: Option<ActivityEventSender>,
     approval_manager: Arc<ApprovalManager>,
     session_grants: Arc<SessionGrantStore>,
+    bash_runtime: Option<Arc<BashRuntime>>,
+    bash_cancellation_observer: Arc<dyn BashCancellationObserver>,
 }
 
 impl ExecutionPipeline {
@@ -127,7 +153,22 @@ impl ExecutionPipeline {
             activity_event_sender: None,
             approval_manager: ApprovalManager::new("unbound-runtime"),
             session_grants: Arc::new(SessionGrantStore::new("unbound-runtime")),
+            bash_runtime: None,
+            bash_cancellation_observer: Arc::new(NoopBashCancellationObserver),
         }
+    }
+
+    pub(crate) fn with_bash_runtime(mut self, bash_runtime: Arc<BashRuntime>) -> Self {
+        self.bash_runtime = Some(bash_runtime);
+        self
+    }
+
+    pub(crate) fn with_bash_cancellation_observer(
+        mut self,
+        observer: Arc<dyn BashCancellationObserver>,
+    ) -> Self {
+        self.bash_cancellation_observer = observer;
+        self
     }
 
     pub(crate) fn with_approval_state(
@@ -203,16 +244,42 @@ impl ExecutionPipeline {
 
     /// Async execution path used by MCP. The approval wait is represented by
     /// a Tokio receiver/timer and never blocks the MCP current-thread runtime.
-    pub(crate) async fn execute_async<E: ToolExecutor + Send>(
+    pub(crate) async fn execute_async<E: ToolExecutor + Send + Sync>(
         &self,
         prepare: impl FnOnce() -> Result<E, ExecutionError>,
-    ) -> ExecutionReport<E::Output> {
+    ) -> ExecutionReport<E::Output>
+    where
+        E::Output: Send,
+    {
+        self.execute_async_cancellable(prepare, CancellationToken::new())
+            .await
+    }
+
+    pub(crate) async fn execute_async_cancellable<E: ToolExecutor + Send + Sync>(
+        &self,
+        prepare: impl FnOnce() -> Result<E, ExecutionError>,
+        request_cancel: CancellationToken,
+    ) -> ExecutionReport<E::Output>
+    where
+        E::Output: Send,
+    {
         let mut context = RequestContext::new(E::TOOL_NAME, self.security.clone());
         let mut audit_events = Vec::new();
+        let cancellation_guard = RequestCancellationGuard::new(
+            request_cancel.clone(),
+            Arc::clone(&self.bash_cancellation_observer),
+        );
         self.emit(&context, PipelineEvent::RequestReceived, &mut audit_events);
         let mut result = self
-            .run_async(&mut context, prepare, &mut audit_events)
+            .run_async(
+                &mut context,
+                prepare,
+                &mut audit_events,
+                request_cancel,
+                cancellation_guard.state(),
+            )
             .await;
+        cancellation_guard.disarm();
         if result.is_err()
             && !matches!(
                 context.state(),
@@ -251,6 +318,7 @@ impl ExecutionPipeline {
         let workspace_validation = match executor.workspace_target() {
             WorkspaceTarget::ExistingPath(path) => self.guard.approve(path).map(|_| ()),
             WorkspaceTarget::WriteTarget(path) => self.guard.approve_write_target(path).map(|_| ()),
+            WorkspaceTarget::WorkspaceRoot => self.guard.validate_workspace_root().map(|_| ()),
         };
         match workspace_validation {
             Ok(_) => {
@@ -271,8 +339,33 @@ impl ExecutionPipeline {
                 return Err(E::workspace_error(error));
             }
         }
+        if E::TOOL_NAME == "bash" {
+            if let Some(runtime) = &self.bash_runtime {
+                if let Err(error) = runtime.generation_readiness() {
+                    let error = ExecutionError::BashRuntime(error);
+                    context.mark_failure_category(audit_failure_category(&error));
+                    self.transition(context, RequestState::Failed)?;
+                    self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                    return Err(error);
+                }
+            } else {
+                let error = ExecutionError::BashRuntime(BashRuntimeError::Unavailable);
+                context.mark_failure_category(audit_failure_category(&error));
+                self.transition(context, RequestState::Failed)?;
+                self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                return Err(error);
+            }
+        }
+        if E::TOOL_NAME == "bash" {
+            if let Ok(facts) = executor.approval_facts(&self.guard) {
+                if let Some(details) = facts.bash_details {
+                    context.set_bash_details(details);
+                }
+            }
+        }
         self.transition(context, RequestState::PolicyEvaluating)?;
-        let evaluation = self.policy.evaluate(&context.policy, &self.registry);
+        let policy_context = executor.policy_context(&self.security);
+        let evaluation = self.policy.evaluate(&policy_context, &self.registry);
         let decision = evaluation.decision.clone();
         context.policy_evaluation = Some(evaluation);
         self.emit(context, PipelineEvent::PolicyDecision, audit_events);
@@ -314,21 +407,75 @@ impl ExecutionPipeline {
         context: &mut RequestContext,
         prepare: impl FnOnce() -> Result<E, ExecutionError>,
         audit_events: &mut Vec<AuditEvent>,
-    ) -> Result<E::Output, ExecutionError> {
+        request_cancel: CancellationToken,
+        cancellation_state: Arc<BashCancellationState>,
+    ) -> Result<E::Output, ExecutionError>
+    where
+        E: Sync,
+        E::Output: Send,
+    {
         self.transition(context, RequestState::Validating)?;
-        self.require_ready()?;
-        if self.registry.is_disabled(E::TOOL_NAME) {
-            context.mark_failure_category(AuditFailureCategory::ToolDisabled);
-            self.transition(context, RequestState::Failed)?;
-            self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
-            return Err(ExecutionError::ToolDisabled);
+        if E::TOOL_NAME == "bash" {
+            if let Some(snapshot) = context.bash_evidence_snapshot() {
+                cancellation_state.set_snapshot(snapshot);
+            }
         }
-        let executor = prepare()?;
-        executor.validate()?;
+        let executor = if E::TOOL_NAME == "bash" {
+            let executor = match prepare() {
+                Ok(executor) => executor,
+                Err(error) => {
+                    context.mark_failure_category(audit_failure_category(&error));
+                    self.transition(context, RequestState::Failed)?;
+                    self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                    return Err(error);
+                }
+            };
+            if let Err(error) = executor.validate() {
+                context.mark_failure_category(audit_failure_category(&error));
+                self.transition(context, RequestState::Failed)?;
+                self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                return Err(error);
+            }
+            if !matches!(
+                &self.security.mode,
+                harness_control_protocol::SecurityMode::DeveloperTest
+            ) {
+                let error = ExecutionError::BashRuntime(BashRuntimeError::Unavailable);
+                context.mark_failure_category(audit_failure_category(&error));
+                self.transition(context, RequestState::Failed)?;
+                self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                return Err(error);
+            }
+            if self.registry.is_disabled(E::TOOL_NAME) {
+                context.mark_failure_category(AuditFailureCategory::ToolDisabled);
+                self.transition(context, RequestState::Failed)?;
+                self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                return Err(ExecutionError::ToolDisabled);
+            }
+            if let Err(error) = self.require_ready() {
+                context.mark_failure_category(audit_failure_category(&error));
+                self.transition(context, RequestState::Failed)?;
+                self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                return Err(error);
+            }
+            executor
+        } else {
+            self.require_ready()?;
+            if self.registry.is_disabled(E::TOOL_NAME) {
+                context.mark_failure_category(AuditFailureCategory::ToolDisabled);
+                self.transition(context, RequestState::Failed)?;
+                self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                return Err(ExecutionError::ToolDisabled);
+            }
+            let executor = prepare()?;
+            executor.validate()?;
+            executor
+        };
         self.transition(context, RequestState::WorkspaceValidating)?;
         let workspace_validation = match executor.workspace_target() {
             WorkspaceTarget::ExistingPath(path) => self.guard.approve(path).map(|_| ()),
             WorkspaceTarget::WriteTarget(path) => self.guard.approve_write_target(path).map(|_| ()),
+            WorkspaceTarget::WorkspaceRoot => self.guard.validate_workspace_root().map(|_| ()),
         };
         match workspace_validation {
             Ok(_) => {
@@ -346,13 +493,50 @@ impl ExecutionPipeline {
                     PipelineEvent::WorkspaceValidated { passed: false },
                     audit_events,
                 );
+                if E::TOOL_NAME == "bash" {
+                    self.transition(context, RequestState::Failed)?;
+                    self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                }
                 return Err(E::workspace_error(error));
             }
         }
+        if E::TOOL_NAME == "bash" {
+            if let Some(runtime) = &self.bash_runtime {
+                if let Err(error) = runtime.generation_readiness() {
+                    let error = ExecutionError::BashRuntime(error);
+                    context.mark_failure_category(audit_failure_category(&error));
+                    self.transition(context, RequestState::Failed)?;
+                    self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                    return Err(error);
+                }
+            } else {
+                let error = ExecutionError::BashRuntime(BashRuntimeError::Unavailable);
+                context.mark_failure_category(audit_failure_category(&error));
+                self.transition(context, RequestState::Failed)?;
+                self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                return Err(error);
+            }
+        }
+        let bash_facts = if E::TOOL_NAME == "bash" {
+            let facts = executor.approval_facts(&self.guard)?;
+            if let Some(details) = facts.bash_details.clone() {
+                context.set_bash_details(details);
+            }
+            Some(facts)
+        } else {
+            None
+        };
+        if let Some(snapshot) = context.bash_evidence_snapshot() {
+            cancellation_state.set_snapshot(snapshot);
+        }
         self.transition(context, RequestState::PolicyEvaluating)?;
-        let evaluation = self.policy.evaluate(&context.policy, &self.registry);
+        let policy_context = executor.policy_context(&self.security);
+        let evaluation = self.policy.evaluate(&policy_context, &self.registry);
         let decision = evaluation.decision.clone();
         context.policy_evaluation = Some(evaluation);
+        if let Some(snapshot) = context.bash_evidence_snapshot() {
+            cancellation_state.set_snapshot(snapshot);
+        }
         self.emit(context, PipelineEvent::PolicyDecision, audit_events);
         match decision {
             PolicyDecision::Deny => {
@@ -360,16 +544,33 @@ impl ExecutionPipeline {
                 self.emit(context, PipelineEvent::RequestDenied, audit_events);
                 Err(ExecutionError::PolicyDenied)
             }
-            PolicyDecision::Allow => self.execute_allowed(context, executor, audit_events),
+            PolicyDecision::Allow => {
+                cancellation_state.set_kind(BashCancellationKind::ExecutionWait);
+                self.execute_allowed_async(context, executor, audit_events, request_cancel)
+                    .await
+            }
             PolicyDecision::Ask => {
-                let tool_facts = executor.approval_facts(&self.guard)?;
-                if self.session_grants.matches(
-                    self.approval_manager.generation_id(),
-                    E::TOOL_NAME,
-                    &tool_facts.scope_summary,
-                ) {
+                let tool_facts = match bash_facts {
+                    Some(facts) => facts,
+                    None => executor.approval_facts(&self.guard)?,
+                };
+                let grant_scope = tool_facts.grant_scope.as_deref();
+                if grant_scope.is_some_and(|scope| {
+                    self.session_grants.matches(
+                        self.approval_manager.generation_id(),
+                        E::TOOL_NAME,
+                        scope,
+                    )
+                }) {
+                    context.mark_session_grant_hit();
+                    if let Some(snapshot) = context.bash_evidence_snapshot() {
+                        cancellation_state.set_snapshot(snapshot);
+                    }
                     self.emit(context, PipelineEvent::SessionGrantMatched, audit_events);
-                    return self.execute_allowed(context, executor, audit_events);
+                    cancellation_state.set_kind(BashCancellationKind::ExecutionWait);
+                    return self
+                        .execute_allowed_async(context, executor, audit_events, request_cancel)
+                        .await;
                 }
 
                 let registration = self
@@ -380,6 +581,9 @@ impl ExecutionPipeline {
                         sanitized_arguments: tool_facts.sanitized_arguments,
                         scope_summary: tool_facts.scope_summary,
                         fingerprint: tool_facts.fingerprint,
+                        grant_scope: tool_facts.grant_scope,
+                        bash_details: tool_facts.bash_details,
+                        allow_for_session_eligible: tool_facts.allow_for_session_eligible,
                         matched_rule_ids: context
                             .policy_evaluation
                             .as_ref()
@@ -399,12 +603,36 @@ impl ExecutionPipeline {
                             .unwrap_or(harness_control_protocol::RiskLevel::High),
                     })
                     .map_err(|_| ExecutionError::ApprovalRequired)?;
+                context.set_approval_request_id(&registration.request);
+                if let Some(snapshot) = context.bash_evidence_snapshot() {
+                    cancellation_state.set_snapshot(snapshot);
+                }
+                cancellation_state.set_kind(BashCancellationKind::ApprovalWait);
                 let registration_fingerprint = registration.fingerprint.clone();
                 self.transition(context, RequestState::AwaitingApproval)?;
                 self.emit(context, PipelineEvent::ApprovalRequired, audit_events);
-                let resolution = self
-                    .await_approval(registration, context.request_id.to_string())
-                    .await?;
+                let resolution = match self
+                    .await_approval(
+                        registration,
+                        context.request_id.to_string(),
+                        request_cancel.clone(),
+                    )
+                    .await
+                {
+                    Ok(resolution) => resolution,
+                    Err(error) => {
+                        if context.state() == RequestState::AwaitingApproval {
+                            context.mark_failure_category(audit_failure_category(&error));
+                            self.transition(context, RequestState::Failed)?;
+                            if matches!(error, ExecutionError::ApprovalExpired) {
+                                self.emit(context, PipelineEvent::ApprovalExpired, audit_events);
+                            } else {
+                                self.emit(context, PipelineEvent::ApprovalCancelled, audit_events);
+                            }
+                        }
+                        return Err(error);
+                    }
+                };
                 if resolution.request_id != context.request_id.to_string()
                     || resolution.fingerprint != registration_fingerprint
                 {
@@ -422,7 +650,11 @@ impl ExecutionPipeline {
                             PipelineEvent::ApprovalResolved { decision },
                             audit_events,
                         );
-                        if let Err(error) = self.revalidate_after_approval(context, &executor) {
+                        if let Err(error) = self.revalidate_after_approval(
+                            context,
+                            &executor,
+                            Some(&registration_fingerprint),
+                        ) {
                             if context.state() == RequestState::AwaitingApproval {
                                 context.mark_failure_category(audit_failure_category(&error));
                                 self.transition(context, RequestState::Failed)?;
@@ -430,7 +662,9 @@ impl ExecutionPipeline {
                             }
                             return Err(error);
                         }
-                        self.execute_allowed(context, executor, audit_events)
+                        cancellation_state.set_kind(BashCancellationKind::ExecutionWait);
+                        self.execute_allowed_async(context, executor, audit_events, request_cancel)
+                            .await
                     }
                     harness_control_protocol::ApprovalStatus::Denied => {
                         self.emit(
@@ -468,6 +702,7 @@ impl ExecutionPipeline {
         &self,
         registration: crate::approval::RegisteredApproval,
         request_id: String,
+        request_cancel: CancellationToken,
     ) -> Result<ApprovalResolution, ExecutionError> {
         let cancellation_guard = ApprovalWaitGuard {
             manager: Arc::clone(&self.approval_manager),
@@ -479,6 +714,7 @@ impl ExecutionPipeline {
         tokio::pin!(timer);
         let result = tokio::select! {
             result = &mut receiver => result.map_err(|_| ExecutionError::ApprovalCancelled),
+            _ = request_cancel.cancelled() => Err(ExecutionError::ApprovalCancelled),
             _ = &mut timer => {
                 self.approval_manager.expire_due();
                 receiver.await.map_err(|_| ExecutionError::ApprovalExpired)
@@ -492,6 +728,7 @@ impl ExecutionPipeline {
         &self,
         context: &mut RequestContext,
         executor: &E,
+        expected_fingerprint: Option<&str>,
     ) -> Result<(), ExecutionError> {
         self.require_ready()?;
         if self.registry.is_disabled(E::TOOL_NAME) {
@@ -509,8 +746,36 @@ impl ExecutionPipeline {
                 .approve_write_target(path)
                 .map(|_| ())
                 .map_err(E::workspace_error)?,
+            WorkspaceTarget::WorkspaceRoot => self
+                .guard
+                .validate_workspace_root()
+                .map(|_| ())
+                .map_err(E::workspace_error)?,
         }
-        let evaluation = self.policy.evaluate(&context.policy, &self.registry);
+        if E::TOOL_NAME == "bash" {
+            if !matches!(
+                &self.security.mode,
+                harness_control_protocol::SecurityMode::DeveloperTest
+            ) {
+                return Err(ExecutionError::BashRuntime(BashRuntimeError::Unavailable));
+            }
+            let runtime = self
+                .bash_runtime
+                .as_ref()
+                .ok_or(ExecutionError::BashRuntime(BashRuntimeError::Unavailable))?;
+            runtime
+                .generation_readiness()
+                .map_err(ExecutionError::BashRuntime)?;
+            executor.validate()?;
+            if let Some(expected) = expected_fingerprint {
+                let actual = executor.approval_facts(&self.guard)?.fingerprint;
+                if actual != expected {
+                    return Err(ExecutionError::ApprovalCancelled);
+                }
+            }
+        }
+        let policy_context = executor.policy_context(&self.security);
+        let evaluation = self.policy.evaluate(&policy_context, &self.registry);
         context.policy_evaluation = Some(evaluation.clone());
         if evaluation.decision == PolicyDecision::Deny {
             self.transition(context, RequestState::Denied)?;
@@ -545,6 +810,64 @@ impl ExecutionPipeline {
                 context.mark_failure_category(audit_failure_category(&error));
                 self.transition(context, RequestState::Failed)?;
                 self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                Err(error)
+            }
+        }
+    }
+
+    async fn execute_allowed_async<E: ToolExecutor + Send + Sync>(
+        &self,
+        context: &mut RequestContext,
+        executor: E,
+        audit_events: &mut Vec<AuditEvent>,
+        request_cancel: CancellationToken,
+    ) -> Result<E::Output, ExecutionError>
+    where
+        E::Output: Send,
+    {
+        if let Err(error) = self.require_ready() {
+            if context.state() == RequestState::AwaitingApproval {
+                self.transition(context, RequestState::Failed)?;
+                self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+            }
+            return Err(error);
+        }
+        self.transition(context, RequestState::Executing)?;
+        self.emit(context, PipelineEvent::ExecutionStarted, audit_events);
+        let permit = ExecutionPermit { _private: () };
+        let started = std::time::Instant::now();
+        let result = executor
+            .execute_async(
+                &permit,
+                &self.guard,
+                self.max_read_bytes,
+                self.bash_runtime.clone(),
+                request_cancel,
+            )
+            .await;
+        match result {
+            Ok(output) => {
+                executor.record_output(context, &output);
+                self.transition(context, RequestState::Completed)?;
+                self.emit(context, PipelineEvent::ExecutionCompleted, audit_events);
+                Ok(output)
+            }
+            Err(error) => {
+                if E::TOOL_NAME == "bash" {
+                    context.set_bash_duration(
+                        started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                    );
+                }
+                context.mark_failure_category(audit_failure_category(&error));
+                self.transition(context, RequestState::Failed)?;
+                if matches!(
+                    error,
+                    ExecutionError::BashRuntime(BashRuntimeError::Cancelled)
+                ) {
+                    self.emit(context, PipelineEvent::ExecutionCancelled, audit_events);
+                } else {
+                    self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
+                }
                 Err(error)
             }
         }
@@ -598,6 +921,88 @@ struct ApprovalWaitGuard {
     request_id: String,
 }
 
+struct RequestCancellationGuard {
+    token: CancellationToken,
+    armed: std::sync::atomic::AtomicBool,
+    state: Arc<BashCancellationState>,
+    observer: Arc<dyn BashCancellationObserver>,
+}
+
+struct BashCancellationState {
+    snapshot: std::sync::Mutex<Option<BashEvidenceSnapshot>>,
+    kind: std::sync::Mutex<BashCancellationKind>,
+    started_at: std::time::Instant,
+}
+
+impl BashCancellationState {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            snapshot: std::sync::Mutex::new(None),
+            kind: std::sync::Mutex::new(BashCancellationKind::ExecutionWait),
+            started_at: std::time::Instant::now(),
+        })
+    }
+
+    fn set_snapshot(&self, snapshot: BashEvidenceSnapshot) {
+        *self
+            .snapshot
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(snapshot);
+    }
+
+    fn set_kind(&self, kind: BashCancellationKind) {
+        *self.kind.lock().unwrap_or_else(|error| error.into_inner()) = kind;
+    }
+}
+
+impl RequestCancellationGuard {
+    fn new(token: CancellationToken, observer: Arc<dyn BashCancellationObserver>) -> Self {
+        Self {
+            token,
+            armed: std::sync::atomic::AtomicBool::new(true),
+            state: BashCancellationState::new(),
+            observer,
+        }
+    }
+
+    fn state(&self) -> Arc<BashCancellationState> {
+        Arc::clone(&self.state)
+    }
+
+    fn disarm(&self) {
+        self.armed.store(false, Ordering::Release);
+    }
+}
+
+impl Drop for RequestCancellationGuard {
+    fn drop(&mut self) {
+        if self.armed.swap(false, Ordering::AcqRel) {
+            self.token.cancel();
+            let snapshot = self
+                .state
+                .snapshot
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone();
+            let kind = *self
+                .state
+                .kind
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(mut snapshot) = snapshot {
+                snapshot.duration_ms = Some(
+                    self.state
+                        .started_at
+                        .elapsed()
+                        .as_millis()
+                        .min(u64::MAX as u128) as u64,
+                );
+                self.observer.on_bash_cancelled(snapshot, kind);
+            }
+        }
+    }
+}
+
 impl Drop for ApprovalWaitGuard {
     fn drop(&mut self) {
         self.manager.cancel(&self.request_id);
@@ -622,6 +1027,18 @@ fn audit_failure_category(error: &ExecutionError) -> AuditFailureCategory {
         | ExecutionError::Glob(GlobError::IoFailure { .. })
         | ExecutionError::Write(WriteError::IoFailure { .. })
         | ExecutionError::Edit(EditError::IoFailure { .. }) => AuditFailureCategory::IoFailure,
+        ExecutionError::BashWorkspace(_) => AuditFailureCategory::WorkspaceViolation,
+        ExecutionError::BashRuntime(error) => match error {
+            BashRuntimeError::Unavailable => AuditFailureCategory::BashUnavailable,
+            BashRuntimeError::InvalidCommand => AuditFailureCategory::BashInvalidCommand,
+            BashRuntimeError::CommandTooLong => AuditFailureCategory::BashCommandTooLong,
+            BashRuntimeError::Timeout => AuditFailureCategory::BashTimeout,
+            BashRuntimeError::OutputLimit => AuditFailureCategory::BashOutputLimit,
+            BashRuntimeError::ConcurrencyLimit => AuditFailureCategory::BashConcurrencyLimit,
+            BashRuntimeError::SpawnFailed => AuditFailureCategory::BashSpawnFailed,
+            BashRuntimeError::Cancelled => AuditFailureCategory::BashCancelled,
+            BashRuntimeError::ProcessFailed => AuditFailureCategory::BashProcessFailed,
+        },
         ExecutionError::ToolDisabled => AuditFailureCategory::ToolDisabled,
         ExecutionError::InvalidArguments
         | ExecutionError::ReadFile(ReadFileError::InvalidArguments { .. })

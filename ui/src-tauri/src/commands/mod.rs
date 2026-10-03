@@ -212,6 +212,22 @@ pub fn tunnel_client_choose(app: AppHandle) -> Result<Option<String>, ControlErr
     Ok(Some(path.display().to_string()))
 }
 
+/// Pick a desired Git Bash executable for the next Runtime generation.
+///
+/// The picker only returns a user-selected path. Runtime owns executable
+/// validation/readiness and this command never launches or probes a shell.
+#[tauri::command]
+pub fn bash_executable_choose(app: AppHandle) -> Result<Option<String>, ControlError> {
+    Ok(app
+        .dialog()
+        .file()
+        .set_title("Choose Git Bash executable")
+        .add_filter("Git Bash executable", &["exe"])
+        .blocking_pick_file()
+        .and_then(|path| path.into_path().ok())
+        .map(|path| path.display().to_string()))
+}
+
 #[tauri::command]
 pub fn tunnel_client_detect() -> Option<String> {
     crate::platform::find_tunnel_client()
@@ -640,6 +656,7 @@ mod validation_tests {
             },
             ui: UiConfig::default(),
             tools: ToolConfig::default(),
+            bash: harness_control_protocol::BashConfig::default(),
             policies: PolicyConfig::default(),
         }
     }

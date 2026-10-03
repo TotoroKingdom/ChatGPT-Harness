@@ -59,6 +59,7 @@ impl ActivitySnapshotParams {
 pub enum ToolCapability {
     WorkspaceRead,
     WorkspaceWrite,
+    DeveloperShell,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,7 +131,7 @@ pub struct ToolDiagnostics {
     pub items: Vec<ToolDiagnostic>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolDiagnostic {
     /// Source-controlled registry identifier, never a request-supplied name.
@@ -138,6 +139,53 @@ pub struct ToolDiagnostic {
     pub declared_capability: Option<ToolCapability>,
     pub availability: DiagnosticToolAvailability,
     pub decision: PolicyDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness: Option<crate::ToolReadiness>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness_reason: Option<String>,
+}
+
+// Bash-only observations are additive. Existing file-tool responses retain
+// their closed shape, including rejection of arbitrary reason/path fields.
+impl<'de> Deserialize<'de> for ToolDiagnostic {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Raw {
+            name: String,
+            declared_capability: Option<ToolCapability>,
+            availability: DiagnosticToolAvailability,
+            decision: PolicyDecision,
+            #[serde(default)]
+            reason: Option<String>,
+            #[serde(default)]
+            readiness: Option<crate::ToolReadiness>,
+            #[serde(default)]
+            readiness_reason: Option<String>,
+        }
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.get("name").and_then(serde_json::Value::as_str) != Some("bash")
+            && ["reason", "readiness", "readinessReason"]
+                .iter()
+                .any(|key| value.get(*key).is_some())
+        {
+            return Err(serde::de::Error::custom(
+                "Bash observation fields are not valid on file-tool diagnostics",
+            ));
+        }
+        let raw: Raw = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            name: raw.name,
+            declared_capability: raw.declared_capability,
+            availability: raw.availability,
+            decision: raw.decision,
+            reason: raw.reason,
+            readiness: raw.readiness,
+            readiness_reason: raw.readiness_reason,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +193,7 @@ pub struct ToolDiagnostic {
 pub enum DiagnosticToolAvailability {
     Available,
     AvailableWithApproval,
+    UnavailableByMode,
     UnavailableByPolicy,
     UnavailableByRuntime,
     Disabled,
@@ -255,6 +304,51 @@ pub enum ActivityCategory {
 }
 
 /// A safe display projection, not an audit record or a security decision.
+/// Bash evidence excludes argv, raw command, environment and process output.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BashActivityEvidence {
+    pub mode: crate::SecurityMode,
+    pub mode_eligible: bool,
+    pub capability: ToolCapability,
+    pub cwd: crate::BashWorkingDirectory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<crate::BashClassification>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub risk_flags: Vec<crate::BashRiskFlag>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_request_id: Option<String>,
+    pub session_grant_hit: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityFailureCategory {
+    ToolDisabled,
+    TargetChanged,
+    AtomicFailure,
+    IoFailure,
+    WorkspaceViolation,
+    InvalidArguments,
+    ExecutionFailed,
+    BashUnavailable,
+    BashInvalidCommand,
+    BashCommandTooLong,
+    BashTimeout,
+    BashOutputLimit,
+    BashConcurrencyLimit,
+    BashSpawnFailed,
+    BashCancelled,
+    BashProcessFailed,
+}
+
+/// A safe display projection, not an audit record or a security decision.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ActivityEntry {
@@ -274,4 +368,8 @@ pub struct ActivityEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_reason: Option<PolicyReason>,
     pub outcome_summary: AuditOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_category: Option<ActivityFailureCategory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bash: Option<BashActivityEvidence>,
 }

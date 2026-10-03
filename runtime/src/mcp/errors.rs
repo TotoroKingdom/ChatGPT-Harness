@@ -1,3 +1,4 @@
+use crate::bash::BashRuntimeError;
 use crate::execution::ExecutionError;
 use crate::tools::{EditError, GlobError, ReadFileError, WriteError};
 use crate::workspace::WorkspaceError;
@@ -28,6 +29,15 @@ pub(crate) enum McpErrorCategory {
     ApprovalExpired,
     ApprovalCancelled,
     ExecutionFailed,
+    BashUnavailable,
+    BashInvalidCommand,
+    BashCommandTooLong,
+    BashTimeout,
+    BashOutputLimit,
+    BashConcurrencyLimit,
+    BashSpawnFailed,
+    BashCancelled,
+    BashProcessFailed,
 }
 
 impl McpErrorCategory {
@@ -55,6 +65,15 @@ impl McpErrorCategory {
             Self::ApprovalExpired => "APPROVAL_EXPIRED",
             Self::ApprovalCancelled => "APPROVAL_CANCELLED",
             Self::ExecutionFailed => "EXECUTION_FAILED",
+            Self::BashUnavailable => "BASH_UNAVAILABLE",
+            Self::BashInvalidCommand => "BASH_INVALID_COMMAND",
+            Self::BashCommandTooLong => "BASH_COMMAND_TOO_LONG",
+            Self::BashTimeout => "BASH_TIMEOUT",
+            Self::BashOutputLimit => "BASH_OUTPUT_LIMIT",
+            Self::BashConcurrencyLimit => "BASH_CONCURRENCY_LIMIT",
+            Self::BashSpawnFailed => "BASH_SPAWN_FAILED",
+            Self::BashCancelled => "BASH_CANCELLED",
+            Self::BashProcessFailed => "BASH_PROCESS_FAILED",
         }
     }
 
@@ -82,6 +101,19 @@ impl McpErrorCategory {
             Self::ApprovalExpired => "Tool approval expired before execution.",
             Self::ApprovalCancelled => "Tool approval was cancelled by Runtime lifecycle.",
             Self::ExecutionFailed => "Tool execution failed.",
+            Self::BashUnavailable => "Git Bash is unavailable in the current Runtime generation.",
+            Self::BashInvalidCommand => "Bash command is invalid.",
+            Self::BashCommandTooLong => "Bash command exceeds the Runtime command limit.",
+            Self::BashTimeout => "Bash command exceeded the Runtime timeout.",
+            Self::BashOutputLimit => "Bash output exceeded the Runtime capture limit.",
+            Self::BashConcurrencyLimit => "Another Bash invocation is already running.",
+            Self::BashSpawnFailed => "Runtime could not start the Bash process.",
+            Self::BashCancelled => {
+                "Bash invocation was cancelled and its process tree was cleaned up."
+            }
+            Self::BashProcessFailed => {
+                "Bash process failed before a structured result was available."
+            }
         }
     }
 }
@@ -103,8 +135,25 @@ pub(crate) fn execution_error(error: &ExecutionError) -> CallToolResult {
         ExecutionError::ApprovalDenied => error_result(McpErrorCategory::ApprovalDenied),
         ExecutionError::ApprovalExpired => error_result(McpErrorCategory::ApprovalExpired),
         ExecutionError::ApprovalCancelled => error_result(McpErrorCategory::ApprovalCancelled),
+        ExecutionError::BashWorkspace(_) => error_result(McpErrorCategory::WorkspaceViolation),
+        ExecutionError::BashRuntime(error) => bash_runtime_error(error),
         ExecutionError::InvalidTransition(_) => error_result(McpErrorCategory::ExecutionFailed),
     }
+}
+
+fn bash_runtime_error(error: &BashRuntimeError) -> CallToolResult {
+    let category = match error {
+        BashRuntimeError::Unavailable => McpErrorCategory::BashUnavailable,
+        BashRuntimeError::InvalidCommand => McpErrorCategory::BashInvalidCommand,
+        BashRuntimeError::CommandTooLong => McpErrorCategory::BashCommandTooLong,
+        BashRuntimeError::Timeout => McpErrorCategory::BashTimeout,
+        BashRuntimeError::OutputLimit => McpErrorCategory::BashOutputLimit,
+        BashRuntimeError::ConcurrencyLimit => McpErrorCategory::BashConcurrencyLimit,
+        BashRuntimeError::SpawnFailed => McpErrorCategory::BashSpawnFailed,
+        BashRuntimeError::Cancelled => McpErrorCategory::BashCancelled,
+        BashRuntimeError::ProcessFailed => McpErrorCategory::BashProcessFailed,
+    };
+    error_result(category)
 }
 pub(crate) fn read_file_error(error: &ReadFileError) -> CallToolResult {
     let category = match error {

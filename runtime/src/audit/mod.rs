@@ -2,8 +2,9 @@
 //! Runtime-owned, non-secret audit event primitives.
 //!
 //! Audit events intentionally contain only bounded request metadata. Raw tool
-//! arguments, paths, credentials, environment variables, errors, and results
-//! are not part of this model.
+//! arguments, physical paths, credentials, environment, raw errors and process
+//! output are excluded. M5 adds a bounded sanitized command preview and scalar
+//! execution evidence; private grant scopes and logical argv remain internal.
 
 mod event;
 mod redaction;

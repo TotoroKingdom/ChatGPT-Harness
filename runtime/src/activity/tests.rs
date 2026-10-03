@@ -24,6 +24,7 @@ fn event(id: u128) -> AuditEvent {
         approval_decision: None,
         outcome: AuditOutcome::InProgress,
         failure_category: None,
+        bash: None,
     }
 }
 
@@ -274,6 +275,7 @@ impl Fixture {
                 max_read_bytes: 4096,
             },
             tools: ToolConfig::default(),
+            bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
         }
     }

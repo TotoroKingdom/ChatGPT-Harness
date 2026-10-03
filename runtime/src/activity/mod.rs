@@ -46,6 +46,8 @@ pub(crate) struct ActivityEntry {
     pub(crate) outcome_summary: AuditOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) failure_category: Option<AuditFailureCategory>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) bash: Option<harness_control_protocol::control_read::BashActivityEvidence>,
 }
 
 impl ActivityEntry {
@@ -94,6 +96,9 @@ impl ActivityEntry {
             policy_reason: event.policy_reason,
             outcome_summary: event.outcome,
             failure_category: event.failure_category,
+            bash: (event.tool_name == "bash" && registry.declared_capability("bash").is_some())
+                .then(|| event.bash.clone())
+                .flatten(),
         }
     }
 }

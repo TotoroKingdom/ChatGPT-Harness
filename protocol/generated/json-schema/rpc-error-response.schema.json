@@ -10,6 +10,16 @@
         "INVALID_ARGUMENT",
         "APPROVAL_NOT_FOUND",
         "APPROVAL_ALREADY_RESOLVED",
+        "APPROVAL_SESSION_GRANT_UNAVAILABLE",
+        "BASH_UNAVAILABLE",
+        "BASH_INVALID_COMMAND",
+        "BASH_COMMAND_TOO_LONG",
+        "BASH_TIMEOUT",
+        "BASH_OUTPUT_LIMIT",
+        "BASH_CONCURRENCY_LIMIT",
+        "BASH_SPAWN_FAILED",
+        "BASH_CANCELLED",
+        "BASH_PROCESS_FAILED",
         "INTERNAL_ERROR"
       ],
       "type": "string"

@@ -24,9 +24,9 @@ function decrementDecimal(value: string): string {
   }
   return "0";
 }
-const completeConfig = (): AppConfig => ({ schemaVersion: 1, configRevision: "7", workspace: { rootPath: "D:\\example-project" }, tunnel: { tunnelId: "mock-tunnel", tunnelClientPath: "D:\\example-project\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] } });
+const completeConfig = (): AppConfig => ({ schemaVersion: 1, configRevision: "7", workspace: { rootPath: "D:\\example-project" }, tunnel: { tunnelId: "mock-tunnel", tunnelClientPath: "D:\\example-project\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] } });
 function event(sequence: string, eventType: ActivityEventType, summary: string, metadata: Record<string,string>, requestId?: string): ActivityEvent { return { eventId: `event_mock_${sequence}`, sequence, eventType, requestId, timestamp: `2026-09-02T00:0${sequence}:00Z`, summary, metadata }; }
-const tools: ToolDescriptor[] = [{name:"read_file",description:"Read a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"glob",description:"Find workspace paths.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"write",description:"Write a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"edit",description:"Edit a workspace text file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"}];
+const tools: ToolDescriptor[] = [{name:"read_file",description:"Read a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"glob",description:"Find workspace paths.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"write",description:"Write a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"edit",description:"Edit a workspace text file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"bash",description:"Run a controlled Git Bash command from the active Workspace. The cwd is an initial working directory, not a filesystem sandbox.",implemented:true,enabled:false,exposed:false,effectivePolicy:"ask",scope:"active_workspace",readiness:"unavailable",riskLevel:"high"}];
 const policies: PolicyRule[] = [{id:"system-read-workspace",name:"Allow workspace reads",decision:"allow",scope:"active_workspace",reason:"Read-only default capability.",source:"system",editable:false,enabled:true},{id:"user-review-sensitive",name:"Review sensitive requests",decision:"ask",scope:"developer_test_capabilities",reason:"Requires explicit approval before a high-risk request.",source:"user",editable:false,enabled:true},{id:"system-deny-outside",name:"Deny outside workspace",decision:"deny",scope:"outside_active_workspace",reason:"Workspace boundary.",source:"system",editable:false,enabled:true}];
 const policySeverity = (decision: PolicyDecision) => decision === "deny" ? 2 : decision === "ask" ? 1 : 0;
 function effectivePolicy(config: AppConfig["policies"]): PolicyEffectiveSnapshot {
@@ -56,8 +56,18 @@ export class MockHarnessControlClient implements HarnessControlClient {
  // Legacy mock lifecycle data is not evidence for M8-C observations.
  runtimeGetDiagnostics(): Promise<RuntimeDiagnostics> { return Promise.reject({code:"RUNTIME_UNAVAILABLE"}); }
  runtimeGetActivitySnapshot(_limit: number): Promise<ActivityEntry[]> { return this.scenario === "empty" ? Promise.resolve([]) : Promise.reject({code:"RUNTIME_UNAVAILABLE"}); }
- private toolCatalog(): ToolDescriptor[] { return tools.map((tool) => { const key = tool.name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()) as keyof AppConfig["tools"]; const configured = (this.activeTools ?? this.config?.tools)?.[key]?.enabled ?? tool.enabled; return { ...tool, enabled: configured, exposed: configured }; }); }
- private effectiveTools(): ToolDiagnostic[] { return this.toolCatalog().map((tool) => ({ name: tool.name, availability: tool.enabled ? "available" : "disabled", decision: tool.enabled ? "allow" : "deny" })); }
+ private toolCatalog(): ToolDescriptor[] { return tools.map((tool) => { const key = tool.name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()) as keyof AppConfig["tools"]; const configured = (this.activeTools ?? this.config?.tools)?.[key]?.enabled ?? tool.enabled; return { ...tool, enabled: configured, exposed: tool.name === "bash" ? configured && this.config?.security.mode === "developer_test" : configured }; }); }
+ private effectiveTools(): ToolDiagnostic[] {
+  const config = this.config ?? completeConfig();
+  return this.toolCatalog().map((tool) => {
+   if (tool.name === "bash") {
+    if (config.security.mode !== "developer_test") return { name: tool.name, availability: "unavailable_by_mode" as const, decision: "deny" as const, declaredCapability: "developer_shell" as const, readiness: "unavailable" as const, readinessReason: "Developer/Test mode is required." };
+    if (!tool.enabled) return { name: tool.name, availability: "disabled" as const, decision: "deny" as const, declaredCapability: "developer_shell" as const, readiness: "unavailable" as const, readinessReason: "Bash is disabled in the desired Runtime configuration." };
+    return { name: tool.name, availability: "unavailable_by_runtime" as const, decision: "deny" as const, declaredCapability: "developer_shell" as const, readiness: "unavailable" as const, reason: "Git Bash readiness is unavailable in the mock Runtime.", readinessReason: "Start a Runtime generation with a validated Git Bash executable." };
+   }
+   return { name: tool.name, availability: tool.enabled ? "available" as const : "disabled" as const, decision: tool.enabled ? "allow" as const : "deny" as const };
+  });
+ }
  runtimeGetEffectiveTools(): Promise<ToolDiagnostic[]> { return this.scenario === "empty" ? Promise.resolve([]) : this.respond(this.effectiveTools()); }
  configGet(){return this.respond(this.config);}
  configMetadata(){return this.respond({configDirectory:"%APPDATA%\\ChatGPT-Harness",configFile:"%APPDATA%\\ChatGPT-Harness\\config.json"});}
@@ -73,6 +83,7 @@ export class MockHarnessControlClient implements HarnessControlClient {
  apiKeyDelete(){this.configured=false;if(this.config)this.config={...this.config,tunnel:{...this.config.tunnel,apiKeyRef:undefined}};return this.respond(undefined);}
  chooseWorkspace(){return this.respond("D:\\example-project");}
  chooseTunnelClient(){return this.respond("D:\\example-project\\tunnel-client-v0.0.13-windows-amd64");}
+ chooseBashExecutable(){return this.respond(null);}
  detectTunnelClient(){return this.respond("D:\\example-project\\tunnel-client-v0.0.13-windows-amd64");}
  validatePath(){return this.respond(true);}
  runtimeStartEligibility(): Promise<StartEligibility> {

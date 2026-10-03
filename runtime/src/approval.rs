@@ -6,7 +6,8 @@
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use harness_control_protocol::{
-    ApprovalDecision, ApprovalRequest, ApprovalStatus, PolicyReason, RiskLevel, SanitizedArguments,
+    ApprovalDecision, ApprovalRequest, ApprovalStatus, BashApprovalDetails,
+    BashSessionGrantUnavailableReason, PolicyReason, RiskLevel, SanitizedArguments,
 };
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -37,6 +38,10 @@ pub(crate) struct ApprovalFacts {
     /// Internal exact-request binding. This value is never serialized into
     /// ApprovalRequest or activity evidence.
     pub(crate) fingerprint: String,
+    /// Exact normalized scope for internal SessionGrant matching only.
+    pub(crate) grant_scope: Option<String>,
+    pub(crate) bash_details: Option<BashApprovalDetails>,
+    pub(crate) allow_for_session_eligible: Option<bool>,
     pub(crate) matched_rule_ids: Vec<String>,
     pub(crate) policy_reason: PolicyReason,
     pub(crate) risk_level: RiskLevel,
@@ -60,12 +65,14 @@ pub(crate) enum ApprovalManagerError {
     DuplicateRequest,
     ApprovalNotFound,
     ApprovalAlreadyResolved,
+    SessionGrantNotEligible,
 }
 
 struct Entry {
     request: ApprovalRequest,
     fingerprint: String,
-    scope_summary: String,
+    grant_scope: Option<String>,
+    allow_for_session_eligible: bool,
     sender: Option<oneshot::Sender<ApprovalResolution>>,
 }
 
@@ -146,13 +153,17 @@ impl ApprovalManager {
         let expires_at =
             now + ChronoDuration::from_std(self.ttl).expect("approval TTL fits chrono duration");
         let request_id = facts.request_id.to_string();
+        let fingerprint = facts.fingerprint.clone();
+        let scope_summary = facts.scope_summary.clone();
+        let grant_scope = facts.grant_scope.clone();
+        let allow_for_session_eligible = facts.allow_for_session_eligible;
         let request = ApprovalRequest {
             request_id: request_id.clone(),
             runtime_id: self.runtime_id.clone(),
             generation_id: self.generation_id.clone(),
             tool: facts.tool,
             sanitized_arguments: facts.sanitized_arguments,
-            scope_summary: facts.scope_summary.clone(),
+            scope_summary: scope_summary.clone(),
             matched_rule_ids: facts
                 .matched_rule_ids
                 .into_iter()
@@ -160,6 +171,12 @@ impl ApprovalManager {
                 .collect(),
             policy_reason: facts.policy_reason,
             risk_level: facts.risk_level,
+            bash_details: facts.bash_details.clone(),
+            allow_for_session_eligible,
+            allow_for_session_unavailable_reason: match allow_for_session_eligible {
+                Some(false) => Some(BashSessionGrantUnavailableReason::UnclassifiedHighRisk),
+                _ => None,
+            },
             created_at: timestamp(now),
             expires_at: timestamp(expires_at),
             status: ApprovalStatus::Pending,
@@ -175,15 +192,16 @@ impl ApprovalManager {
             request_id,
             Entry {
                 request: request.clone(),
-                fingerprint: facts.fingerprint.clone(),
-                scope_summary: facts.scope_summary,
+                fingerprint: fingerprint.clone(),
+                grant_scope,
+                allow_for_session_eligible: allow_for_session_eligible.unwrap_or(true),
                 sender: Some(sender),
             },
         );
         Ok(RegisteredApproval {
             request,
             receiver,
-            fingerprint: facts.fingerprint,
+            fingerprint,
         })
     }
 
@@ -230,7 +248,7 @@ impl ApprovalManager {
         prepare_wake: F,
     ) -> Result<ApprovalRequest, ApprovalManagerError>
     where
-        F: FnOnce(&ApprovalRequest, &str),
+        F: FnOnce(&ApprovalRequest, Option<&str>),
     {
         self.expire_due();
         let now = self.clock.now();
@@ -243,6 +261,10 @@ impl ApprovalManager {
             return Err(ApprovalManagerError::ApprovalAlreadyResolved);
         }
 
+        if decision == ApprovalDecision::AllowForSession && !entry.allow_for_session_eligible {
+            return Err(ApprovalManagerError::SessionGrantNotEligible);
+        }
+
         let status = match decision {
             ApprovalDecision::AllowOnce | ApprovalDecision::AllowForSession => {
                 ApprovalStatus::Approved
@@ -252,7 +274,7 @@ impl ApprovalManager {
         entry.request.status = status.clone();
         entry.request.resolved_at = Some(timestamp(now));
         entry.request.decision = Some(decision);
-        prepare_wake(&entry.request, &entry.scope_summary);
+        prepare_wake(&entry.request, entry.grant_scope.as_deref());
         let resolution = ApprovalResolution {
             request_id: entry.request.request_id.clone(),
             fingerprint: entry.fingerprint.clone(),
@@ -409,6 +431,9 @@ mod tests {
             sanitized_arguments: [("path".into(), scope.into())].into_iter().collect(),
             scope_summary: scope.into(),
             fingerprint: format!("{tool}|{scope}"),
+            grant_scope: Some(scope.into()),
+            bash_details: None,
+            allow_for_session_eligible: None,
             matched_rule_ids: vec!["ask-write".into()],
             policy_reason: PolicyReason::MatchedUserRules,
             risk_level: RiskLevel::Medium,
@@ -641,5 +666,42 @@ mod tests {
         assert!(serialized.contains("<redacted content>"));
         assert!(!serialized.contains("SECRET_RAW_WRITE_CONTENT"));
         assert!(!serialized.contains("private content"));
+    }
+
+    #[tokio::test]
+    async fn unclassified_bash_rejects_forced_session_grant_and_stays_pending() {
+        let manager = ApprovalManager::new("runtime-a");
+        let request_id = Uuid::new_v4();
+        let mut registration = manager
+            .register(ApprovalFacts {
+                request_id,
+                tool: "bash".into(),
+                sanitized_arguments: [("command".into(), "echo <redacted>".into())]
+                    .into_iter()
+                    .collect(),
+                scope_summary: "{\"version\":1,\"redacted\":true}".into(),
+                fingerprint: "{\"command\":\"echo $(secret)\"}".into(),
+                grant_scope: None,
+                bash_details: None,
+                allow_for_session_eligible: Some(false),
+                matched_rule_ids: vec![],
+                policy_reason: PolicyReason::ToolDefault,
+                risk_level: RiskLevel::High,
+            })
+            .expect("register Bash approval");
+
+        assert_eq!(registration.request.allow_for_session_eligible, Some(false));
+        assert!(matches!(
+            manager.resolve(
+                &registration.request.request_id,
+                ApprovalDecision::AllowForSession,
+            ),
+            Err(ApprovalManagerError::SessionGrantNotEligible)
+        ));
+        assert_eq!(manager.pending_count(), 1);
+        assert!(matches!(
+            registration.receiver.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
     }
 }

@@ -16,6 +16,7 @@ function config(): AppConfig {
     security: { mode: "normal", developerTestMode: false },
     ui: {},
     tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
+    bash: { autoDetect: true },
     policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
   };
 }
@@ -120,5 +121,73 @@ describe("M3 PoliciesPage", () => {
     expect(screen.getByLabelText("User rule tool matcher")).toHaveValue("write");
     expect(screen.getByLabelText("User rule name")).toHaveValue("Review write approvals");
     expect(state.context.saveConfig).not.toHaveBeenCalled();
+  });
+
+  it("creates a typed Bash Command matcher with an exact argv prefix", async () => {
+    const { saveConfig } = setup();
+    fireEvent.change(screen.getByLabelText("User rule matcher type"), { target: { value: "bash_command" } });
+    fireEvent.change(screen.getByLabelText("User rule ID"), { target: { value: "review-git-status" } });
+    fireEvent.change(screen.getByLabelText("User rule name"), { target: { value: "Review git status" } });
+    fireEvent.change(screen.getByLabelText("Bash executable"), { target: { value: "git" } });
+    fireEvent.change(screen.getByLabelText("Bash argv prefix tokens"), { target: { value: '["status", "--short"]' } });
+    fireEvent.change(screen.getByLabelText("User rule reason"), { target: { value: "Inspect status before execution" } });
+    fireEvent.change(screen.getByLabelText("User rule decision"), { target: { value: "ask" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create User Rule" }));
+    await waitFor(() => expect(saveConfig).toHaveBeenCalled());
+    expect((saveConfig.mock.calls[0][0] as AppConfig).policies.userRules[0]).toMatchObject({
+      id: "review-git-status",
+      decision: "ask",
+      matcher: { type: "bash_command", executable: "git", argvPrefix: ["status", "--short"] },
+    });
+  });
+
+  it("rejects a Bash matcher that tries to use a shell operator", async () => {
+    const { saveConfig } = setup();
+    fireEvent.change(screen.getByLabelText("User rule matcher type"), { target: { value: "bash_command" } });
+    fireEvent.change(screen.getByLabelText("User rule ID"), { target: { value: "unsafe" } });
+    fireEvent.change(screen.getByLabelText("User rule name"), { target: { value: "Unsafe" } });
+    fireEvent.change(screen.getByLabelText("Bash executable"), { target: { value: "git && push" } });
+    fireEvent.change(screen.getByLabelText("User rule reason"), { target: { value: "Must be reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create User Rule" }));
+    expect(await screen.findByText(/normalized command token/)).toBeInTheDocument();
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it("preserves an empty logical argv token in a Bash Command matcher", async () => {
+    const { saveConfig } = setup();
+    fireEvent.change(screen.getByLabelText("User rule matcher type"), { target: { value: "bash_command" } });
+    fireEvent.change(screen.getByLabelText("User rule ID"), { target: { value: "review-empty-arg" } });
+    fireEvent.change(screen.getByLabelText("User rule name"), { target: { value: "Review empty arg" } });
+    fireEvent.change(screen.getByLabelText("Bash executable"), { target: { value: "printf" } });
+    fireEvent.change(screen.getByLabelText("Bash argv prefix tokens"), { target: { value: '["%s", ""]' } });
+    fireEvent.change(screen.getByLabelText("User rule reason"), { target: { value: "Preserve logical argv shape" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create User Rule" }));
+    await waitFor(() => expect(saveConfig).toHaveBeenCalled());
+    expect((saveConfig.mock.calls[0][0] as AppConfig).policies.userRules[0].matcher).toEqual({
+      type: "bash_command",
+      executable: "printf",
+      argvPrefix: ["%s", ""],
+    });
+  });
+
+  it("rejects malformed multiline JSON instead of treating lines as separate tokens", async () => {
+    const { saveConfig } = setup();
+    fireEvent.change(screen.getByLabelText("User rule matcher type"), { target: { value: "bash_command" } });
+    fireEvent.change(screen.getByLabelText("User rule ID"), { target: { value: "malformed-prefix" } });
+    fireEvent.change(screen.getByLabelText("User rule name"), { target: { value: "Malformed prefix" } });
+    fireEvent.change(screen.getByLabelText("Bash executable"), { target: { value: "git" } });
+    fireEvent.change(screen.getByLabelText("Bash argv prefix tokens"), { target: { value: '[\n  "status",\n  "--short"\n' } });
+    fireEvent.change(screen.getByLabelText("User rule reason"), { target: { value: "Must remain typed JSON" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create User Rule" }));
+    expect(await screen.findByText(/Bash argv prefix must be a JSON array/)).toBeInTheDocument();
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it("opens an unclassified Bash handoff at an ASK-safe starting decision", () => {
+    setup();
+    cleanup();
+    render(<PoliciesPage initialDraft={{ tool: "bash", scope: "dynamic command", name: "Review Bash approvals", reason: "Review dynamic Bash commands.", matcher: { type: "tool", tool: "bash" } }} />);
+    expect(screen.getByLabelText("User rule tool matcher")).toHaveValue("bash");
+    expect(screen.getByLabelText("User rule decision")).toHaveValue("ask");
   });
 });

@@ -78,6 +78,7 @@ fn base_snapshot(fixture: &Fixture) -> RuntimeConfigSnapshot {
             max_read_bytes: 1_048_576,
         },
         tools: ToolConfig::default(),
+        bash: harness_control_protocol::BashConfig::default(),
         policies: PolicyConfig::default(),
     }
 }

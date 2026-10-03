@@ -1,5 +1,19 @@
+import type { PolicyMatcherConfig } from "@protocol/v1";
+
 export type PageKey = "overview" | "tools" | "policies" | "activity" | "approvals" | "settings";
-export type PolicyDraftHandoff = { tool: string; scope: string; name: string; reason: string };
+
+/**
+ * A review handoff from Approval Center to Policies.  The matcher is only a
+ * prefilled draft: Policies still validates it and the user must explicitly
+ * save the resulting desired configuration.
+ */
+export type PolicyDraftHandoff = {
+  tool: string;
+  scope: string;
+  name: string;
+  reason: string;
+  matcher?: PolicyMatcherConfig;
+};
 
 export const pages: Array<{ key: PageKey; label: string; eyebrow: string }> = [
   { key: "overview", label: "Overview", eyebrow: "Control plane" },

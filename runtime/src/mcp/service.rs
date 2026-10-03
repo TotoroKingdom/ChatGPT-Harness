@@ -1,5 +1,5 @@
 use crate::mcp::context::McpExecutionContext;
-use crate::mcp::{edit, glob, read_file, write};
+use crate::mcp::{bash, edit, glob, read_file, write};
 use crate::tools::{EffectiveTool, ToolAvailability};
 use rmcp::handler::server::common::schema_for_input;
 use rmcp::handler::server::ServerHandler;
@@ -10,11 +10,13 @@ use rmcp::model::{
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::ErrorData;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
 const READ_FILE: &str = "read_file";
 const GLOB: &str = "glob";
 const WRITE: &str = "write";
 const EDIT: &str = "edit";
+const BASH: &str = "bash";
 
 #[derive(Clone)]
 pub struct McpService {
@@ -24,6 +26,7 @@ pub struct McpService {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum McpProtocolError {
     UnknownTool,
+    AsyncOnly,
 }
 
 impl McpService {
@@ -59,6 +62,7 @@ impl McpService {
             GLOB => Ok(glob::execute(&self.context, arguments)),
             WRITE => Ok(write::execute(&self.context, arguments)),
             EDIT => Ok(edit::execute(&self.context, arguments)),
+            BASH => Err(McpProtocolError::AsyncOnly),
             _ => Err(McpProtocolError::UnknownTool),
         }
     }
@@ -68,11 +72,22 @@ impl McpService {
         name: &str,
         arguments: Value,
     ) -> Result<CallToolResult, McpProtocolError> {
+        self.call_tool_async_with_cancel(name, arguments, CancellationToken::new())
+            .await
+    }
+
+    pub async fn call_tool_async_with_cancel(
+        &self,
+        name: &str,
+        arguments: Value,
+        request_cancel: CancellationToken,
+    ) -> Result<CallToolResult, McpProtocolError> {
         match name {
             READ_FILE => Ok(read_file::execute_async(&self.context, arguments).await),
             GLOB => Ok(glob::execute_async(&self.context, arguments).await),
             WRITE => Ok(write::execute_async(&self.context, arguments).await),
             EDIT => Ok(edit::execute_async(&self.context, arguments).await),
+            BASH => Ok(bash::execute(&self.context, arguments, request_cancel).await),
             _ => Err(McpProtocolError::UnknownTool),
         }
     }
@@ -102,21 +117,29 @@ impl ServerHandler for McpService {
     fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>>
            + rmcp::service::MaybeSendFuture
            + '_ {
         let service = self.clone();
         async move {
             service
-                .call_tool_async(
+                .call_tool_async_with_cancel(
                     &request.name,
                     Value::Object(request.arguments.unwrap_or_default()),
+                    context.ct.clone(),
                 )
                 .await
                 .map(Into::into)
-                .map_err(|McpProtocolError::UnknownTool| {
-                    ErrorData::new(ErrorCode::METHOD_NOT_FOUND, "unknown tool", None)
+                .map_err(|error| match error {
+                    McpProtocolError::UnknownTool => {
+                        ErrorData::new(ErrorCode::METHOD_NOT_FOUND, "unknown tool", None)
+                    }
+                    McpProtocolError::AsyncOnly => ErrorData::new(
+                        ErrorCode::INTERNAL_ERROR,
+                        "Bash requires asynchronous MCP execution",
+                        None,
+                    ),
                 })
         }
     }
@@ -128,6 +151,7 @@ fn tool_from_effective(tool: EffectiveTool) -> Option<Tool> {
         GLOB => Some(glob_tool_with_metadata(&tool.name, &tool.description)),
         WRITE => Some(write_tool_with_metadata(&tool.name, &tool.description)),
         EDIT => Some(edit_tool_with_metadata(&tool.name, &tool.description)),
+        BASH => Some(bash_tool_with_metadata(&tool.name, &tool.description)),
         _ => None,
     }
 }
@@ -179,6 +203,21 @@ fn edit_tool_with_metadata(name: &str, description: &str) -> Tool {
     )
 }
 
+fn bash_tool_with_metadata(name: &str, description: &str) -> Tool {
+    Tool::new(
+        name.to_owned(),
+        description.to_owned(),
+        schema_for_input::<bash::BashArguments>().expect("bash MCP schema is statically valid"),
+    )
+    .with_output_schema::<bash::BashOutputSchema>()
+    .with_annotations(
+        ToolAnnotations::new()
+            .read_only(false)
+            .destructive(true)
+            .open_world(true),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +230,7 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use tokio_util::sync::CancellationToken;
 
     struct TestWorkspace {
         base: PathBuf,
@@ -262,8 +302,37 @@ mod tests {
                 max_read_bytes: 64,
             },
             tools: ToolConfig::default(),
+            bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
         }
+    }
+
+    #[cfg(windows)]
+    fn bash_config_for(
+        root: &Path,
+        decision: harness_control_protocol::PolicyDecision,
+    ) -> RuntimeConfigSnapshot {
+        let mut config = config_for(root);
+        let program_files = std::env::var_os("ProgramFiles")
+            .map(PathBuf::from)
+            .expect("ProgramFiles for Git Bash fixture");
+        let bash = program_files.join("Git").join("bin").join("bash.exe");
+        assert!(
+            bash.is_file(),
+            "Git Bash fixture is required: {}",
+            bash.display()
+        );
+        config.security = harness_control_protocol::SecurityConfig {
+            mode: harness_control_protocol::SecurityMode::DeveloperTest,
+            developer_test_mode: true,
+        };
+        config.tools.bash.enabled = true;
+        config.bash = harness_control_protocol::BashConfig {
+            auto_detect: false,
+            executable_path: Some(bash.to_string_lossy().into_owned()),
+        };
+        config.policies.tool_defaults.bash = decision;
+        config
     }
 
     fn call(service: &McpService, name: &str, arguments: Value) -> CallToolResult {
@@ -287,6 +356,214 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
         panic!("timed out waiting for {count} pending approvals");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn bash_allow_once_resumes_same_request_with_structured_output() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        let mut config = bash_config_for(
+            &workspace.root,
+            harness_control_protocol::PolicyDecision::Ask,
+        );
+        config.policies.tool_defaults.bash = harness_control_protocol::PolicyDecision::Ask;
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(BASH, json!({ "command": "printf bash-ok" }))
+                    .await
+                    .expect("known Bash tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        let pending = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        assert_eq!(pending[0].tool, BASH);
+        core.approval_manager()
+            .resolve(
+                &pending[0].request_id,
+                harness_control_protocol::ApprovalDecision::AllowOnce,
+            )
+            .expect("allow Bash once");
+        let result = call.await.expect("Bash call task");
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(result.structured_content.as_ref().unwrap()["exitCode"], 0);
+        assert_eq!(
+            result.structured_content.as_ref().unwrap()["stdout"],
+            "bash-ok"
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn bash_request_cancellation_cancels_pending_approval_without_spawn() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(bash_config_for(
+            &workspace.root,
+            harness_control_protocol::PolicyDecision::Ask,
+        ))
+        .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let cancellation = CancellationToken::new();
+        let call = tokio::spawn({
+            let service = service.clone();
+            let cancellation = cancellation.clone();
+            async move {
+                service
+                    .call_tool_async_with_cancel(
+                        BASH,
+                        json!({ "command": "sleep 60" }),
+                        cancellation,
+                    )
+                    .await
+                    .expect("known Bash tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        cancellation.cancel();
+        let result = call.await.expect("cancelled Bash call task");
+        assert_eq!(error_code(&result), "APPROVAL_CANCELLED");
+        assert_eq!(core.approval_manager().pending_count(), 0);
+        assert!(!workspace.root.join("should-not-run").exists());
+        core.drain_activity_events();
+        let activity = core.activity_snapshot(100);
+        let cancelled = activity
+            .iter()
+            .find(|entry| entry.event_type == crate::audit::AuditEventType::ApprovalCancelled)
+            .expect("approval cancellation evidence");
+        assert_eq!(cancelled.tool_name.as_deref(), Some(BASH));
+        assert_eq!(
+            cancelled.bash.as_ref().unwrap().cwd,
+            harness_control_protocol::BashWorkingDirectory::ActiveWorkspace
+        );
+        let serialized = serde_json::to_string(&activity).unwrap();
+        assert!(!serialized.contains("stdout"));
+        assert!(!serialized.contains("stderr"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn bash_request_cancellation_stops_allowed_process() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(bash_config_for(
+            &workspace.root,
+            harness_control_protocol::PolicyDecision::Allow,
+        ))
+        .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let cancellation = CancellationToken::new();
+        let call = tokio::spawn({
+            let service = service.clone();
+            let cancellation = cancellation.clone();
+            async move {
+                service
+                    .call_tool_async_with_cancel(
+                        BASH,
+                        json!({ "command": "sleep 60" }),
+                        cancellation,
+                    )
+                    .await
+                    .expect("known Bash tool")
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        cancellation.cancel();
+        let result = call.await.expect("cancelled Bash call task");
+        assert_eq!(error_code(&result), "BASH_CANCELLED");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn runtime_stop_cancels_allowed_bash_process() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(bash_config_for(
+            &workspace.root,
+            harness_control_protocol::PolicyDecision::Allow,
+        ))
+        .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(BASH, json!({ "command": "sleep 60" }))
+                    .await
+                    .expect("known Bash tool")
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        core.stop();
+        let result = call.await.expect("runtime-stopped Bash call task");
+        assert_eq!(error_code(&result), "BASH_CANCELLED");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn post_approval_revalidation_rejects_stopped_bash_generation() {
+        let workspace = TestWorkspace::new();
+        let mut core = RuntimeCore::new();
+        core.initialize(bash_config_for(
+            &workspace.root,
+            harness_control_protocol::PolicyDecision::Ask,
+        ))
+        .expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let call = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .call_tool_async(BASH, json!({ "command": "printf should-not-run" }))
+                    .await
+                    .expect("known Bash tool")
+            }
+        });
+        wait_for_pending(&core, 1).await;
+        let pending = core
+            .approval_manager()
+            .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+        core.bash_runtime().expect("Bash Runtime").stop();
+        core.approval_manager()
+            .resolve(
+                &pending[0].request_id,
+                harness_control_protocol::ApprovalDecision::AllowOnce,
+            )
+            .expect("resolve approval");
+        let result = call.await.expect("post-approval task");
+        assert_eq!(error_code(&result), "BASH_CANCELLED");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn normal_mode_bash_stale_call_is_unavailable_by_mode_not_policy_denied() {
+        let workspace = TestWorkspace::new();
+        let mut config = bash_config_for(
+            &workspace.root,
+            harness_control_protocol::PolicyDecision::Allow,
+        );
+        config.security.mode = harness_control_protocol::SecurityMode::Normal;
+        config.security.developer_test_mode = true;
+        let mut core = RuntimeCore::new();
+        core.initialize(config).expect("initialize runtime");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let result = service
+            .call_tool_async(BASH, json!({ "command": "printf should-not-run" }))
+            .await
+            .expect("known Bash tool");
+        assert_eq!(error_code(&result), "BASH_UNAVAILABLE");
     }
 
     #[test]
@@ -578,6 +855,7 @@ mod tests {
         let decision = harness_control_protocol::ApprovalDecision::AllowForSession;
         manager
             .resolve_with(&request_id, decision, |approval, scope| {
+                let scope = scope.expect("classified file approval has grant scope");
                 grants.insert_from_approved_scope(
                     &approval.generation_id,
                     &approval.request_id,
@@ -1110,6 +1388,23 @@ mod tests {
             assert_eq!(annotations.destructive_hint, Some(true));
             assert_eq!(annotations.open_world_hint, Some(false));
         }
+    }
+
+    #[test]
+    fn bash_builder_exposes_input_output_schema_and_truthful_annotations() {
+        let tool = bash_tool_with_metadata("bash", "controlled Bash");
+        let input = serde_json::to_value(tool.input_schema.as_ref()).unwrap();
+        assert_eq!(input["properties"]["command"]["type"], "string");
+        assert_eq!(input["additionalProperties"], false);
+        let output = serde_json::to_value(tool.output_schema.expect("output schema")).unwrap();
+        assert_eq!(output["properties"]["exitCode"]["type"], "integer");
+        assert_eq!(output["properties"]["stdout"]["type"], "string");
+        assert_eq!(output["properties"]["stderr"]["type"], "string");
+        assert_eq!(output["properties"]["durationMs"]["type"], "integer");
+        let annotations = tool.annotations.expect("Bash annotations");
+        assert_eq!(annotations.read_only_hint, Some(false));
+        assert_eq!(annotations.destructive_hint, Some(true));
+        assert_eq!(annotations.open_world_hint, Some(true));
     }
 
     #[test]

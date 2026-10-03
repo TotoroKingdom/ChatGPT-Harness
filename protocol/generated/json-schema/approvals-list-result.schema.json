@@ -11,6 +11,34 @@
     },
     "ApprovalRequest": {
       "properties": {
+        "allowForSessionEligible": {
+          "description": "`None` is the legacy/non-Bash value.  Bash always supplies `Some` so\nunclassified commands can explicitly disable session grants.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "allowForSessionUnavailableReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BashSessionGrantUnavailableReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bashDetails": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BashApprovalDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional M5 Bash projection.  Omitted for existing file-tool approval\nrecords so older consumers retain their current wire shape."
+        },
         "createdAt": {
           "type": "string"
         },
@@ -93,6 +121,108 @@
         "denied",
         "expired",
         "cancelled"
+      ],
+      "type": "string"
+    },
+    "BashApprovalDetails": {
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "$ref": "#/$defs/BashClassification"
+        },
+        "commandPreview": {
+          "description": "Bounded, shell-display-safe preview; it is never the raw command.",
+          "type": "string"
+        },
+        "cwd": {
+          "$ref": "#/$defs/BashWorkingDirectory"
+        },
+        "normalizedSegments": {
+          "items": {
+            "$ref": "#/$defs/BashApprovalSegment"
+          },
+          "type": "array"
+        },
+        "previewRedacted": {
+          "type": "boolean"
+        },
+        "previewTruncated": {
+          "type": "boolean"
+        },
+        "riskFlags": {
+          "items": {
+            "$ref": "#/$defs/BashRiskFlag"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "commandPreview",
+        "classification",
+        "normalizedSegments",
+        "riskFlags",
+        "cwd",
+        "previewRedacted",
+        "previewTruncated"
+      ],
+      "type": "object"
+    },
+    "BashApprovalSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "argv": {
+          "description": "Logical argv suitable for display only.  A value of `true` in\n`argv_redacted` means this vector cannot be used to create an exact\nBashCommand matcher draft.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "argvRedacted": {
+          "type": "boolean"
+        },
+        "executable": {
+          "description": "Sanitized normalized executable identity.  This is never a raw shell\nsource fragment or a canonical filesystem path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "executable",
+        "argv",
+        "argvRedacted"
+      ],
+      "type": "object"
+    },
+    "BashClassification": {
+      "description": "Runtime-owned, display-safe Bash approval evidence.  This projection is\nintentionally separate from the internal normalized command scope used by\nSessionGrant matching: the latter may contain sensitive literal argv and\nnever crosses the protocol boundary.",
+      "enum": [
+        "classified",
+        "unclassified_high_risk"
+      ],
+      "type": "string"
+    },
+    "BashRiskFlag": {
+      "enum": [
+        "command_substitution",
+        "backticks",
+        "eval",
+        "nested_shell",
+        "interpreter_inline_code",
+        "redirection",
+        "dynamic_expansion",
+        "malformed_quoting",
+        "unsupported_grammar"
+      ],
+      "type": "string"
+    },
+    "BashSessionGrantUnavailableReason": {
+      "enum": [
+        "unclassified_high_risk"
+      ],
+      "type": "string"
+    },
+    "BashWorkingDirectory": {
+      "enum": [
+        "active_workspace"
       ],
       "type": "string"
     },

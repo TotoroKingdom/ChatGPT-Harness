@@ -78,6 +78,8 @@ export interface HarnessControlClient extends ControlReadClient {
   apiKeyDelete(): Promise<void>;
   chooseWorkspace(): Promise<string | null>;
   chooseTunnelClient(): Promise<string | null>;
+  /** Pick a desired Git Bash executable; Runtime validates it on next start. */
+  chooseBashExecutable(): Promise<string | null>;
   detectTunnelClient(): Promise<string | null>;
   validatePath(path: string, file: boolean): Promise<boolean>;
   localDiagnosticsRun(): Promise<DiagnosticRun>;

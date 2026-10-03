@@ -16,8 +16,37 @@ pub struct AppConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub tools: ToolConfig,
+    // Desired Git Bash configuration. Runtime validates the executable again
+    // for every generation.
+    #[serde(default)]
+    pub bash: BashConfig,
     #[serde(default)]
     pub policies: PolicyConfig,
+}
+
+// Desired Git-for-Windows Bash configuration. `executable_path` is only a
+// user preference and does not imply that Runtime has accepted or launched it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BashConfig {
+    #[serde(default = "default_true")]
+    pub auto_detect: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub executable_path: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for BashConfig {
+    fn default() -> Self {
+        Self {
+            auto_detect: true,
+            executable_path: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -92,29 +121,27 @@ impl PolicyConfig {
             if !ids.insert(rule.id.as_str()) {
                 return Err(format!("Duplicate user policy rule ID '{}'.", rule.id));
             }
-            if rule.matcher.tool.trim().is_empty() {
-                return Err(format!(
-                    "User policy rule '{}' needs a tool matcher.",
+            rule.matcher.validate().map_err(|error| {
+                format!(
+                    "User policy rule '{}' has an invalid matcher: {error}.",
                     rule.id
-                ));
-            }
-            if !matches!(
-                rule.matcher.matcher_type,
-                super::policies::PolicyMatcherType::Tool
-            ) {
-                return Err(format!(
-                    "User policy rule '{}' uses an unsupported matcher type.",
-                    rule.id
-                ));
-            }
-            if !matches!(
-                rule.matcher.tool.as_str(),
-                "read_file" | "glob" | "write" | "edit"
-            ) {
-                return Err(format!(
-                    "User policy rule '{}' targets an unknown or unavailable tool.",
-                    rule.id
-                ));
+                )
+            })?;
+            match &rule.matcher {
+                super::policies::PolicyMatcherConfig::Tool { tool }
+                    if matches!(
+                        tool.as_str(),
+                        "read_file" | "glob" | "write" | "edit" | "bash"
+                    ) => {}
+                super::policies::PolicyMatcherConfig::Tool { .. } => {
+                    return Err(format!(
+                        "User policy rule '{}' targets an unknown or unavailable tool.",
+                        rule.id
+                    ));
+                }
+                // BashCommand implicitly targets the registered `bash` tool;
+                // Runtime repeats the authoritative capability check.
+                super::policies::PolicyMatcherConfig::BashCommand { .. } => {}
             }
         }
         Ok(())
@@ -234,6 +261,8 @@ pub struct RuntimeConfigSnapshot {
     pub security: SecurityConfig,
     pub runtime_limits: RuntimeLimits,
     pub tools: ToolConfig,
+    #[serde(default)]
+    pub bash: BashConfig,
     #[serde(default)]
     pub policies: PolicyConfig,
 }
