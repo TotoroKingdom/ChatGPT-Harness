@@ -1,6 +1,6 @@
 use harness_control_protocol::{
     AppConfig, BashConfig, DecimalU64, PolicyConfig, SecurityConfig, SecurityMode, ToolConfig,
-    TunnelConfig, UiConfig, WorkspaceConfig,
+    TunnelConfig, UiConfig, UiLanguage, WorkspaceConfig,
 };
 use serde::Serialize;
 use std::{
@@ -126,7 +126,7 @@ impl ConfigStore {
         let previous = self.load()?;
         config.config_revision = match previous {
             None => DecimalU64::new(1),
-            Some(old) if same_semantics(&old, &config) => old.config_revision,
+            Some(old) if same_restart_semantics(&old, &config) => old.config_revision,
             Some(old) => old
                 .config_revision
                 .checked_add_one()
@@ -138,6 +138,21 @@ impl ConfigStore {
         atomic_write(&self.file, &bytes).map_err(|e| ConfigError::Io(e.to_string()))?;
         Ok(config)
     }
+
+    /// Persist only the presentation language preference.
+    ///
+    /// Read the latest persisted configuration first so this focused mutation
+    /// cannot commit an unrelated Settings draft. When no config exists, use
+    /// the same safe defaults as the normal config bootstrap path.
+    pub fn set_ui_language(&self, language: Option<UiLanguage>) -> Result<AppConfig, ConfigError> {
+        let mut config = match self.load()? {
+            Some(config) => config,
+            None => Self::safe_defaults(),
+        };
+        config.ui.language = language;
+        self.save(config)
+    }
+
     pub fn reset(&self) -> Result<(), ConfigError> {
         if self.file.exists() {
             fs::remove_file(&self.file).map_err(|e| ConfigError::Io(e.to_string()))?;
@@ -188,11 +203,19 @@ pub(crate) fn normalize_and_validate_control_plane_http_proxy(
     Ok(())
 }
 
-fn same_semantics(a: &AppConfig, b: &AppConfig) -> bool {
+/// Compare only configuration that affects Harness/Runtime restart semantics.
+///
+/// `UiConfig` is presentation state. It is persisted in the same local config
+/// file, but changing it must not create Runtime restart debt or advance the
+/// Runtime-facing revision. Keep every non-UI field in this comparison so a
+/// UI-only save cannot hide an unrelated desired configuration change.
+fn same_restart_semantics(a: &AppConfig, b: &AppConfig) -> bool {
     let mut left = a.clone();
     let mut right = b.clone();
     left.config_revision = DecimalU64::ZERO;
     right.config_revision = DecimalU64::ZERO;
+    left.ui = UiConfig::default();
+    right.ui = UiConfig::default();
     left == right
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -243,8 +266,9 @@ fn replace_file(tmp: &Path, target: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use harness_control_protocol::{
-        AppConfig, BashConfig, PolicyConfig, PolicyDecision, PolicyMatcherConfig, SecurityConfig,
-        SecurityMode, TunnelConfig, UiConfig, UserPolicyRuleConfig, WorkspaceConfig,
+        AppConfig, BashConfig, PolicyConfig, PolicyDecision, PolicyMatcherConfig,
+        RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode, TunnelConfig, UiConfig,
+        UiLanguage, UserPolicyRuleConfig, WorkspaceConfig,
     };
     fn c() -> AppConfig {
         AppConfig {
@@ -349,6 +373,204 @@ mod tests {
             .unwrap()
             .bash;
         assert_eq!(bash, BashConfig::default());
+    }
+
+    #[test]
+    fn legacy_schema_v1_without_language_loads_with_system_follow_default() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["ui"].as_object_mut().unwrap().remove("language");
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = ConfigStore::new(d.path().into()).load().unwrap().unwrap();
+        assert_eq!(loaded.ui.language, None);
+    }
+
+    #[test]
+    fn ui_language_values_round_trip_and_clear_to_follow_system() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let first = store.save(c()).unwrap();
+
+        let mut english = first.clone();
+        english.ui.language = Some(UiLanguage::En);
+        let english = store.save(english).unwrap();
+        assert_eq!(english.ui.language, Some(UiLanguage::En));
+        assert_eq!(english.config_revision, DecimalU64::new(1));
+
+        let mut chinese = english.clone();
+        chinese.ui.language = Some(UiLanguage::ZhCn);
+        let chinese = store.save(chinese).unwrap();
+        assert_eq!(chinese.ui.language, Some(UiLanguage::ZhCn));
+        assert_eq!(chinese.config_revision, DecimalU64::new(1));
+
+        let mut follow_system = chinese.clone();
+        follow_system.ui.language = None;
+        let follow_system = store.save(follow_system).unwrap();
+        assert_eq!(follow_system.ui.language, None);
+        assert_eq!(follow_system.config_revision, DecimalU64::new(1));
+        assert_eq!(store.load().unwrap().unwrap().ui.language, None);
+    }
+
+    #[test]
+    fn invalid_serialized_ui_language_fails_closed() {
+        let d = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["ui"]["language"] = serde_json::json!("fr");
+        fs::write(
+            d.path().join("config.json"),
+            serde_json::to_vec_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            ConfigStore::new(d.path().into()).load(),
+            Err(ConfigError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn ui_only_theme_and_language_saves_keep_revision_stable() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let first = store.save(c()).unwrap();
+
+        let mut themed = first.clone();
+        themed.ui.theme = Some("dark".into());
+        let themed = store.save(themed).unwrap();
+        assert_eq!(themed.config_revision, DecimalU64::new(1));
+
+        let mut localized = themed.clone();
+        localized.ui.language = Some(UiLanguage::ZhCn);
+        let localized = store.save(localized).unwrap();
+        assert_eq!(localized.config_revision, DecimalU64::new(1));
+    }
+
+    #[test]
+    fn language_combined_with_each_runtime_change_increments_once() {
+        let runtime_changes = ["tool", "security", "tunnel", "workspace", "policy", "bash"];
+        for change in runtime_changes {
+            let d = tempfile::tempdir().unwrap();
+            let store = ConfigStore::new(d.path().into());
+            let first = store.save(c()).unwrap();
+            let mut changed = first.clone();
+            changed.ui.language = Some(UiLanguage::En);
+            match change {
+                "tool" => changed.tools.write.enabled = false,
+                "security" => {
+                    changed.security.mode = SecurityMode::DeveloperTest;
+                    changed.security.developer_test_mode = true;
+                }
+                "tunnel" => changed.tunnel.tunnel_id = "next".into(),
+                "workspace" => changed.workspace.root_path = r"D:\next".into(),
+                "policy" => changed.policies.tool_defaults.write = PolicyDecision::Deny,
+                "bash" => changed.bash.auto_detect = false,
+                _ => unreachable!(),
+            }
+            let changed = store.save(changed).unwrap();
+            assert_eq!(changed.config_revision, DecimalU64::new(2), "{change}");
+        }
+    }
+
+    #[test]
+    fn isolated_language_update_reads_current_config_and_preserves_unrelated_fields() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let mut original = c();
+        original.workspace.root_path = "D:\\persisted".into();
+        original.tunnel.tunnel_id = "persisted-tunnel".into();
+        original.tools.write.enabled = false;
+        let original = store.save(original).unwrap();
+
+        let saved = store.set_ui_language(Some(UiLanguage::ZhCn)).unwrap();
+        assert_eq!(saved.ui.language, Some(UiLanguage::ZhCn));
+        assert_eq!(saved.workspace, original.workspace);
+        assert_eq!(saved.tunnel, original.tunnel);
+        assert_eq!(saved.tools, original.tools);
+        assert_eq!(saved.config_revision, original.config_revision);
+
+        let cleared = store.set_ui_language(None).unwrap();
+        assert_eq!(cleared.ui.language, None);
+        assert_eq!(cleared.workspace, original.workspace);
+        assert_eq!(cleared.tunnel, original.tunnel);
+        assert_eq!(cleared.tools, original.tools);
+        assert_eq!(cleared.config_revision, original.config_revision);
+    }
+
+    #[test]
+    fn isolated_language_update_uses_safe_defaults_when_config_is_missing() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+
+        let saved = store.set_ui_language(Some(UiLanguage::En)).unwrap();
+        assert_eq!(saved.ui.language, Some(UiLanguage::En));
+        assert_eq!(saved.config_revision, DecimalU64::new(1));
+        assert!(saved.workspace.root_path.is_empty());
+        assert!(saved.tunnel.tunnel_id.is_empty());
+        assert!(saved.tunnel.api_key_ref.is_none());
+
+        let cleared = store.set_ui_language(None).unwrap();
+        assert_eq!(cleared.ui.language, None);
+        assert_eq!(cleared.config_revision, DecimalU64::new(1));
+        assert!(cleared.workspace.root_path.is_empty());
+        assert!(cleared.tunnel.tunnel_id.is_empty());
+    }
+
+    #[test]
+    fn isolated_language_update_rejects_corrupt_config_without_overwriting_it() {
+        let d = tempfile::tempdir().unwrap();
+        let target = d.path().join("config.json");
+        fs::write(&target, b"{not-json").unwrap();
+
+        let result = ConfigStore::new(d.path().into()).set_ui_language(Some(UiLanguage::ZhCn));
+        assert!(matches!(result, Err(ConfigError::Invalid(_))));
+        assert_eq!(fs::read(target).unwrap(), b"{not-json");
+    }
+
+    #[test]
+    fn isolated_language_atomic_save_failure_preserves_previous_config_and_revision() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let original = store.save(c()).unwrap();
+        let target = d.path().join("config.json");
+        let bytes = fs::read(&target).unwrap();
+        // Deterministically prevent creating the temporary file; do not rely
+        // on platform-specific ACLs or a privileged test account.
+        fs::create_dir(d.path().join("config.json.tmp")).unwrap();
+
+        let error = store.set_ui_language(Some(UiLanguage::ZhCn)).unwrap_err();
+        assert_eq!(error.code(), "CONFIG_WRITE_FAILED");
+        assert_eq!(fs::read(target).unwrap(), bytes);
+        assert_eq!(store.load().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn runtime_snapshot_serialization_excludes_ui_language() {
+        let mut config = c();
+        config.ui.language = Some(UiLanguage::ZhCn);
+        let snapshot = RuntimeConfigSnapshot {
+            config_revision: config.config_revision,
+            workspace: config.workspace,
+            security: config.security,
+            runtime_limits: RuntimeLimits {
+                max_concurrent_requests: 1,
+                max_activity_events: 2,
+                max_read_bytes: 3,
+            },
+            tools: config.tools,
+            bash: config.bash,
+            policies: config.policies,
+        };
+        let encoded = serde_json::to_value(snapshot).unwrap();
+        assert!(encoded.get("ui").is_none());
+        assert!(serde_json::to_string(&encoded)
+            .unwrap()
+            .contains("runtimeLimits"));
+        assert!(!serde_json::to_string(&encoded).unwrap().contains("zh-CN"));
     }
 
     #[test]
@@ -691,6 +913,19 @@ mod tests {
         fs::write(&target, b"old").unwrap();
         atomic_write(&target, b"new").unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"new");
+        assert!(!d.path().join("config.json.tmp").exists());
+    }
+
+    #[test]
+    fn atomic_write_failure_keeps_existing_target_unchanged() {
+        let d = tempfile::tempdir().unwrap();
+        let target = d.path().join("config.json");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("sentinel"), b"old").unwrap();
+
+        assert!(atomic_write(&target, b"new").is_err());
+        assert!(target.is_dir());
+        assert_eq!(fs::read(target.join("sentinel")).unwrap(), b"old");
         assert!(!d.path().join("config.json.tmp").exists());
     }
 

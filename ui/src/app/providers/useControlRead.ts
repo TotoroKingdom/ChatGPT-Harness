@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useHarnessData } from "./HarnessDataProvider";
-import { controlReadError } from "@/services/harness/control-read";
+import { controlReadError, type ControlReadError } from "@/services/harness/control-read";
 
-export type ReadState<T> = { status: "loading" } | { status: "success"; data: T } | { status: "error"; message: string };
+export type ReadState<T> = { status: "loading" } | { status: "success"; data: T } | { status: "error"; error: ControlReadError };
 
 // Lifecycle signals only invalidate the snapshot. They NEVER supply readiness,
 // policy, workspace or availability values; those come from the read API alone.
@@ -23,7 +23,7 @@ export function useControlRead<T>(read: () => Promise<T>, enabled = true) {
         const data = await read();
         if (active) setResult({ read, epoch, revision, state: { status: "success", data } });
       } catch (error) {
-        if (active) setResult({ read, epoch, revision, state: { status: "error", message: controlReadError(error) } });
+        if (active) setResult({ read, epoch, revision, state: { status: "error", error: controlReadError(error) } });
       }
     })();
     return () => { active = false; };

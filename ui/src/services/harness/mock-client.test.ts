@@ -67,6 +67,22 @@ describe("M2 mock configuration and lifecycle", () => {
     expect(changed.configRevision).toBe("2");
   });
 
+  it("keeps the revision stable for language-only saves and preserves unrelated fields", async () => {
+    const client = new MockHarnessControlClient("ready");
+    const first = await client.configSave(testConfig());
+    const saved = await client.uiLanguageSet("zh-CN");
+
+    expect(saved.ui.language).toBe("zh-CN");
+    expect(saved.configRevision).toBe(first.configRevision);
+    expect(saved.workspace).toEqual(first.workspace);
+    expect(saved.tunnel).toEqual(first.tunnel);
+    expect(saved.tools).toEqual(first.tools);
+
+    const cleared = await client.uiLanguageSet(null);
+    expect(cleared.ui.language).toBeUndefined();
+    expect(cleared.configRevision).toBe(first.configRevision);
+  });
+
   it("returns the tunnel-client package directory from auto detect", async () => {
     const client = new MockHarnessControlClient("ready");
     await expect(client.detectTunnelClient()).resolves.toBe(

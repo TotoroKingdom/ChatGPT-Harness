@@ -61,6 +61,25 @@ function Probe() {
   );
 }
 
+function LanguageProbe() {
+  const { setUiLanguage } = useHarnessData();
+  const [result, setResult] = useState("");
+
+  return (
+    <>
+      <output data-testid="language-save-result">{result}</output>
+      <button
+        type="button"
+        onClick={() => {
+          void setUiLanguage("zh-CN").then((next) => setResult(String(next.ok)));
+        }}
+      >
+        Save language
+      </button>
+    </>
+  );
+}
+
 function RuntimeProbe() {
   const { components, restartRequired, runtime } = useHarnessData();
   const runtimeId =
@@ -130,6 +149,23 @@ describe("HarnessDataProvider activity subscription", () => {
 
     await waitFor(() => expect(screen.getByTestId("activity-count")).toHaveTextContent("1"));
     expect(client.activitySubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("persists language through the isolated client mutation", async () => {
+    const languageSet = vi.spyOn(client, "uiLanguageSet");
+    const fullConfigSave = vi.spyOn(client, "configSave");
+
+    render(
+      <HarnessDataProvider>
+        <LanguageProbe />
+      </HarnessDataProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save language" }));
+    await waitFor(() => expect(screen.getByTestId("language-save-result")).toHaveTextContent("true"));
+    expect(languageSet).toHaveBeenCalledWith("zh-CN");
+    expect(fullConfigSave).not.toHaveBeenCalled();
+    await expect(client.configGet()).resolves.toEqual(expect.objectContaining({ ui: { language: "zh-CN" } }));
   });
 });
 

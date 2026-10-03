@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig, PolicyEffectiveSnapshot, PoliciesListResult } from "@protocol/v1";
+import { i18n } from "@/i18n";
 import { PoliciesPage } from "./PoliciesPage";
 
 const state = vi.hoisted(() => ({ context: undefined as any }));
@@ -54,11 +55,43 @@ function setup(overrides: Record<string, unknown> = {}) {
 describe("M3 PoliciesPage", () => {
   it("shows Runtime effective evidence and restart mismatch without editable system controls", () => {
     setup();
-    expect(screen.getByText("Allow workspace reads")).toBeInTheDocument();
+    expect(screen.getByText("Allow workspace capabilities")).toBeInTheDocument();
     expect(screen.getByText("Current generation")).toBeInTheDocument();
     expect(screen.getByText("Restart Required")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
+  it("localizes system friendly presentation while preserving raw IDs, matchers, and user text", async () => {
+    const current = effective();
+    current.userRules = [{
+      id: "user-review-writes",
+      name: "Keep my exact user name",
+      decision: "ask",
+      matcher: { type: "tool", tool: "write" },
+      reason: "Keep my exact user reason",
+      source: "user",
+      editable: true,
+      enabled: true,
+    }];
+    setup({ policies: { status: "success", data: { items: [], effective: current } } });
+
+    expect(screen.getByText("Allow workspace capabilities")).toBeInTheDocument();
+    expect(screen.getByText("system-read-workspace")).toBeInTheDocument();
+    expect(screen.getByText("Keep my exact user name")).toBeInTheDocument();
+    expect(screen.getByText("Keep my exact user reason")).toBeInTheDocument();
+    expect(screen.getByText("user-review-writes")).toBeInTheDocument();
+    expect(screen.getByText("tool:write")).toBeInTheDocument();
+
+    await act(async () => { await i18n.changeLanguage("zh-CN"); });
+    expect(screen.getByText("允许工作区能力")).toBeInTheDocument();
+    expect(screen.getByText("工作区能力基线。")).toBeInTheDocument();
+    expect(screen.getByText("system-read-workspace")).toBeInTheDocument();
+    expect(screen.getByText("Keep my exact user name")).toBeInTheDocument();
+    expect(screen.getByText("Keep my exact user reason")).toBeInTheDocument();
+    expect(screen.getByText("user-review-writes")).toBeInTheDocument();
+    expect(screen.getByText("工具：write")).toBeInTheDocument();
+    expect(screen.queryByText("Allow workspace capabilities")).not.toBeInTheDocument();
   });
 
   it("creates and edits a User Rule while preserving its identity", async () => {

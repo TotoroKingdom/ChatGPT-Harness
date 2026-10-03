@@ -5,6 +5,9 @@ import { RuntimeOverview } from "./overview/RuntimeOverview";
 import { OverviewPage } from "./overview/OverviewPage";
 import { ActivityPage } from "./activity/ActivityPage";
 import { ToolsPage } from "./tools/ToolsPage";
+import { i18n } from "@/i18n";
+import { toolAvailabilityKey } from "@/i18n/presentation";
+import type { ToolAvailability } from "@/services/harness/control-read";
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
@@ -43,14 +46,41 @@ beforeEach(() => { tauri.invoke.mockReset(); context = makeContext(); });
 afterEach(cleanup);
 
 describe("M8-D Control Plane response rendering", () => {
+  it.each(["en", "zh-CN"] as const)("renders Overview status and observation boundaries in %s", async (language) => {
+    await i18n.changeLanguage(language);
+    tauri.invoke.mockResolvedValue(diagnostics());
+    render(<OverviewPage />);
+    expect(await screen.findByText(language === "en" ? "Degraded" : "降级")).toBeInTheDocument();
+    expect(screen.getByText(language === "en" ? "Engine not loaded" : "引擎未加载")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: language === "en" ? "Runtime Overview" : "Runtime 概览" })).toBeInTheDocument();
+    expect(screen.getByText(language === "en" ? "External MCP readiness: NOT ESTABLISHED" : "外部 MCP 就绪状态：尚未证实")).toBeInTheDocument();
+    expect(screen.getByText("2026-09-08T01:02:03.000Z")).toHaveAttribute("datetime", "2026-09-08T01:02:03.000Z");
+  });
+
+  it("switches Activity labels without changing raw tool, snapshot or read count", async () => {
+    const entries = [{ ...entry("read_file"), eventType: "execution_completed", decisionSummary: "allow", outcomeSummary: "success", failureCategory: "bash_timeout" }];
+    const original = JSON.stringify(entries);
+    tauri.invoke.mockResolvedValue(entries);
+    render(<ActivityPage />);
+    await screen.findByText("Execution completed");
+    const calls = tauri.invoke.mock.calls.length;
+    await act(async () => { await i18n.changeLanguage("zh-CN"); });
+    expect(screen.getByText("read_file")).toBeInTheDocument();
+    expect(screen.getByText("允许")).toBeInTheDocument();
+    expect(screen.queryByText("Execution completed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Succeeded")).not.toBeInTheDocument();
+    expect(tauri.invoke.mock.calls).toHaveLength(calls);
+    expect(JSON.stringify(entries)).toBe(original);
+  });
+
   it("renders diagnostics authority, not config or calculated tool counts", async () => {
     tauri.invoke.mockResolvedValue(diagnostics());
     const { container } = render(<OverviewPage />);
     expect(await screen.findByText("4 directly available / 9 declared")).toBeInTheDocument();
     expect(screen.getByText("Validated at initialization")).toBeInTheDocument();
     expect(screen.getByText("Engine not loaded")).toBeInTheDocument();
-    expect(screen.getByText("degraded")).toBeInTheDocument();
-    expect(screen.getByText(/M7-C: BLOCKED/)).toBeInTheDocument();
+    expect(screen.getByText("Degraded")).toBeInTheDocument();
+    expect(screen.getByText(/External MCP readiness: NOT ESTABLISHED/)).toBeInTheDocument();
     expect(tauri.invoke.mock.calls).toEqual([["runtime_get_diagnostics", undefined]]);
     noSensitiveDOM(container);
   });
@@ -60,7 +90,7 @@ describe("M8-D Control Plane response rendering", () => {
     tauri.invoke.mockResolvedValue(tools);
     const { container } = render(<ToolsPage />);
     expect(await screen.findByText("registry_tool_0")).toBeInTheDocument();
-    tools.forEach((item) => expect(screen.getByText(item.availability)).toBeInTheDocument());
+    tools.forEach((item) => expect(screen.getByText(i18n.t(toolAvailabilityKey(item.availability as ToolAvailability)))).toBeInTheDocument());
     expect(screen.getAllByText("ASK")).toHaveLength(4);
     expect(screen.getAllByText("Not provided by Control Plane")).toHaveLength(4);
     expect(tauri.invoke.mock.calls).toEqual([["runtime_get_effective_tools", undefined]]);
@@ -95,9 +125,9 @@ describe("M8-D Control Plane response rendering", () => {
     expect(await screen.findByText("ALLOW")).toBeInTheDocument();
     expect(screen.getByText("DENY")).toBeInTheDocument();
     expect(screen.getByText("ASK")).toBeInTheDocument();
-    expect(screen.getByText("success")).toBeInTheDocument();
-    expect(screen.getByText("denied")).toBeInTheDocument();
-    expect(screen.getAllByText("approval_required")).toHaveLength(2);
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
+    expect(screen.getByText("Denied")).toBeInTheDocument();
+    expect(screen.getAllByText("Approval required")).toHaveLength(2);
   });
 
   it.each([[ActivityPage, "No retained activity"], [ToolsPage, "No tools reported"]] as const)("distinguishes empty arrays from unavailable", async (Page, message) => {

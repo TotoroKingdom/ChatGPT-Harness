@@ -1,14 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { AppConfig, BashConfig, ToolConfig, ToolDescriptor } from "@protocol/v1";
 import { useHarnessData } from "@/app/providers/HarnessDataProvider";
 import { useControlRead } from "@/app/providers/useControlRead";
 import type { ToolDiagnostic } from "@/services/harness/control-read";
 import { Card, SectionHeading } from "@/components/common/primitives";
 import { ControlReadView } from "@/components/status/ControlReadView";
+import {
+  policyDecisionKey,
+  presentError,
+  toolAvailabilityKey,
+  toolReadinessKey,
+  type ErrorPresentation,
+  type TranslationKey,
+} from "@/i18n/presentation";
 
 type ImplementedToolKey = keyof ToolConfig;
 type ToolMetadata = Pick<ToolDescriptor, "name" | "description"> & { key: ImplementedToolKey };
 const defaultBashConfig: BashConfig = { autoDetect: true };
+
+const builtInToolDescriptionKeys: Record<string, TranslationKey> = {
+  read_file: "tools.builtInDescriptions.readFile",
+  glob: "tools.builtInDescriptions.glob",
+  write: "tools.builtInDescriptions.write",
+  edit: "tools.builtInDescriptions.edit",
+  bash: "tools.builtInDescriptions.bash",
+};
+
+const availabilityReasonKeys: Record<ToolDiagnostic["availability"], TranslationKey> = {
+  available: "tools.availabilityReasons.available",
+  available_with_approval: "tools.availabilityReasons.availableWithApproval",
+  unavailable_by_mode: "tools.availabilityReasons.unavailableByMode",
+  unavailable_by_policy: "tools.availabilityReasons.unavailableByPolicy",
+  unavailable_by_runtime: "tools.availabilityReasons.unavailableByRuntime",
+  disabled: "tools.availabilityReasons.disabled",
+};
 
 function configKeyForRuntimeName(name: string, config: AppConfig): ImplementedToolKey | null {
   const key = name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()) as keyof ToolConfig;
@@ -34,7 +60,7 @@ function metadataFromRegistry(items: ToolDescriptor[], config: AppConfig): ToolM
     metadata.push({
       key: "bash",
       name: "bash",
-      description: "Run a controlled Git Bash command from the active Workspace. The cwd is an initial working directory, not a filesystem sandbox.",
+      description: "",
     });
   }
   return metadata;
@@ -46,59 +72,44 @@ function metadataFromPersistedConfig(config: AppConfig): ToolMetadata[] {
     .map((key) => ({
       key,
       name: runtimeNameForConfigKey(key),
-      description: key === "bash"
-        ? "Run a controlled Git Bash command from the active Workspace. The cwd is an initial working directory, not a filesystem sandbox."
-        : "Built-in configurable tool.",
+      description: "",
     }));
 }
 
-function effectiveReason(tool: ToolDiagnostic | undefined, running: boolean): string {
-  if (!running) return "No active Runtime generation.";
-  if (!tool) return "Runtime did not report this tool.";
-  if (tool.reason) return tool.reason;
-  switch (tool.availability) {
-    case "disabled": return "Disabled by saved Runtime configuration.";
-    case "unavailable_by_mode": return "Unavailable by mode.";
-    case "unavailable_by_policy": return "Unavailable by Runtime policy.";
-    case "unavailable_by_runtime": return "Runtime capability is unavailable.";
-    case "available_with_approval": return "Available after human approval.";
-    case "available": return "Available in the current Runtime generation.";
-  }
+function effectiveReason(tool: ToolDiagnostic | undefined, running: boolean): { key: TranslationKey; detail?: string } {
+  if (!running) return { key: "tools.availabilityReasons.noActiveRuntime" };
+  if (!tool) return { key: "tools.availabilityReasons.notReported" };
+  return { key: availabilityReasonKeys[tool.availability], detail: tool.reason };
 }
 
-function effectiveDecision(tool: ToolDiagnostic | undefined, running: boolean): string {
-  if (!running || !tool) return "NOT EVALUATED";
+function effectiveDecision(tool: ToolDiagnostic | undefined, running: boolean, translate: (key: string) => string): string {
+  if (!running || !tool) return translate("tools.notEvaluated");
   // Mode, disabled, and Runtime-unavailable states are eligibility failures;
   // do not render the Runtime's fail-closed DENY as their cause.
-  if (tool.availability === "disabled" || tool.availability === "unavailable_by_mode" || tool.availability === "unavailable_by_runtime") return "NOT EVALUATED";
-  return tool.decision.toUpperCase();
+  if (tool.availability === "disabled" || tool.availability === "unavailable_by_mode" || tool.availability === "unavailable_by_runtime") return translate("tools.notEvaluated");
+  return translate(policyDecisionKey(tool.decision));
 }
 
-function bashAvailability(tool: ToolDiagnostic | undefined, running: boolean): string {
-  if (!running || !tool) return "Not reported";
-  switch (tool.availability) {
-    case "unavailable_by_mode": return "Unavailable by mode";
-    case "unavailable_by_policy": return "Unavailable by Runtime policy";
-    case "unavailable_by_runtime": return "Unavailable by Runtime";
-    case "available_with_approval": return "Available with approval";
-    case "available": return "Available";
-    case "disabled": return "Disabled";
-  }
+function availabilityLabel(tool: ToolDiagnostic | undefined, running: boolean, translate: (key: string) => string): string {
+  if (!running || !tool) return translate("tools.notReported");
+  return translate(toolAvailabilityKey(tool.availability));
 }
 
 function LegacyEffectiveTools({ tools }: { tools: ToolDiagnostic[] }) {
+  const { t } = useTranslation();
   return tools.length === 0
-    ? <Card><strong>No tools reported</strong><p className="muted">The Control Plane returned an empty catalog, not a readiness assertion.</p></Card>
+    ? <Card><strong>{t("tools.empty.title")}</strong><p className="muted">{t("tools.empty.description")}</p></Card>
     : <Card><div className="observation-table-wrap"><table className="observation-table">
-      <caption className="muted">Read-only catalog snapshot · refresh for current observations</caption>
-      <thead><tr><th scope="col">Tool name</th><th scope="col">Availability</th><th scope="col">Decision</th><th scope="col">Reason</th></tr></thead>
+      <caption className="muted">{t("tools.table.legacyCaption")}</caption>
+      <thead><tr><th scope="col">{t("tools.table.toolName")}</th><th scope="col">{t("tools.table.availability")}</th><th scope="col">{t("tools.table.decision")}</th><th scope="col">{t("tools.table.reason")}</th></tr></thead>
       <tbody>{tools.map((tool) => <tr key={tool.name}>
-        <td className="mono">{tool.name}</td><td>{tool.availability}</td><td>{tool.decision.toUpperCase()}</td><td>Not provided by Control Plane</td>
+        <td className="mono">{tool.name}</td><td>{t(toolAvailabilityKey(tool.availability))}</td><td>{t(policyDecisionKey(tool.decision))}</td><td>{t("tools.notReportedByControlPlane")}</td>
       </tr>)}</tbody>
     </table></div></Card>;
 }
 
 export function ToolsPage() {
+  const { t } = useTranslation();
   const {
     client,
     config,
@@ -111,8 +122,8 @@ export function ToolsPage() {
   const read = useCallback(() => client.runtimeGetEffectiveTools(), [client]);
   const { state, refresh } = useControlRead(read, running);
   const [saving, setSaving] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState("");
-  const [saveMessage, setSaveMessage] = useState("");
+  const [saveError, setSaveError] = useState<ErrorPresentation | null>(null);
+  const [saveMessageKey, setSaveMessageKey] = useState<TranslationKey | null>(null);
   const [bashDraft, setBashDraft] = useState<BashConfig>(defaultBashConfig);
 
   useEffect(() => {
@@ -127,21 +138,21 @@ export function ToolsPage() {
     return running ? [] : metadataFromPersistedConfig(config);
   }, [config, registry, running]);
 
-  const saveDesired = async (next: AppConfig, key: string, message = "Desired configuration saved.") => {
+  const saveDesired = async (next: AppConfig, key: string, messageKey: TranslationKey = "tools.messages.configSaved") => {
     if (saving) return false;
     setSaving(key);
-    setSaveError("");
-    setSaveMessage("");
+    setSaveError(null);
+    setSaveMessageKey(null);
     try {
       const result = await saveConfig(next);
       if (!result.ok) {
-        setSaveError(result.error?.message ?? "Could not save desired configuration.");
+        setSaveError(presentError(result.error, result.error?.message));
         return false;
       }
-      setSaveMessage(message);
+      setSaveMessageKey(messageKey);
       return true;
-    } catch {
-      setSaveError("Could not save desired configuration.");
+    } catch (error) {
+      setSaveError(presentError(error));
       return false;
     } finally {
       setSaving(null);
@@ -157,26 +168,26 @@ export function ToolsPage() {
         ...config.tools,
         [tool.key]: { enabled: !enabled },
       },
-    }, `tool:${tool.key}`, "Desired tool state saved.");
+    }, `tool:${tool.key}`, "tools.messages.toolSaved");
   };
 
   const saveBash = async (next: BashConfig) => {
     if (!config || saving) return;
     const previous = bashDraft;
     setBashDraft(next);
-    const saved = await saveDesired({ ...config, bash: next }, "bash:config", "Desired Bash configuration saved.");
+    const saved = await saveDesired({ ...config, bash: next }, "bash:config", "tools.messages.bashSaved");
     if (!saved) setBashDraft(previous);
   };
 
   const chooseBash = async () => {
     if (!config || saving || typeof client.chooseBashExecutable !== "function") return;
-    setSaveError("");
+    setSaveError(null);
     try {
       const path = await client.chooseBashExecutable();
       if (!path) return;
       await saveBash({ ...bashDraft, executablePath: path });
     } catch {
-      setSaveError("Could not choose a Git Bash executable.");
+      setSaveError({ summaryKey: "tools.errors.chooseBash" });
     }
   };
 
@@ -193,88 +204,103 @@ export function ToolsPage() {
   const effectiveByName = new Map(effectiveTools.map((tool) => [tool.name, tool]));
   const bashEffective = effectiveByName.get("bash");
 
+  const toolDescription = (tool: ToolMetadata) => {
+    const key = builtInToolDescriptionKeys[tool.name];
+    return key ? t(key) : tool.description || t("tools.builtInGeneric");
+  };
+  const technicalDetail = (value?: string) => value
+    ? <><br /><span className="muted mono">{t("tools.technicalDetail")}: {value}</span></>
+    : null;
+  const reason = (tool: ToolDiagnostic | undefined) => {
+    const presentation = effectiveReason(tool, running);
+    return <>{t(presentation.key)}{technicalDetail(presentation.detail)}</>;
+  };
+  const readiness = (tool: ToolDiagnostic | undefined) => tool?.readiness
+    ? t(toolReadinessKey(tool.readiness))
+    : t("tools.notReported");
+
   return <div className="page-stack">
     <SectionHeading
-      eyebrow="M5 controlled Bash"
-      title="Tools"
+      eyebrow={t("tools.eyebrow")}
+      title={t("tools.title")}
       description={legacyMode
-        ? "Availability and decisions are reported by Runtime, never inferred by this UI."
-        : "Set the next Runtime generation's desired tool state. Current effective state stays immutable until restart."}
-      action={<button className="button button-secondary" onClick={refresh} disabled={!running}>Refresh tools</button>}
+        ? t("tools.descriptionLegacy")
+        : t("tools.description")}
+      action={<button className="button button-secondary" onClick={refresh} disabled={!running}>{t("tools.refresh")}</button>}
     />
 
     {restartRequired && <div className="notice notice-warning" role="status">
-      <strong>Restart Required</strong>
-      <span>Saved desired tool state differs from the active Runtime generation.</span>
+      <strong>{t("tools.restartRequired")}</strong>
+      <span>{t("tools.restartDescription")}</span>
     </div>}
-    {saveError && <div className="notice notice-danger" role="alert"><strong>Save failed</strong><span>{saveError}</span></div>}
-    {saveMessage && <div className="notice notice-success" role="status"><span>{saveMessage}</span></div>}
+    {saveError && <div className="notice notice-danger" role="alert"><strong>{t("tools.saveFailed")}</strong><span>{t(saveError.summaryKey)}</span>{saveError.detail && <span className="muted mono">{t("tools.technicalDetail")}: {saveError.detail}</span>}</div>}
+    {saveMessageKey && <div className="notice notice-success" role="status"><span>{t(saveMessageKey)}</span></div>}
 
     {legacyMode ? (
       <ControlReadView state={state}>{(data) => <LegacyEffectiveTools tools={data} />}</ControlReadView>
     ) : running ? (
       <ControlReadView state={state}>{(data) => data.length === 0
-        ? <Card><strong>No tools reported</strong><p className="muted">The Control Plane returned an empty catalog, not a readiness assertion.</p></Card>
+        ? <Card><strong>{t("tools.empty.title")}</strong><p className="muted">{t("tools.empty.description")}</p></Card>
         : <>
           <Card><div className="observation-table-wrap"><table className="observation-table">
-            <caption className="muted">Desired state is persistent; effective state belongs to the current Runtime generation.</caption>
-            <thead><tr><th scope="col">Tool name</th><th scope="col">Desired</th><th scope="col">Effective</th><th scope="col">Decision</th><th scope="col">Reason</th></tr></thead>
+            <caption className="muted">{t("tools.table.runningCaption")}</caption>
+            <thead><tr><th scope="col">{t("tools.table.toolName")}</th><th scope="col">{t("tools.table.desired")}</th><th scope="col">{t("tools.table.effective")}</th><th scope="col">{t("tools.table.decision")}</th><th scope="col">{t("tools.table.reason")}</th></tr></thead>
             <tbody>{metadata.map((tool) => {
               const desired = config.tools[tool.key].enabled;
               const effective = effectiveByName.get(tool.name);
               if (tool.key === "bash") {
                 return <tr key={tool.name}>
-                  <td><span className="mono">{tool.name}</span><br /><span className="muted">{tool.description}</span></td>
-                  <td><label><input type="checkbox" aria-label="Desired state for bash" checked={desired} disabled={saving !== null} onChange={() => void onToggle(tool)} /> {desired ? "ON" : "OFF"}</label></td>
-                  <td>{bashAvailability(effective, running)}<br /><span className="muted">Readiness: {effective?.readiness ?? "not reported"}</span></td>
-                  <td>{effectiveDecision(effective, running)}</td>
-                  <td>{effectiveReason(effective, running)}{effective?.readinessReason && <><br /><span className="muted">Remediation: {effective.readinessReason}</span></>}</td>
+                  <td><span className="mono">{tool.name}</span><br /><span className="muted">{toolDescription(tool)}</span></td>
+                  <td><label><input type="checkbox" aria-label={t("tools.desiredStateFor", { tool: tool.name })} checked={desired} disabled={saving !== null} onChange={() => void onToggle(tool)} /> {desired ? t("tools.on") : t("tools.off")}</label></td>
+                  <td>{availabilityLabel(effective, running, t)}<br /><span className="muted">{t("tools.table.readiness")}: {readiness(effective)}</span></td>
+                  <td>{effectiveDecision(effective, running, t)}</td>
+                  <td>{reason(effective)}{technicalDetail(effective?.readinessReason)}</td>
                 </tr>;
               }
               return <tr key={tool.name}>
-                <td><span className="mono">{tool.name}</span><br /><span className="muted">{tool.description}</span></td>
-                <td><label><input type="checkbox" aria-label={`Desired state for ${tool.name}`} checked={desired} disabled={saving !== null} onChange={() => void onToggle(tool)} /> {desired ? "ON" : "OFF"}</label></td>
-                <td>{effective?.availability ?? "not_reported"}</td>
-                <td>{effectiveDecision(effective, running)}</td>
-                <td>{effectiveReason(effective, running)}</td>
+                <td><span className="mono">{tool.name}</span><br /><span className="muted">{toolDescription(tool)}</span></td>
+                <td><label><input type="checkbox" aria-label={t("tools.desiredStateFor", { tool: tool.name })} checked={desired} disabled={saving !== null} onChange={() => void onToggle(tool)} /> {desired ? t("tools.on") : t("tools.off")}</label></td>
+                <td>{availabilityLabel(effective, running, t)}</td>
+                <td>{effectiveDecision(effective, running, t)}</td>
+                <td>{reason(effective)}</td>
               </tr>;
             })}</tbody>
           </table></div></Card>
           <Card>
-            <h3>Git Bash configuration</h3>
-            <p className="muted">These controls save desired configuration only. A manual override takes precedence and is validated exactly; Auto Detect applies only when no manual path is configured. Runtime validates the selected executable when the next generation starts.</p>
+            <h3>{t("tools.bash.title")}</h3>
+            <p className="muted">{t("tools.bash.runningDescription")}</p>
             <div className="form-grid">
-              <label className="form-field"><span>Auto detect Git Bash</span><input type="checkbox" aria-label="Auto detect Git Bash" checked={bashDraft.autoDetect} disabled={saving !== null} onChange={() => void toggleAutoDetect()} /></label>
-              <label className="form-field"><span>Manual Git Bash executable</span><div className="input-action-row"><input className="path-input" aria-label="Manual Git Bash executable" value={bashDraft.executablePath ?? ""} readOnly placeholder="No manual override" title={bashDraft.executablePath || undefined} /><button className="button button-secondary" onClick={() => void chooseBash()} disabled={saving !== null}>Choose bash.exe</button><button className="button button-secondary" onClick={() => void clearBashOverride()} disabled={saving !== null || !bashDraft.executablePath}>Clear override</button></div></label>
+              <label className="form-field"><span>{t("tools.bash.autoDetect")}</span><input type="checkbox" aria-label={t("tools.bash.autoDetect")} checked={bashDraft.autoDetect} disabled={saving !== null} onChange={() => void toggleAutoDetect()} /></label>
+              <label className="form-field"><span>{t("tools.bash.manualExecutable")}</span><div className="input-action-row"><input className="path-input" aria-label={t("tools.bash.manualExecutable")} value={bashDraft.executablePath ?? ""} readOnly placeholder={t("tools.bash.noOverride")} title={bashDraft.executablePath || undefined} /><button className="button button-secondary" onClick={() => void chooseBash()} disabled={saving !== null}>{t("tools.bash.choose")}</button><button className="button button-secondary" onClick={() => void clearBashOverride()} disabled={saving !== null || !bashDraft.executablePath}>{t("tools.bash.clear")}</button></div></label>
             </div>
-            <p className="muted">Bash uses the active Workspace as its initial working directory. It can still access files outside that directory and the network; Policy, Approval, hard limits, and process ownership are the controls.</p>
-            {bashEffective?.reason && <p className="muted">Runtime readiness: {bashEffective.reason}</p>}
+            <p className="muted">{t("tools.bash.noSandboxWarning")} {t("tools.bash.boundary")}</p>
+            {bashEffective?.reason && <p className="muted">{t("tools.bash.runtimeDetail")}: {bashEffective.reason}</p>}
           </Card>
         </>}
       </ControlReadView>
     ) : (
       <>
         <Card><div className="observation-table-wrap"><table className="observation-table">
-          <caption className="muted">No active Runtime generation. These toggles will apply on the next start.</caption>
-          <thead><tr><th scope="col">Tool name</th><th scope="col">Desired</th><th scope="col">Effective</th><th scope="col">Reason</th></tr></thead>
+          <caption className="muted">{t("tools.table.stoppedCaption")}</caption>
+          <thead><tr><th scope="col">{t("tools.table.toolName")}</th><th scope="col">{t("tools.table.desired")}</th><th scope="col">{t("tools.table.effective")}</th><th scope="col">{t("tools.table.reason")}</th></tr></thead>
           <tbody>{metadata.map((tool) => {
             const desired = config.tools[tool.key].enabled;
             return <tr key={tool.name}>
-              <td><span className="mono">{tool.name}</span><br /><span className="muted">{tool.description}</span></td>
-              <td><label><input type="checkbox" aria-label={`Desired state for ${tool.name}`} checked={desired} disabled={saving !== null} onChange={() => void onToggle(tool)} /> {desired ? "ON" : "OFF"}</label></td>
-              <td>not_running</td>
-              <td>No active Runtime generation.</td>
+              <td><span className="mono">{tool.name}</span><br /><span className="muted">{toolDescription(tool)}</span></td>
+              <td><label><input type="checkbox" aria-label={t("tools.desiredStateFor", { tool: tool.name })} checked={desired} disabled={saving !== null} onChange={() => void onToggle(tool)} /> {desired ? t("tools.on") : t("tools.off")}</label></td>
+              <td>{t("tools.notRunning")}</td>
+              <td>{t("tools.availabilityReasons.noActiveRuntime")}</td>
             </tr>;
           })}</tbody>
         </table></div></Card>
         <Card>
-          <h3>Git Bash configuration</h3>
-          <p className="muted">Desired configuration is saved for the next Runtime generation. A manual override takes precedence and is validated exactly; Auto Detect applies only when no manual path is configured. Current readiness is unavailable until Runtime reports it.</p>
+          <h3>{t("tools.bash.title")}</h3>
+          <p className="muted">{t("tools.bash.stoppedDescription")}</p>
           <div className="form-grid">
-            <label className="form-field"><span>Auto detect Git Bash</span><input type="checkbox" aria-label="Auto detect Git Bash" checked={bashDraft.autoDetect} disabled={saving !== null} onChange={() => void toggleAutoDetect()} /></label>
-            <label className="form-field"><span>Manual Git Bash executable</span><div className="input-action-row"><input className="path-input" aria-label="Manual Git Bash executable" value={bashDraft.executablePath ?? ""} readOnly placeholder="No manual override" title={bashDraft.executablePath || undefined} /><button className="button button-secondary" onClick={() => void chooseBash()} disabled={saving !== null}>Choose bash.exe</button><button className="button button-secondary" onClick={() => void clearBashOverride()} disabled={saving !== null || !bashDraft.executablePath}>Clear override</button></div></label>
+            <label className="form-field"><span>{t("tools.bash.autoDetect")}</span><input type="checkbox" aria-label={t("tools.bash.autoDetect")} checked={bashDraft.autoDetect} disabled={saving !== null} onChange={() => void toggleAutoDetect()} /></label>
+            <label className="form-field"><span>{t("tools.bash.manualExecutable")}</span><div className="input-action-row"><input className="path-input" aria-label={t("tools.bash.manualExecutable")} value={bashDraft.executablePath ?? ""} readOnly placeholder={t("tools.bash.noOverride")} title={bashDraft.executablePath || undefined} /><button className="button button-secondary" onClick={() => void chooseBash()} disabled={saving !== null}>{t("tools.bash.choose")}</button><button className="button button-secondary" onClick={() => void clearBashOverride()} disabled={saving !== null || !bashDraft.executablePath}>{t("tools.bash.clear")}</button></div></label>
           </div>
-          <p className="muted">Bash uses the active Workspace as its initial working directory. It can still access files outside that directory and the network; Policy, Approval, hard limits, and process ownership are the controls.</p>
+          <p className="muted">{t("tools.bash.noSandboxWarning")} {t("tools.bash.boundary")}</p>
         </Card>
       </>
     )}

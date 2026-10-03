@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest, BashApprovalDetails } from "@protocol/v1";
+import { i18n } from "@/i18n";
 import { ApprovalsPage } from "./ApprovalsPage";
 
 const state = vi.hoisted(() => ({ context: undefined as any }));
@@ -67,7 +68,7 @@ function setup(request = approval()) {
   return { approvalsResolve, refreshApprovals, navigate };
 }
 
-describe("M4 Approval Center", () => {
+describe("M6 Approval Center", () => {
   it("shows pending evidence and all resolution actions", () => {
     setup();
     expect(screen.getByText("Approval Center")).toBeInTheDocument();
@@ -104,8 +105,15 @@ describe("M4 Approval Center", () => {
     };
     render(<ApprovalsPage />);
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    expect(await screen.findByText("This approval is already resolved or expired. Refresh the Approval Center.")).toBeInTheDocument();
+    expect(await screen.findByText("This approval is already resolved or expired.")).toBeInTheDocument();
+    expect(screen.getByText("Refresh the Approval Center and try again.")).toBeInTheDocument();
+    expect(screen.getByText("APPROVAL_ALREADY_RESOLVED")).toBeInTheDocument();
     expect(refreshApprovals).toHaveBeenCalled();
+
+    await act(async () => { await i18n.changeLanguage("zh-CN"); });
+    expect(screen.getByText("该审批已处理或已过期。")).toBeInTheDocument();
+    expect(screen.getByText("请刷新审批中心后重试。")).toBeInTheDocument();
+    expect(screen.getByText("APPROVAL_ALREADY_RESOLVED")).toBeInTheDocument();
   });
 
   it("Create rule navigates to a broader explicit policy draft without resolving", () => {
@@ -182,5 +190,35 @@ describe("M4 Approval Center", () => {
         matcher: { type: "tool", tool: "bash" },
       }),
     });
+  });
+
+  it("switches presentation live in both locales while preserving approval identity and actions", async () => {
+    const { approvalsResolve, refreshApprovals } = setup();
+    await waitFor(() => expect(refreshApprovals).toHaveBeenCalledTimes(1));
+    const refreshCallsBeforeSwitch = refreshApprovals.mock.calls.length;
+
+    expect(screen.getByText("Approval Center")).toBeInTheDocument();
+    expect(screen.getByText("PENDING")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
+    expect(screen.getByText(/request_01/)).toBeInTheDocument();
+    expect(screen.getByText("write", { exact: true })).toBeInTheDocument();
+
+    await act(async () => { await i18n.changeLanguage("zh-CN"); });
+
+    expect(screen.getByText("审批中心")).toBeInTheDocument();
+    expect(screen.getByText("待处理")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "仅允许本次" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "本次会话允许" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "拒绝" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "创建规则" })).toBeEnabled();
+    expect(screen.getByText(/request_01/)).toBeInTheDocument();
+    expect(screen.getByText("write", { exact: true })).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(refreshApprovals).toHaveBeenCalledTimes(refreshCallsBeforeSwitch);
+    expect(approvalsResolve).not.toHaveBeenCalled();
+
+    await act(async () => { await i18n.changeLanguage("en"); });
+    expect(screen.getByText("Approval Center")).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe("en");
   });
 });

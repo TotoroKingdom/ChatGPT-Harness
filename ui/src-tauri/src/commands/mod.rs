@@ -14,7 +14,7 @@ use harness_control_protocol::{
     AppConfig, ApprovalsListParams, ApprovalsListResult, ApprovalsResolveParams,
     ApprovalsResolveResult, DiagnosticCheck, DiagnosticRun, DiagnosticStatus, PoliciesListResult,
     RuntimeState, RuntimeStopResult, SecurityMode, StartEligibility, StartEligibilityStatus,
-    ToolsListResult,
+    ToolsListResult, UiLanguage,
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -120,6 +120,19 @@ pub fn config_save(
         config.tunnel.api_key_ref = Some(reference);
     }
     config_store.save(config).map_err(Into::into)
+}
+
+/// Persist only the React presentation language preference.
+///
+/// This intentionally bypasses the full Settings draft and never calls the
+/// Runtime control plane. ConfigStore keeps the update atomic and excludes
+/// `UiConfig` from restart-affecting revision semantics.
+#[tauri::command]
+pub fn ui_language_set(
+    app: AppHandle,
+    language: Option<UiLanguage>,
+) -> Result<AppConfig, ControlError> {
+    store(&app)?.set_ui_language(language).map_err(Into::into)
 }
 
 #[tauri::command]

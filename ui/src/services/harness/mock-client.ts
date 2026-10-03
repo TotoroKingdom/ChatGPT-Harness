@@ -1,5 +1,5 @@
 import type { ActivityEntry, RuntimeDiagnostics, ToolDiagnostic } from "./control-read";
-import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, ToolDescriptor, ToolsListResult } from "@protocol/v1";
+import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, ToolDescriptor, ToolsListResult, UiLanguage } from "@protocol/v1";
 import { HarnessClientError } from "./errors";
 import type { ActivityEventListener, ComponentStates, ComponentStatesListener, HarnessControlClient, HarnessStatus, RuntimeProcessStatus, Unsubscribe } from "./client";
 export type MockScenario = "ready" | "disconnected" | "empty" | "error";
@@ -25,9 +25,23 @@ function decrementDecimal(value: string): string {
   return "0";
 }
 const completeConfig = (): AppConfig => ({ schemaVersion: 1, configRevision: "7", workspace: { rootPath: "D:\\example-project" }, tunnel: { tunnelId: "mock-tunnel", tunnelClientPath: "D:\\example-project\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] } });
+const safeConfig = (): AppConfig => {
+ const config = completeConfig();
+ return {
+  ...config,
+  configRevision: "0",
+  workspace: { rootPath: "" },
+  tunnel: { ...config.tunnel, tunnelId: "", tunnelClientPath: undefined, apiKeyRef: undefined },
+ };
+};
 function event(sequence: string, eventType: ActivityEventType, summary: string, metadata: Record<string,string>, requestId?: string): ActivityEvent { return { eventId: `event_mock_${sequence}`, sequence, eventType, requestId, timestamp: `2026-09-02T00:0${sequence}:00Z`, summary, metadata }; }
 const tools: ToolDescriptor[] = [{name:"read_file",description:"Read a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"glob",description:"Find workspace paths.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"write",description:"Write a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"edit",description:"Edit a workspace text file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"bash",description:"Run a controlled Git Bash command from the active Workspace. The cwd is an initial working directory, not a filesystem sandbox.",implemented:true,enabled:false,exposed:false,effectivePolicy:"ask",scope:"active_workspace",readiness:"unavailable",riskLevel:"high"}];
 const policies: PolicyRule[] = [{id:"system-read-workspace",name:"Allow workspace reads",decision:"allow",scope:"active_workspace",reason:"Read-only default capability.",source:"system",editable:false,enabled:true},{id:"user-review-sensitive",name:"Review sensitive requests",decision:"ask",scope:"developer_test_capabilities",reason:"Requires explicit approval before a high-risk request.",source:"user",editable:false,enabled:true},{id:"system-deny-outside",name:"Deny outside workspace",decision:"deny",scope:"outside_active_workspace",reason:"Workspace boundary.",source:"system",editable:false,enabled:true}];
+function restartSemantics(config: AppConfig | null) {
+ if (!config) return null;
+ const { configRevision: _configRevision, ui: _ui, ...runtimeConfig } = config;
+ return runtimeConfig;
+}
 const policySeverity = (decision: PolicyDecision) => decision === "deny" ? 2 : decision === "ask" ? 1 : 0;
 function effectivePolicy(config: AppConfig["policies"]): PolicyEffectiveSnapshot {
   const systemRules = policies.filter((rule) => rule.source === "system").map((rule) => ({ id: rule.id, name: rule.name, decision: rule.decision, reason: rule.reason, source: rule.source, editable: false, enabled: rule.enabled }));
@@ -71,12 +85,27 @@ export class MockHarnessControlClient implements HarnessControlClient {
  runtimeGetEffectiveTools(): Promise<ToolDiagnostic[]> { return this.scenario === "empty" ? Promise.resolve([]) : this.respond(this.effectiveTools()); }
  configGet(){return this.respond(this.config);}
  configMetadata(){return this.respond({configDirectory:"%APPDATA%\\ChatGPT-Harness",configFile:"%APPDATA%\\ChatGPT-Harness\\config.json"});}
- configSave(config:AppConfig,apiKey?:string){
+ async configSave(config:AppConfig,apiKey?:string){
   const previousRevision = this.config?.configRevision ?? "0";
-  if(apiKey?.trim()){config={...config,tunnel:{...config.tunnel,apiKeyRef:{provider:"memory-development",key:"tunnel-api-key"}}};this.configured=true;}
-  const semanticsChanged = !this.config || JSON.stringify({...this.config,configRevision:"0"}) !== JSON.stringify({...config,configRevision:"0"});
-  config={...config,configRevision:semanticsChanged ? incrementDecimal(previousRevision) : previousRevision};
-  this.config=config; return this.respond(config);
+  const apiKeySaved = Boolean(apiKey?.trim());
+  const candidate = apiKeySaved ? {...config,tunnel:{...config.tunnel,apiKeyRef:{provider:"memory-development",key:"tunnel-api-key"}}} : config;
+  const semanticsChanged = !this.config || JSON.stringify(restartSemantics(this.config)) !== JSON.stringify(restartSemantics(candidate));
+  const next = {...candidate,configRevision:semanticsChanged ? incrementDecimal(previousRevision) : previousRevision};
+  const persisted = await this.respond(next);
+  this.config=persisted;
+  if(apiKeySaved)this.configured=true;
+  return persisted;
+ }
+ async uiLanguageSet(language: UiLanguage | null): Promise<AppConfig>{
+  const hadPersistedConfig = this.config !== null;
+  const base = this.config ?? safeConfig();
+  const ui: AppConfig["ui"] = {...base.ui};
+  if (language === null) delete ui.language;
+  else ui.language = language;
+  const next = {...base,ui,configRevision: hadPersistedConfig ? base.configRevision : "1"};
+  const persisted = await this.respond(next);
+  this.config=persisted;
+  return persisted;
  }
  configReset(){this.config=null;this.configured=false;return this.respond(undefined);}
  apiKeyStatus(){return this.respond(this.configured);}

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { parseActivity, parseTools } from "./control-read";
+import { controlReadError, parseActivity, parseTools } from "./control-read";
+
+describe("machine-only control read error boundary", () => {
+  it.each(["RUNTIME_UNAVAILABLE", "RUNTIME_NOT_READY", "INVALID_REQUEST"])("preserves safe code %s without prose", (code) => {
+    expect(controlReadError({ code, message: "secret" })).toEqual({ code });
+  });
+  it("drops unknown code, messages and thrown details", () => {
+    expect(controlReadError({ code: "SECRET_CODE", message: "API_KEY" })).toEqual({ code: "CONTROL_READ_FAILED" });
+    expect(controlReadError(new Error("SECRET"))).toEqual({ code: "CONTROL_READ_FAILED" });
+  });
+});
 
 describe("control-read M5 projections", () => {
   it("preserves Runtime-owned Bash availability and readiness observations", () => {

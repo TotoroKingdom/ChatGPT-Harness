@@ -38,6 +38,7 @@ pub fn run() {
             crate::commands::config_get,
             crate::commands::config_metadata,
             crate::commands::config_save,
+            crate::commands::ui_language_set,
             crate::commands::config_reset,
             crate::commands::secret_api_key_status,
             crate::commands::secret_api_key_delete,

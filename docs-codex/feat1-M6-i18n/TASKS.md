@@ -546,34 +546,38 @@ Unit / Integration / E2E are Coding Agent responsibilities; only Manual Acceptan
 
 ## Development Completion Checklist
 
-- [ ] T1 UiLanguage/config/revision semantics PASS
-- [ ] T2 i18n bootstrap/locale resolution PASS
-- [ ] T3 shared typed presentation/error mapping PASS
-- [ ] T4 all primary UI surfaces bilingual PASS
-- [ ] T5 resource/regression PASS
-- [ ] Supported locales exactly English + Simplified Chinese
-- [ ] No saved language follows supported system locale
-- [ ] Unsupported system locale falls back English
-- [ ] Saved preference overrides system locale
-- [ ] Follow system preference clears saved explicit locale
-- [ ] Language switch immediate
-- [ ] Language persists across relaunch/bootstrap
-- [ ] Language-only save does not increment configRevision
-- [ ] Language switch does not create Restart Required
-- [ ] Existing Restart Required is preserved
-- [ ] Persistence failure rolls locale back
-- [ ] `en.json` / `zh-CN.json` key parity PASS
-- [ ] interpolation placeholder parity PASS
-- [ ] AppShell / FirstRun / Overview / Tools / Policies / Activity / Approvals / Settings translated
-- [ ] known error-code explanations localized
-- [ ] raw tool names unchanged
-- [ ] raw protocol/machine values unchanged on wire
-- [ ] Policy internal IDs unchanged
-- [ ] user-authored Policy text unchanged
-- [ ] Bash no-sandbox warning accurate in both languages
-- [ ] `<html lang>` correct/live
-- [ ] M0–M5 regression PASS
-- [ ] cargo fmt/check/test PASS
-- [ ] npm test/typecheck/build PASS
-- [ ] git diff --check PASS
-- [ ] TASKS does not claim Integration/E2E/Manual Acceptance PASS
+- [x] T1 UiLanguage/config/revision semantics PASS
+- [x] T2 i18n bootstrap/locale resolution PASS
+- [x] T3 shared typed presentation/error mapping PASS
+- [x] T4 all primary UI surfaces bilingual PASS
+- [x] T5 resource/regression PASS
+- [x] Supported locales exactly English + Simplified Chinese
+- [x] No saved language follows supported system locale
+- [x] Unsupported system locale falls back English
+- [x] Saved preference overrides system locale
+- [x] Follow system preference clears saved explicit locale
+- [x] Language switch immediate
+- [x] Language persists across ConfigStore round-trip / bootstrap unit seam (real relaunch deferred to independent QA)
+- [x] Language-only save does not increment configRevision
+- [x] Language switch does not create Restart Required
+- [x] Existing Restart Required is preserved
+- [x] Persistence failure rolls locale back
+- [x] `en.json` / `zh-CN.json` key parity PASS
+- [x] interpolation placeholder parity PASS
+- [x] AppShell / FirstRun / Overview / Tools / Policies / Activity / Approvals / Settings translated
+- [x] known error-code explanations localized
+- [x] raw tool names unchanged
+- [x] raw protocol/machine values unchanged on wire
+- [x] Policy internal IDs unchanged
+- [x] user-authored Policy text unchanged
+- [x] Bash no-sandbox warning accurate in both languages
+- [x] `<html lang>` correct/live
+- [x] M0–M5 unit / code-level regression PASS
+- [x] cargo fmt/check + scoped unit tests PASS (Integration/E2E excluded from final regression)
+- [x] npm test/typecheck/build PASS
+- [x] git diff --check PASS
+- [x] TASKS does not claim Integration/E2E/Manual Acceptance PASS
+
+Development result: **M6 Development Complete — Ready for Independent QA**.
+
+实际验证命令、结果和 T1 误执行既有 Integration 模块的阶段偏差见 [DEVELOPMENT_REPORT.md](DEVELOPMENT_REPORT.md)。本 checklist 只记录开发级证据，不代表 Integration / Local E2E / Manual Acceptance 通过，也不将 M6 标记为 ACCEPTED / FROZEN。

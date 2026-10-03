@@ -16,10 +16,10 @@ export type PolicyDraftHandoff = {
 };
 
 export const pages: Array<{ key: PageKey; label: string; eyebrow: string }> = [
-  { key: "overview", label: "Overview", eyebrow: "Control plane" },
-  { key: "tools", label: "Tools", eyebrow: "Capability catalog" },
-  { key: "policies", label: "Policies", eyebrow: "Security posture" },
-  { key: "activity", label: "Activity", eyebrow: "Audit trail" },
-  { key: "approvals", label: "Approvals", eyebrow: "Human approval" },
-  { key: "settings", label: "Settings", eyebrow: "Configuration" },
+  { key: "overview", label: "nav.overview", eyebrow: "nav.eyebrows.overview" },
+  { key: "tools", label: "nav.tools", eyebrow: "nav.eyebrows.tools" },
+  { key: "policies", label: "nav.policies", eyebrow: "nav.eyebrows.policies" },
+  { key: "activity", label: "nav.activity", eyebrow: "nav.eyebrows.activity" },
+  { key: "approvals", label: "nav.approvals", eyebrow: "nav.eyebrows.approvals" },
+  { key: "settings", label: "nav.settings", eyebrow: "nav.eyebrows.settings" },
 ];

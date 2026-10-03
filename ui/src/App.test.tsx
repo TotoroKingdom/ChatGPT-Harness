@@ -30,9 +30,9 @@ describe("M1 application shell", () => {
     fireEvent.click(nav("Tools"));
     expect(await screen.findByText("read_file")).toBeInTheDocument();
     expect(screen.getAllByText("ON").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("available").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Available").length).toBeGreaterThan(0);
     fireEvent.click(nav("Policies"));
-    expect(await screen.findByText("Allow workspace reads")).toBeInTheDocument();
+    expect(await screen.findByText("Allow workspace capabilities")).toBeInTheDocument();
     expect(screen.getAllByText("DENY").length).toBeGreaterThan(0);
   });
 

@@ -1,5 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { bootstrapPresentation } from "./i18n";
+import { createHarnessControlClient } from "./services/harness/factory";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
+const client = createHarnessControlClient();
+void bootstrapPresentation(() => client.configGet(), () => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
+});

@@ -243,6 +243,16 @@
     },
     "UiConfig": {
       "properties": {
+        "language": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UiLanguage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "theme": {
           "type": [
             "string",
@@ -251,6 +261,14 @@
         }
       },
       "type": "object"
+    },
+    "UiLanguage": {
+      "description": "Supported React presentation languages.\n\nThis preference is persisted by the host/UI boundary and deliberately does\nnot appear in `RuntimeConfigSnapshot` or any Runtime-facing contract.",
+      "enum": [
+        "en",
+        "zh-CN"
+      ],
+      "type": "string"
     },
     "UserPolicyRuleConfig": {
       "additionalProperties": false,

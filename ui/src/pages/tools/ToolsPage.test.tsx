@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig, RuntimeState, ToolDescriptor } from "@protocol/v1";
 import type { ToolDiagnostic } from "@/services/harness/control-read";
+import { i18n } from "@/i18n";
 import { ToolsPage } from "./ToolsPage";
 
 const state = vi.hoisted(() => ({
@@ -126,13 +127,13 @@ describe("ToolsPage M2 desired/effective controls", () => {
       return { ok: true };
     });
     render(<ToolsPage />);
-    await screen.findAllByText("available");
+    await screen.findAllByText("Available");
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Desired state for write" }));
 
     await waitFor(() => expect(screen.getByText("Restart Required")).toBeInTheDocument());
     expect(screen.getByRole("checkbox", { name: "Desired state for write" })).not.toBeChecked();
-    expect(screen.getAllByText("available").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Available").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Available in the current Runtime generation.").length).toBeGreaterThan(0);
   });
 
@@ -143,7 +144,7 @@ describe("ToolsPage M2 desired/effective controls", () => {
     state.effective.mockResolvedValueOnce(effectiveCatalog()).mockResolvedValueOnce(disabled);
     state.context = makeContext({ restartRequired: true });
     const { rerender } = render(<ToolsPage />);
-    await screen.findAllByText("available");
+    await screen.findAllByText("Available");
 
     state.context = makeContext({
       config: { ...config(), tools: { ...config().tools, write: { enabled: false } } },
@@ -152,7 +153,7 @@ describe("ToolsPage M2 desired/effective controls", () => {
     });
     rerender(<ToolsPage />);
 
-    await waitFor(() => expect(screen.getByText("disabled")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Disabled")).toBeInTheDocument());
     expect(screen.queryByText("Restart Required")).not.toBeInTheDocument();
   });
 
@@ -217,8 +218,8 @@ describe("ToolsPage M2 desired/effective controls", () => {
     render(<ToolsPage />);
 
     expect(await screen.findByText("Unavailable by mode")).toBeInTheDocument();
-    expect(screen.getByText("Readiness: unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Developer/Test mode is required.")).toBeInTheDocument();
+    expect(screen.getByText("Readiness: Unavailable")).toBeInTheDocument();
+    expect(document.body).toHaveTextContent("Developer/Test mode is required.");
     expect(screen.getByText(/not a filesystem sandbox/)).toBeInTheDocument();
     expect(screen.getByText(/files outside that directory and the network/)).toBeInTheDocument();
     expect(screen.getAllByText("NOT EVALUATED")).toHaveLength(1);
@@ -287,5 +288,54 @@ describe("ToolsPage M2 desired/effective controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear override" }));
     await waitFor(() => expect(state.save).toHaveBeenCalledTimes(2));
     expect(state.save.mock.calls[1][0].bash).toEqual({ autoDetect: false, executablePath: undefined });
+  });
+
+  it("switches every Tools presentation label live while preserving raw tool identity and the Bash boundary warning", async () => {
+    state.context = makeContext({
+      client: { runtimeGetEffectiveTools: state.effective, chooseBashExecutable: vi.fn() },
+      tools: { status: "success", data: { items: [...descriptors, bashDescriptor] } },
+      restartRequired: true,
+    });
+    state.effective.mockResolvedValue([
+      ...effectiveCatalog(),
+      { name: "bash", availability: "unavailable_by_mode", decision: "deny", readiness: "unavailable" },
+    ]);
+    render(<ToolsPage />);
+
+    expect(await screen.findByRole("heading", { name: "Tools" })).toBeInTheDocument();
+    expect(screen.getByText("read_file")).toBeInTheDocument();
+    expect(screen.getByText("Restart Required")).toBeInTheDocument();
+    expect(screen.getByText("Read a workspace file.")).toBeInTheDocument();
+    expect(document.body).toHaveTextContent("Bash is not an OS filesystem sandbox.");
+
+    await act(async () => { await i18n.changeLanguage("zh-CN"); });
+
+    expect(screen.getByRole("heading", { name: "工具" })).toBeInTheDocument();
+    expect(screen.getByText("read_file")).toBeInTheDocument();
+    expect(screen.getByText("需要重启")).toBeInTheDocument();
+    expect(screen.getByText("读取工作区文件。")).toBeInTheDocument();
+    expect(document.body).toHaveTextContent("Bash 不是操作系统文件系统沙箱。");
+    expect(screen.getByText("当前模式不可用。")).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe("zh-CN");
+  });
+
+  it("keeps the localized primary error while preserving a safe Runtime detail", async () => {
+    state.context = makeContext({
+      components: { runtime: "stopped", tunnel: "stopped", mcp: "stopped" },
+      runtime: { status: "idle" },
+      tools: { status: "disconnected" },
+    });
+    state.save.mockResolvedValue({ ok: false, error: { code: "CONFIG_WRITE_FAILED", message: "Configuration write failed" } });
+    render(<ToolsPage />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Desired state for read_file" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Save failed");
+    expect(alert).toHaveTextContent("Configuration could not be saved.");
+    expect(alert).toHaveTextContent("Configuration write failed");
+
+    await act(async () => { await i18n.changeLanguage("zh-CN"); });
+    expect(screen.getByRole("alert")).toHaveTextContent("无法保存配置。");
+    expect(screen.getByRole("alert")).toHaveTextContent("Configuration write failed");
   });
 });

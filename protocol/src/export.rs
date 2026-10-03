@@ -41,6 +41,7 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         SecretReference,
         SecurityMode,
         SecurityConfig,
+        UiLanguage,
         UiConfig,
         StartEligibilityStatus,
         StartEligibility,

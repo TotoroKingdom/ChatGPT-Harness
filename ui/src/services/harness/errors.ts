@@ -17,13 +17,14 @@ export class HarnessClientError extends Error {
 export function toClientError(error: unknown): HarnessClientError {
   if (error instanceof HarnessClientError) return error;
   if (error instanceof Error) {
-    return new HarnessClientError("error", error.message, error);
+    const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
+    return new HarnessClientError("error", error.message, error, code);
   }
   if (typeof error === "object" && error !== null) {
     const value = error as { code?: unknown; message?: unknown };
-    if (typeof value.message === "string") {
-      return new HarnessClientError("error", value.message, error, typeof value.code === "string" ? value.code : undefined);
+    if (typeof value.message === "string" || typeof value.code === "string") {
+      return new HarnessClientError("error", typeof value.message === "string" ? value.message : "", error, typeof value.code === "string" ? value.code : undefined);
     }
   }
-  return new HarnessClientError("error", "The Harness client returned an unknown error.", error);
+  return new HarnessClientError("error", "", error);
 }

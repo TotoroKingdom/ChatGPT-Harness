@@ -14,6 +14,7 @@ import type {
   RuntimeStopResult,
   StartEligibility,
   ToolsListResult,
+  UiLanguage,
 } from "@protocol/v1";
 
 export type ComponentStatus = "stopped" | "starting" | "ready" | "degraded" | "error" | "stopping";
@@ -73,6 +74,7 @@ export interface HarnessControlClient extends ControlReadClient {
   configGet(): Promise<AppConfig | null>;
   configMetadata(): Promise<ConfigMetadata>;
   configSave(config: AppConfig, apiKey?: string): Promise<AppConfig>;
+  uiLanguageSet(language: UiLanguage | null): Promise<AppConfig>;
   configReset(): Promise<void>;
   apiKeyStatus(): Promise<boolean>;
   apiKeyDelete(): Promise<void>;

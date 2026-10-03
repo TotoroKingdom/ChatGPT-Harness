@@ -226,6 +226,23 @@ pub struct UiConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub theme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub language: Option<UiLanguage>,
+}
+
+/// Supported React presentation languages.
+///
+/// This preference is persisted by the host/UI boundary and deliberately does
+/// not appear in `RuntimeConfigSnapshot` or any Runtime-facing contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub enum UiLanguage {
+    #[serde(rename = "en")]
+    #[ts(rename = "en")]
+    En,
+    #[serde(rename = "zh-CN")]
+    #[ts(rename = "zh-CN")]
+    ZhCn,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -273,4 +290,36 @@ pub struct RuntimeLimits {
     pub max_concurrent_requests: u32,
     pub max_activity_events: u32,
     pub max_read_bytes: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UiConfig, UiLanguage};
+
+    #[test]
+    fn ui_language_wire_values_are_strict_and_backward_compatible() {
+        assert_eq!(serde_json::to_string(&UiLanguage::En).unwrap(), "\"en\"");
+        assert_eq!(
+            serde_json::to_string(&UiLanguage::ZhCn).unwrap(),
+            "\"zh-CN\""
+        );
+        assert_eq!(
+            serde_json::from_str::<UiLanguage>("\"en\"").unwrap(),
+            UiLanguage::En
+        );
+        assert_eq!(
+            serde_json::from_str::<UiLanguage>("\"zh-CN\"").unwrap(),
+            UiLanguage::ZhCn
+        );
+        for unsupported in ["zh", "en-US", "fr", "zh-TW"] {
+            assert!(
+                serde_json::from_str::<UiLanguage>(&format!("\"{unsupported}\"")).is_err(),
+                "accepted unsupported UI language: {unsupported}"
+            );
+        }
+        assert_eq!(
+            serde_json::from_str::<UiConfig>("{}").unwrap(),
+            UiConfig::default()
+        );
+    }
 }

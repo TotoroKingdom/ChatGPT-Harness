@@ -285,13 +285,15 @@ export function parseActivity(value: unknown): ActivityEntry[] {
   });
 }
 
-// Fixed copy only. Never render rejection.message, stack, JSON or unknown codes.
-export function controlReadError(error: unknown): string {
+// Keep machine meaning only. Never echo rejection.message/stack/JSON here:
+// this read boundary has deliberately stricter redaction than general errors.
+export type ControlReadError = { code: "RUNTIME_UNAVAILABLE" | "RUNTIME_NOT_READY" | "INVALID_REQUEST" | "CONTROL_READ_FAILED" };
+export function controlReadError(error: unknown): ControlReadError {
   const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
   switch (code) {
-    case "RUNTIME_UNAVAILABLE": return "Runtime unavailable. Start or reconnect Runtime, then refresh.";
-    case "RUNTIME_NOT_READY": return "Runtime not ready. Wait for initialization, then refresh.";
-    case "INVALID_REQUEST": return "Invalid control read request.";
-    default: return "Control read failed. Refresh to try again.";
+    case "RUNTIME_UNAVAILABLE":
+    case "RUNTIME_NOT_READY":
+    case "INVALID_REQUEST": return { code };
+    default: return { code: "CONTROL_READ_FAILED" };
   }
 }

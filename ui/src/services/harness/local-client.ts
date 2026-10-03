@@ -16,6 +16,7 @@ import type {
   RuntimeStopResult,
   StartEligibility,
   ToolsListResult,
+  UiLanguage,
 } from "@protocol/v1";
 import type {
   ActivityEventListener,
@@ -126,6 +127,10 @@ export class TauriHarnessControlClient implements HarnessControlClient {
 
   configSave(config: AppConfig, apiKey?: string) {
     return this.call<AppConfig>("config_save", { config, apiKey: apiKey ?? null });
+  }
+
+  uiLanguageSet(language: UiLanguage | null) {
+    return this.call<AppConfig>("ui_language_set", { language });
   }
 
   configReset() {

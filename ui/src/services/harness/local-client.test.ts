@@ -97,6 +97,19 @@ describe("TauriHarnessControlClient", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("runtime_process_status", undefined);
   });
 
+  it("persists the isolated UI language command without using configSave", async () => {
+    const persisted = { schemaVersion: 1, configRevision: "7", ui: { language: "zh-CN" } };
+    tauri.invoke.mockResolvedValue(persisted);
+    const client = new TauriHarnessControlClient();
+
+    await expect(client.uiLanguageSet("zh-CN")).resolves.toEqual(persisted);
+    expect(tauri.invoke).toHaveBeenCalledWith("ui_language_set", { language: "zh-CN" });
+
+    tauri.invoke.mockResolvedValue({ ...persisted, ui: {} });
+    await expect(client.uiLanguageSet(null)).resolves.toEqual({ ...persisted, ui: {} });
+    expect(tauri.invoke).toHaveBeenLastCalledWith("ui_language_set", { language: null });
+  });
+
   it("uses the native Bash picker as a desired-path source only", async () => {
     tauri.invoke.mockResolvedValue("D:\\Git\\bin\\bash.exe");
     const client = new TauriHarnessControlClient();

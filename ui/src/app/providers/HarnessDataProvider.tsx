@@ -9,6 +9,7 @@ import type {
   RuntimeState,
   StartEligibility,
   ToolsListResult,
+  UiLanguage,
 } from "@protocol/v1";
 import { HarnessClientError, toClientError } from "@/services/harness/errors";
 import { createHarnessControlClient } from "@/services/harness/factory";
@@ -52,6 +53,7 @@ type ContextValue = ResourceState & {
   refreshConfig: () => Promise<void>;
   resetConfig: () => Promise<SaveResult>;
   saveConfig: (config: AppConfig, apiKey?: string) => Promise<SaveResult>;
+  setUiLanguage: (language: UiLanguage | null) => Promise<SaveResult>;
   deleteApiKey: () => Promise<void>;
   chooseWorkspace: () => Promise<string | null>;
   chooseTunnelClient: () => Promise<string | null>;
@@ -328,6 +330,23 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     [client, refreshConfig],
   );
 
+  const setUiLanguage = useCallback(
+    async (language: UiLanguage | null): Promise<SaveResult> => {
+      try {
+        const saved = await client.uiLanguageSet(language);
+        setConfig(saved);
+        setConfigError(null);
+        await refreshConfig();
+        return { ok: true };
+      } catch (error) {
+        const clientError = toClientError(error);
+        setConfigError(clientError);
+        return { ok: false, error: clientError };
+      }
+    },
+    [client, refreshConfig],
+  );
+
   const resetConfig = useCallback(async (): Promise<SaveResult> => {
     try {
       await client.configReset();
@@ -482,6 +501,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       refreshConfig,
       resetConfig,
       saveConfig,
+      setUiLanguage,
       deleteApiKey: async () => {
         await client.apiKeyDelete();
         setApiKeyConfigured(false);
@@ -520,6 +540,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       restartHarness,
       runDiagnostics,
       saveConfig,
+      setUiLanguage,
       startHarness,
       stopHarness,
       subscribeToActivity,
