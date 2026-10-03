@@ -578,6 +578,6 @@ Unit / Integration / E2E are Coding Agent responsibilities; only Manual Acceptan
 - [x] git diff --check PASS
 - [x] TASKS does not claim Integration/E2E/Manual Acceptance PASS
 
-Development result: **M6 Development Complete — Ready for Independent QA**.
+Development result: **M6 Development Complete**. Milestone final status: **ACCEPTED / FROZEN**（2026-10-04）。
 
-实际验证命令、结果和 T1 误执行既有 Integration 模块的阶段偏差见 [DEVELOPMENT_REPORT.md](DEVELOPMENT_REPORT.md)。本 checklist 只记录开发级证据，不代表 Integration / Local E2E / Manual Acceptance 通过，也不将 M6 标记为 ACCEPTED / FROZEN。
+实际验证命令、结果和 T1 误执行既有 Integration 模块的阶段偏差见 [DEVELOPMENT_REPORT.md](DEVELOPMENT_REPORT.md)。本 checklist 只记录开发级证据；最终 Integration 40/40 PASS、Local Black-box E2E 22/22 PASS 见 [QA_REPORT.md](QA_REPORT.md)，用户确认的人工验收 PASS 与 ACCEPTED / FROZEN 结论见 [MANUAL_ACCEPTANCE_CHECKLIST.md](MANUAL_ACCEPTANCE_CHECKLIST.md)。本次收口未重新执行测试或修改生产代码。

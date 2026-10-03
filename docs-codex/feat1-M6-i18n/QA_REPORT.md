@@ -4,9 +4,9 @@
 被测代码：HEAD `7083fbc4862340b73f083f4b7b4912b626909662`，加本轮必要修复及新增 QA 测试。  
 依据：同目录的 SPEC.md、PLAN.md、TASKS.md、INTEGRATION_TEST_PLAN.md、E2E_TEST_PLAN.md；DEVELOPMENT_REPORT.md 仅作为开发交接参考。
 
-结论：**Integration INT-01–INT-40 全部 PASS；Local Black-box E2E E2E-01–E2E-22 全部 PASS；无未解决 FAIL / BLOCKED。具备进入 M6 Portable + Manual Acceptance 阶段的条件。**
+结论：**Integration INT-01–INT-40 全部 PASS；Local Black-box E2E E2E-01–E2E-22 全部 PASS；无未解决 FAIL / BLOCKED。用户已完成并确认 Manual Acceptance PASS；M6 最终状态为 ACCEPTED / FROZEN。**
 
-本轮未执行 MANUAL_ACCEPTANCE_CHECKLIST.md，未构建 M6 Portable 验收包，未进行人工验收或冻结，未把 M6 标记为 ACCEPTED / FROZEN。进入下一阶段前仍须从最新代码构建独立 M6 Portable 包。
+QA 执行阶段未进行人工验收或冻结。后续已基于 HEAD `3c51941c3ba4a4c8556bb76a703e1639e387704e` 重新构建独立 M6 Portable 包，身份与准备证据见 [MANUAL_ACCEPTANCE_CHECKLIST.md](MANUAL_ACCEPTANCE_CHECKLIST.md)。2026-10-04，Human Reviewer（用户）明确确认人工验收完成并通过：简体中文 / English 可正常切换、即时生效。M6 已正式 **ACCEPTED / FROZEN**；既有 Integration **40/40 PASS** 与 Local Black-box E2E **22/22 PASS**（LOCAL_M6_E2E=PASS）保持不变，本次文档收口未重新执行测试或修改生产代码。
 
 ## 执行边界与构建身份
 

@@ -1,6 +1,6 @@
 # M6 Development Report — Chinese / English UI
 
-Status: **M6 Development Complete — Ready for Independent QA**
+Status: **M6 ACCEPTED / FROZEN**（2026-10-04；开发阶段证据保留如下）
 Date: 2026-10-04
 Source: HEAD `4e2514ed54b5eed72318da7d9a73fc5b4249d0d8` plus current uncommitted M6 changes.
 Baseline: M5 `ACCEPTED / FROZEN`; M5 acceptance records and Runtime production code remain unchanged.
@@ -64,4 +64,4 @@ The component tests use the actual Provider with a local mock adapter to prove i
 
 ## Handoff
 
-M6 is ready to enter independent QA using the existing M6 test plans. The INT-04 fixture observation must be retained in QA reporting. This report and TASKS completion establish development completion only; **M6 is not ACCEPTED / FROZEN**.
+开发阶段报告与 TASKS 仅证明开发完成，原 INT-04 fixture observation 保留，后续处理见 [QA_REPORT.md](QA_REPORT.md)。最终状态：Integration 40/40 PASS、Local Black-box E2E 22/22 PASS；Human Reviewer（用户）于 2026-10-04 确认人工验收完成并通过，简体中文 / English 可正常切换、即时生效。M6 已正式 **ACCEPTED / FROZEN**，最终记录见 [MANUAL_ACCEPTANCE_CHECKLIST.md](MANUAL_ACCEPTANCE_CHECKLIST.md)。本次仅收口文档，未重新执行测试或修改生产代码。
