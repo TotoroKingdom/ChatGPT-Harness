@@ -129,7 +129,7 @@ export function SettingsPage() {
   };
 
   const changeLanguage = async (value: UiLanguage | "") => {
-    if (languageSaving) return;
+    if (languageSaving || saving || resetting) return;
     const previousPreference = data.config?.ui.language ?? null;
     const previousLocale = currentLocale();
     const nextPreference = value || null;
@@ -161,6 +161,7 @@ export function SettingsPage() {
   };
 
   const save = async () => {
+    if (languageSaving || saving || resetting) return;
     setFeedback(null);
     if (!form.workspace.rootPath.trim()) {
       setFeedback({ kind: "error", summaryKey: "validation.settings.workspace" });
@@ -197,6 +198,7 @@ export function SettingsPage() {
   };
 
   const reset = async () => {
+    if (languageSaving || saving || resetting) return;
     if (!window.confirm(t("settings.actions.resetConfirm"))) return;
     setResetting(true);
     const result = await data.resetConfig();
@@ -239,7 +241,7 @@ export function SettingsPage() {
           <select
             value={languageSelection}
             onChange={(event) => void changeLanguage(event.target.value as UiLanguage | "")}
-            disabled={languageSaving}
+            disabled={languageSaving || saving || resetting}
             aria-busy={languageSaving}
           >
             <option value="">{t("settings.followSystem")}</option>
@@ -255,7 +257,7 @@ export function SettingsPage() {
           <strong>{t("settings.configError.title")}</strong>
           <span>{t(presentError(data.configError).summaryKey)}</span>
           {presentError(data.configError).code && <code className="mono">{presentError(data.configError).code}</code>}
-          <button className="button button-quiet" onClick={() => void reset()} disabled={resetting}>{t("settings.configError.reset")}</button>
+          <button className="button button-quiet" onClick={() => void reset()} disabled={resetting || saving || languageSaving}>{t("settings.configError.reset")}</button>
         </div>
       )}
       {data.restartRequired && (
@@ -351,9 +353,9 @@ export function SettingsPage() {
       <FeedbackNotice feedback={feedback} />
       <div className="settings-actions">
         <span className={dirty ? "warning-text" : "muted"}>{dirty ? t("settings.actions.unsaved") : t("settings.actions.saved")}</span>
-        <button className="button button-secondary" disabled={!dirty || saving} onClick={() => { setForm(data.config ?? emptyConfig); setApiKey(""); setReplacingApiKey(false); setDirty(false); }}>{t("settings.actions.discard")}</button>
-        <button className="button button-primary" disabled={!dirty || saving} onClick={() => void save()}>{saving ? t("settings.actions.saving") : t("settings.actions.save")}</button>
-        <button className="button button-quiet danger-text" onClick={() => void reset()} disabled={resetting}>{resetting ? t("settings.actions.resetting") : t("settings.actions.reset")}</button>
+        <button className="button button-secondary" disabled={!dirty || saving || resetting || languageSaving} onClick={() => { setForm(data.config ?? emptyConfig); setApiKey(""); setReplacingApiKey(false); setDirty(false); }}>{t("settings.actions.discard")}</button>
+        <button className="button button-primary" disabled={!dirty || saving || resetting || languageSaving} onClick={() => void save()}>{saving ? t("settings.actions.saving") : t("settings.actions.save")}</button>
+        <button className="button button-quiet danger-text" onClick={() => void reset()} disabled={resetting || saving || languageSaving}>{resetting ? t("settings.actions.resetting") : t("settings.actions.reset")}</button>
       </div>
     </div>
   );

@@ -236,15 +236,28 @@ fn int_04(fixture: &Fixture) -> QaResult<()> {
         check!(store.load().is_err(), "INT-04 {name} loaded unexpectedly");
         fs::write(directory.join("config.json"), &original).map_err(|_| "restore INT-04")?;
     }
-    let mut invalid_save = config;
+    // M5 registers bash. Keep the rejection fixture genuinely unknown instead
+    // of retaining M3's pre-Bash capability assumption.
+    let mut invalid_save = config.clone();
     invalid_save.policies.user_rules.push(user_rule(
         "invalid-save",
         PolicyDecision::Allow,
-        "bash",
+        "unknown-tool",
         true,
     ));
     check!(store.save(invalid_save).is_err());
     check!(fs::read(directory.join("config.json")).unwrap() == original);
+    let mut bash_rule = config;
+    bash_rule.policies.user_rules.push(user_rule(
+        "m5-bash-rule",
+        PolicyDecision::Ask,
+        "bash",
+        true,
+    ));
+    let saved = store.save(bash_rule).map_err(|_| "save M5 bash rule")?;
+    check!(saved.config_revision == DecimalU64::new(2));
+    check!(store.load().unwrap().unwrap().policies == saved.policies);
+    println!("INT-04 EVIDENCE: unknown-tool rejected with bytes preserved; M5 bash matcher persisted at revision 2");
     Ok(())
 }
 

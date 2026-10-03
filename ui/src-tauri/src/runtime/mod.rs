@@ -1245,6 +1245,9 @@ mod m2_e2e;
 mod m3_config_integration;
 
 #[cfg(test)]
+mod m6_i18n_qa;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use harness_control_protocol::{

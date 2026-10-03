@@ -18,10 +18,10 @@ use std::time::{Duration, Instant};
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
-type E2eResult<T> = Result<T, E2eError>;
+pub(super) type E2eResult<T> = Result<T, E2eError>;
 
 #[derive(Debug)]
-struct E2eError(String);
+pub(super) struct E2eError(String);
 
 impl E2eError {
     fn new(message: impl Into<String>) -> Self {
@@ -208,7 +208,7 @@ fn report_case(case_id: &str, result: E2eResult<()>, failures: &mut Vec<String>)
     }
 }
 
-fn runtime_binary() -> E2eResult<PathBuf> {
+pub(super) fn runtime_binary() -> E2eResult<PathBuf> {
     if let Some(path) = std::env::var_os("HARNESS_E2E_RUNTIME_BIN") {
         let path = PathBuf::from(path);
         check!(
@@ -274,7 +274,7 @@ impl Drop for Fixture {
     }
 }
 
-struct RuntimeProcess {
+pub(super) struct RuntimeProcess {
     child: Child,
     stdin: ChildStdin,
     messages: Receiver<String>,
@@ -286,7 +286,11 @@ struct RuntimeProcess {
 }
 
 impl RuntimeProcess {
-    fn start(binary: &Path, config: &AppConfig, generation: &str) -> E2eResult<(Self, McpClient)> {
+    pub(super) fn start(
+        binary: &Path,
+        config: &AppConfig,
+        generation: &str,
+    ) -> E2eResult<(Self, McpClient)> {
         let mut child = Command::new(binary)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -366,7 +370,7 @@ impl RuntimeProcess {
         Ok((process, mcp))
     }
 
-    fn control_request(&mut self, method: &str, params: Value) -> E2eResult<Value> {
+    pub(super) fn control_request(&mut self, method: &str, params: Value) -> E2eResult<Value> {
         self.next_request_id += 1;
         let id = format!("m2-e2e-{}", self.next_request_id);
         self.write_json_line(&json!({
@@ -404,6 +408,20 @@ impl RuntimeProcess {
         }
     }
 
+    pub(super) fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    pub(super) fn runtime_id(&self) -> &str {
+        &self.runtime_id
+    }
+
+    pub(super) fn stopped_and_endpoint_closed(&mut self) -> bool {
+        self.child.try_wait().ok().flatten().is_some()
+            && TcpStream::connect_timeout(&self.endpoint.address, Duration::from_millis(500))
+                .is_err()
+    }
+
     fn control_notification(&mut self, method: &str, params: Value) -> E2eResult<()> {
         self.write_json_line(&json!({
             "jsonrpc": "2.0",
@@ -431,7 +449,7 @@ impl RuntimeProcess {
             .map_err(|_| E2eError::new("flush Control RPC failed"))
     }
 
-    fn stop(&mut self) -> E2eResult<()> {
+    pub(super) fn stop(&mut self) -> E2eResult<()> {
         let result = self.control_request("runtime.stop", json!({}))?;
         check!(
             result.get("accepted") == Some(&Value::Bool(true)),
@@ -493,7 +511,7 @@ struct Endpoint {
     address: SocketAddr,
 }
 
-struct McpClient {
+pub(super) struct McpClient {
     endpoint: Endpoint,
     session_id: String,
     next_request_id: u64,
@@ -546,11 +564,11 @@ impl McpClient {
         })
     }
 
-    fn list_tools(&mut self) -> E2eResult<Value> {
+    pub(super) fn list_tools(&mut self) -> E2eResult<Value> {
         self.request("tools/list", json!({}))
     }
 
-    fn call_tool(&mut self, name: &str, arguments: Value) -> E2eResult<Value> {
+    pub(super) fn call_tool(&mut self, name: &str, arguments: Value) -> E2eResult<Value> {
         self.request(
             "tools/call",
             json!({ "name": name, "arguments": arguments }),
