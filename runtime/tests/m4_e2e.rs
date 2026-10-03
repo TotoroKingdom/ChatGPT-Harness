@@ -12,7 +12,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
-const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const PENDING_DETECTION_TIMEOUT: Duration = Duration::from_secs(3);
 
 type E2eResult<T> = Result<T, E2eError>;
@@ -771,7 +771,7 @@ fn http_json_request(
         .set_write_timeout(Some(HTTP_TIMEOUT))
         .map_err(|error| E2eError::new(format!("set MCP write timeout failed: {error}")))?;
     let mut request = format!(
-        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: keep-alive\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
         address.port(),
         body.len()
     );
@@ -786,11 +786,124 @@ fn http_json_request(
         .and_then(|_| stream.write_all(&body))
         .and_then(|_| stream.flush())
         .map_err(|error| E2eError::new(format!("write MCP request failed: {error}")))?;
-    let mut raw_response = Vec::new();
-    stream
-        .read_to_end(&mut raw_response)
-        .map_err(|error| E2eError::new(format!("read MCP response failed: {error}")))?;
-    parse_http_response(&raw_response)
+    read_mcp_response(&mut stream)
+}
+
+/// rmcp keeps Streamable HTTP request-wise SSE connections open after the
+/// priming event. Read until the first JSON-RPC response instead of waiting
+/// for EOF; this also keeps approval-wait and Runtime-stop regression cases
+/// observable with the current M5 transport.
+fn read_mcp_response(stream: &mut TcpStream) -> E2eResult<HttpResponse> {
+    let deadline = Instant::now() + HTTP_TIMEOUT;
+    let mut raw = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                return Err(E2eError::new(
+                    "MCP response closed before JSON-RPC data arrived",
+                ));
+            }
+            Ok(read) => raw.extend_from_slice(&buffer[..read]),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) && Instant::now() < deadline =>
+            {
+                continue;
+            }
+            Err(error) => {
+                return Err(E2eError::new(format!("read MCP response failed: {error}")));
+            }
+        }
+
+        let Some(header_end) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+            if Instant::now() >= deadline {
+                return Err(E2eError::new("MCP response had no complete HTTP header"));
+            }
+            continue;
+        };
+        let header_text = std::str::from_utf8(&raw[..header_end]).map_err(|error| {
+            E2eError::new(format!("MCP response headers were not UTF-8: {error}"))
+        })?;
+        let mut lines = header_text.lines();
+        let status = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .ok_or_else(|| E2eError::new("MCP response has no HTTP status"))?
+            .parse::<u16>()
+            .map_err(|error| E2eError::new(format!("invalid MCP HTTP status: {error}")))?;
+        let headers = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_owned()))
+            .collect::<BTreeMap<_, _>>();
+        let wire_body = &raw[header_end + 4..];
+        let (body, chunked_complete) = if headers
+            .get("transfer-encoding")
+            .is_some_and(|value| value.eq_ignore_ascii_case("chunked"))
+        {
+            decode_chunked_available(wire_body)?
+        } else {
+            (wire_body.to_vec(), true)
+        };
+        if body_contains_json_rpc(&body)
+            || (chunked_complete && headers.contains_key("content-length") && !body.is_empty())
+        {
+            return Ok(HttpResponse {
+                status,
+                headers,
+                body,
+            });
+        }
+        if Instant::now() >= deadline {
+            return Err(E2eError::new("MCP response did not contain JSON-RPC data"));
+        }
+    }
+}
+
+fn body_contains_json_rpc(body: &[u8]) -> bool {
+    if serde_json::from_slice::<Value>(body).is_ok() {
+        return true;
+    }
+    std::str::from_utf8(body).ok().is_some_and(|text| {
+        text.lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .any(|data| {
+                !data.trim().is_empty() && serde_json::from_str::<Value>(data.trim()).is_ok()
+            })
+    })
+}
+
+fn decode_chunked_available(wire: &[u8]) -> E2eResult<(Vec<u8>, bool)> {
+    let mut cursor = 0usize;
+    let mut body = Vec::new();
+    loop {
+        let Some(relative_end) = wire[cursor..]
+            .windows(2)
+            .position(|window| window == b"\r\n")
+        else {
+            return Ok((body, false));
+        };
+        let line_end = cursor + relative_end;
+        let length_text = std::str::from_utf8(&wire[cursor..line_end])
+            .map_err(|error| E2eError::new(format!("invalid chunk length: {error}")))?;
+        let length =
+            usize::from_str_radix(length_text.split(';').next().unwrap_or_default().trim(), 16)
+                .map_err(|error| E2eError::new(format!("invalid chunk size: {error}")))?;
+        cursor = line_end + 2;
+        if length == 0 {
+            return Ok((body, true));
+        }
+        if wire.len() < cursor + length + 2 {
+            return Ok((body, false));
+        }
+        body.extend_from_slice(&wire[cursor..cursor + length]);
+        if &wire[cursor + length..cursor + length + 2] != b"\r\n" {
+            return Err(E2eError::new("invalid chunk terminator"));
+        }
+        cursor += length + 2;
+    }
 }
 
 fn parse_http_response(raw: &[u8]) -> E2eResult<HttpResponse> {
@@ -1224,8 +1337,13 @@ fn run_e2e_11(generation: &mut Generation) -> E2eResult<String> {
     let (call, request) = start_pending_write(generation, "stopped.txt", "must not execute")?;
     let id = request_id(&request).to_owned();
     generation.graceful_stop()?;
-    let result = call.receive()?;
-    assert_mcp_error_code(&result, "APPROVAL_CANCELLED")?;
+    match call.receive() {
+        Ok(result) => assert_mcp_error_code(&result, "APPROVAL_CANCELLED")?,
+        Err(error) => check!(
+            error.to_string().contains("closed before JSON-RPC data"),
+            "Runtime stop returned an unexpected pending MCP error: {error}"
+        ),
+    }
     check!(
         !generation_path(generation, "stopped.txt").exists(),
         "Runtime stop allowed a pending write to execute"

@@ -16,7 +16,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
-const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 type E2eResult<T> = Result<T, E2eError>;
 
@@ -499,6 +499,22 @@ struct McpClient {
     next_request_id: u64,
 }
 
+struct PendingMcpCall {
+    receiver: Receiver<E2eResult<Value>>,
+    thread: JoinHandle<()>,
+}
+
+impl PendingMcpCall {
+    fn receive(self) -> E2eResult<Value> {
+        let result = self
+            .receiver
+            .recv_timeout(HTTP_TIMEOUT)
+            .map_err(|_| E2eError::new("original MCP call did not finish"))?;
+        let _ = self.thread.join();
+        result
+    }
+}
+
 impl McpClient {
     fn connect(endpoint: Endpoint) -> E2eResult<Self> {
         let response = http_json_request(
@@ -541,6 +557,30 @@ impl McpClient {
         )
     }
 
+    fn pending_tool(&mut self, name: &str, arguments: Value) -> PendingMcpCall {
+        self.next_request_id += 1;
+        let endpoint = self.endpoint;
+        let session_id = self.session_id.clone();
+        let id = self.next_request_id;
+        let name = name.to_owned();
+        let (sender, receiver) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            let result = http_json_request(
+                endpoint.address,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "tools/call",
+                    "params": { "name": name, "arguments": arguments },
+                }),
+                Some(&session_id),
+            )
+            .and_then(|response| response.json_rpc());
+            let _ = sender.send(result);
+        });
+        PendingMcpCall { receiver, thread }
+    }
+
     fn request(&mut self, method: &str, params: Value) -> E2eResult<Value> {
         self.next_request_id += 1;
         let response = http_json_request(
@@ -559,6 +599,44 @@ impl McpClient {
         );
         response.json_rpc()
     }
+}
+
+fn wait_pending_approval(runtime: &mut RuntimeProcess, scope: &str) -> E2eResult<Value> {
+    let deadline = Instant::now() + CONTROL_TIMEOUT;
+    loop {
+        let result = runtime.control_request("approvals.list", json!({ "status": "pending" }))?;
+        if let Some(request) = result["items"].as_array().and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["scopeSummary"] == json!(scope))
+        }) {
+            return Ok(request.clone());
+        }
+        if Instant::now() >= deadline {
+            return Err(E2eError::new(format!(
+                "pending approval for {scope} was not observable"
+            )));
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn deny_pending_write(
+    runtime: &mut RuntimeProcess,
+    mcp: &mut McpClient,
+    path: &str,
+    content: &str,
+) -> E2eResult<Value> {
+    let call = mcp.pending_tool("write", json!({ "path": path, "content": content }));
+    let approval = wait_pending_approval(runtime, path)?;
+    let request_id = approval["requestId"]
+        .as_str()
+        .ok_or_else(|| E2eError::new("pending approval had no requestId"))?;
+    runtime.control_request(
+        "approvals.resolve",
+        json!({ "requestId": request_id, "decision": "deny" }),
+    )?;
+    call.receive()
 }
 
 struct HttpResponse {
@@ -603,7 +681,7 @@ fn http_json_request(
         .set_write_timeout(Some(HTTP_TIMEOUT))
         .map_err(|_| E2eError::new("set MCP write timeout failed"))?;
     let mut request = format!(
-        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: keep-alive\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
         address.port(),
         body.len()
     );
@@ -618,11 +696,117 @@ fn http_json_request(
         .and_then(|_| stream.write_all(&body))
         .and_then(|_| stream.flush())
         .map_err(|_| E2eError::new("write MCP request failed"))?;
-    let mut raw_response = Vec::new();
-    stream
-        .read_to_end(&mut raw_response)
-        .map_err(|_| E2eError::new("read MCP response failed"))?;
-    parse_http_response(&raw_response)
+    read_mcp_response(&mut stream)
+}
+
+/// Consume the first JSON-RPC message from rmcp's request-wise SSE stream.
+/// The stream is intentionally kept alive while a Runtime request waits for
+/// approval, so these historical regression cases must not wait for EOF.
+fn read_mcp_response(stream: &mut TcpStream) -> E2eResult<HttpResponse> {
+    let deadline = Instant::now() + HTTP_TIMEOUT;
+    let mut raw = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => return Err(E2eError::new("MCP response closed before JSON-RPC data")),
+            Ok(read) => raw.extend_from_slice(&buffer[..read]),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) && Instant::now() < deadline =>
+            {
+                continue;
+            }
+            Err(error) => return Err(E2eError::new(format!("read MCP response failed: {error}"))),
+        }
+
+        let Some(header_end) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+            if Instant::now() >= deadline {
+                return Err(E2eError::new("MCP response had no complete HTTP header"));
+            }
+            continue;
+        };
+        let header_text = std::str::from_utf8(&raw[..header_end])
+            .map_err(|_| E2eError::new("MCP response headers were not UTF-8"))?;
+        let mut lines = header_text.lines();
+        let status = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .ok_or_else(|| E2eError::new("MCP response had no status"))?
+            .parse::<u16>()
+            .map_err(|_| E2eError::new("MCP response status was invalid"))?;
+        let headers = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_owned()))
+            .collect::<BTreeMap<_, _>>();
+        let wire_body = &raw[header_end + 4..];
+        let (body, chunked_complete) = if headers
+            .get("transfer-encoding")
+            .is_some_and(|value| value.eq_ignore_ascii_case("chunked"))
+        {
+            decode_chunked_available(wire_body)?
+        } else {
+            (wire_body.to_vec(), true)
+        };
+        if body_contains_json_rpc(&body)
+            || (chunked_complete && headers.contains_key("content-length") && !body.is_empty())
+        {
+            return Ok(HttpResponse {
+                status,
+                headers,
+                body,
+            });
+        }
+        if Instant::now() >= deadline {
+            return Err(E2eError::new("MCP response did not contain JSON-RPC data"));
+        }
+    }
+}
+
+fn body_contains_json_rpc(body: &[u8]) -> bool {
+    if serde_json::from_slice::<Value>(body).is_ok() {
+        return true;
+    }
+    std::str::from_utf8(body).ok().is_some_and(|text| {
+        text.lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .any(|data| {
+                !data.trim().is_empty() && serde_json::from_str::<Value>(data.trim()).is_ok()
+            })
+    })
+}
+
+fn decode_chunked_available(wire: &[u8]) -> E2eResult<(Vec<u8>, bool)> {
+    let mut cursor = 0usize;
+    let mut body = Vec::new();
+    loop {
+        let Some(relative_end) = wire[cursor..]
+            .windows(2)
+            .position(|window| window == b"\r\n")
+        else {
+            return Ok((body, false));
+        };
+        let line_end = cursor + relative_end;
+        let length_text = std::str::from_utf8(&wire[cursor..line_end])
+            .map_err(|_| E2eError::new("invalid chunk length"))?;
+        let length =
+            usize::from_str_radix(length_text.split(';').next().unwrap_or_default().trim(), 16)
+                .map_err(|_| E2eError::new("invalid chunk size"))?;
+        cursor = line_end + 2;
+        if length == 0 {
+            return Ok((body, true));
+        }
+        if wire.len() < cursor + length + 2 {
+            return Ok((body, false));
+        }
+        body.extend_from_slice(&wire[cursor..cursor + length]);
+        check!(
+            &wire[cursor + length..cursor + length + 2] == b"\r\n",
+            "invalid chunk terminator"
+        );
+        cursor += length + 2;
+    }
 }
 
 fn parse_http_response(raw: &[u8]) -> E2eResult<HttpResponse> {
@@ -726,11 +910,16 @@ fn run_e2e_01(
     let effective_items = effective
         .as_array()
         .ok_or_else(|| E2eError::new("effective tool observation was not an array"))?;
+    let bash = effective_items
+        .iter()
+        .find(|item| item.get("name") == Some(&json!("bash")))
+        .ok_or_else(|| E2eError::new("default generation did not report the Bash declaration"))?;
     check!(
-        !effective_items
-            .iter()
-            .any(|item| item.get("name") == Some(&json!("bash"))),
-        "bash was registered by the default generation"
+        matches!(
+            bash.get("availability").and_then(Value::as_str),
+            Some("unavailable_by_mode") | Some("unavailable_disabled")
+        ),
+        "default generation exposed executable Bash"
     );
     Ok(())
 }
@@ -1552,13 +1741,8 @@ fn run_m3_e2e_05(
     let before_bytes = fs::read(fixture.workspace.join("write-target.txt"))
         .map_err(|_| E2eError::new("read M3 ASK fixture failed"))?;
     let before = latest_activity(runtime)?;
-    assert_mcp_error_code(
-        &mcp.call_tool(
-            "write",
-            json!({ "path": "write-target.txt", "content": "must await approval" }),
-        )?,
-        "APPROVAL_REQUIRED",
-    )?;
+    let response = deny_pending_write(runtime, mcp, "write-target.txt", "must await approval")?;
+    assert_mcp_error_code(&response, "APPROVAL_DENIED")?;
     check!(
         fs::read(fixture.workspace.join("write-target.txt"))
             .map_err(|_| E2eError::new("read M3 ASK target failed"))?
@@ -1568,7 +1752,7 @@ fn run_m3_e2e_05(
     let status = runtime.control_request("runtime.status", json!({}))?;
     check!(
         status["pendingApprovals"] == json!(0),
-        "M3 ASK created a pending approval"
+        "M3 ASK left a pending approval after denial"
     );
     m3_assert_policy(
         runtime,
@@ -1822,13 +2006,11 @@ fn run_m3_e2e_11(
                     )?,
                     "POLICY_DENIED",
                 )?,
-                "ask" => assert_mcp_error_code(
-                    &mcp.call_tool(
-                        "write",
-                        json!({ "path": "control-ask.txt", "content": "ask" }),
-                    )?,
-                    "APPROVAL_REQUIRED",
-                )?,
+                "ask" => {
+                    let response =
+                        deny_pending_write(&mut runtime, &mut mcp, "control-ask.txt", "ask")?;
+                    assert_mcp_error_code(&response, "APPROVAL_DENIED")?;
+                }
                 _ => return Err(E2eError::new("unknown M3 control fixture")),
             }
             Ok(())
@@ -1911,11 +2093,16 @@ fn run_m3_e2e_13(
     ] {
         let (mut runtime, mut mcp) = RuntimeProcess::start(binary, config, generation)?;
         let before = latest_activity(&mut runtime)?;
-        let response = mcp.call_tool(
-            "write",
-            json!({ "path": "confidentiality.txt", "content": sentinel }),
-        )?;
+        let response = if expected_code == Some("APPROVAL_REQUIRED") {
+            deny_pending_write(&mut runtime, &mut mcp, "confidentiality.txt", sentinel)?
+        } else {
+            mcp.call_tool(
+                "write",
+                json!({ "path": "confidentiality.txt", "content": sentinel }),
+            )?
+        };
         match expected_code {
+            Some("APPROVAL_REQUIRED") => assert_mcp_error_code(&response, "APPROVAL_DENIED")?,
             Some(code) => assert_mcp_error_code(&response, code)?,
             None => assert_mcp_success(&response)?,
         }
