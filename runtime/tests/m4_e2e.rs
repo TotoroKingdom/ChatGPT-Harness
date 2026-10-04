@@ -1276,7 +1276,7 @@ fn run_e2e_08(generation: &mut Generation) -> E2eResult<()> {
     let recent = activity.iter().skip(before);
     check!(
         recent.clone().any(|event| {
-            event.get("eventType").and_then(Value::as_str) == Some("approval_resolved")
+            event.get("eventType").and_then(Value::as_str) == Some("session_grant_matched")
                 && event
                     .get("metadata")
                     .and_then(|metadata| metadata.get("tool"))

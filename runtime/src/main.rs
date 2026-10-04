@@ -23,6 +23,8 @@ mod m5_analyzer_security;
 mod m5_bash_pipeline_tests;
 #[cfg(test)]
 mod m5_output_security;
+#[cfg(test)]
+mod m7_qa;
 
 fn main() {
     if let Err(error) = server::run() {

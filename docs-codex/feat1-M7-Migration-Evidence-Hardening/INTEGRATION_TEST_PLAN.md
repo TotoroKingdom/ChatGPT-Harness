@@ -575,6 +575,17 @@ v1-future-or-unsupported-schema.json
 
 fixture内容必须来自真实历史 schema/commit shape或与其严格等价。
 
+### QA implementation mapping (2026-10-04)
+
+实际 source-controlled fixtures 位于 `fixtures/config/`：纯 V2 样本为
+`v1-v2-era.json`，分阶段样本为 `v1-transitional-m2-tools.json`、
+`v1-transitional-m3-policy.json`、`v1-transitional-m5-bash.json`、
+`v1-transitional-m6-i18n.json`；保留组合样本 `v1-transitional-m6.json`。
+负向样本包括 `v1-invalid-policy.json`、`v1-invalid-secret-like-field.json`、
+`v1-future-schema.json`，以及既有 proxy/unknown-field fixtures。
+`fixtures/config/README.md` 记录对应历史提交。此处只对齐实际文件名，不减少
+分阶段迁移、错误、完整性或安全断言。
+
 ## 6. Evidence Format
 
 每个 case记录：

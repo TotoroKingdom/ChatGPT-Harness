@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 3,
+  "configRevision": "41",
+  "workspace": {
+    "rootPath": "C:\\FakeWorkspace"
+  },
+  "tunnel": {
+    "tunnelId": "fake-tunnel-id",
+    "controlPlaneHttpProxy": "http://127.0.0.1:8080",
+    "tunnelClientPath": "C:\\FakeTunnelClient",
+    "autoDetect": false,
+    "apiKeyRef": {
+      "provider": "fake-secret-provider",
+      "key": "opaque-fake-reference"
+    }
+  },
+  "security": {
+    "mode": "developer_test",
+    "developerTestMode": true
+  },
+  "ui": {
+    "theme": "dark",
+    "language": "zh-CN"
+  },
+  "tools": {
+    "readFile": {
+      "enabled": true
+    },
+    "glob": {
+      "enabled": true
+    },
+    "write": {
+      "enabled": false
+    },
+    "edit": {
+      "enabled": true
+    },
+    "bash": {
+      "enabled": false
+    }
+  },
+  "policies": {
+    "toolDefaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "deny",
+      "edit": "ask",
+      "bash": "ask"
+    },
+    "userRules": [
+      {
+        "id": "fake-deny-write",
+        "name": "Fake deny",
+        "enabled": true,
+        "decision": "deny",
+        "matcher": {
+          "type": "tool",
+          "tool": "write"
+        },
+        "reason": "Fake user reason"
+      }
+    ]
+  },
+  "bash": {
+    "autoDetect": false,
+    "executablePath": "C:\\FakeGit\\bin\\bash.exe"
+  }
+}

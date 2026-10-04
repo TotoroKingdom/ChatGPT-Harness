@@ -361,6 +361,15 @@ Control/effective diagnostics必须返回不同 availability/reason code，而�
 
 不得出现与状态矛盾的 action。
 
+执行澄清（2026-10-04）：当前 production read DTO 的机器身份为
+`statusReason`；remediation key 由 production UI 的 `toolRemediationKey`
+映射。此 case 必须将真实 release Runtime Control DTO 交给实际 production
+presentation code，断言 disabled/policy denied/ASK/Bash unavailable 的
+reason、remediation key 和 en/zh-CN 资源一致。允许无 GUI 的 Node 探针直接
+执行该生产代码；不得在 runner 中复制映射表，或用 mock DTO 替代真实读取。
+澄清原因是实现把本地化展示放在 UI，未在 Runtime DTO 增加重复展示字段；
+真实机器状态和修复指引的验证要求保持不变。
+
 ### E2E-20 — Desired/effective revision mismatch is truthful
 
 Runtime使用 revision N启动。
