@@ -1,18 +1,20 @@
 # M7 Independent Automated QA Report
 
 Date: **2026-10-04 (Asia/Shanghai)**
-Status: **M7 Automated QA PASS — Ready for Manual Acceptance**
+Status: **M7 — ACCEPTED / FROZEN**
 
 严格依据本目录 `INTEGRATION_TEST_PLAN.md` 与 `E2E_TEST_PLAN.md` 执行。
 Integration **40/40 PASS**；Local Black-box E2E **25/25 PASS**。
 最终 **FAIL=0、BLOCKED=0，无未解决产品缺陷或自动化 QA 阻塞项**。
 
-没有执行 `MANUAL_ACCEPTANCE_CHECKLIST.md`，没有代替人工/External ChatGPT
-验收，没有将 M7/V3 标记为 ACCEPTED / FROZEN。
+Human Reviewer 已完成 `MANUAL_ACCEPTANCE_CHECKLIST.md` 全部人工验收项并确认
+PASS。本报告不代替 M8 External ChatGPT 验收；V3 仍未标记为 ACCEPTED / FROZEN。
 
 ## 1. 实际代码、构建与证据位置
 
 - Git baseline：`352f2d436cfb717a4f949befb846cb054889b1cf`。
+- Production implementation commit：`63c63c833528fb0560652e9d032f08563a64f453`。
+- Automated evidence commit：`eb9cc67853321e21bfe68ffe6fdac34437a86bf3`。
 - 被测内容为该 HEAD 上已有的 **M7 Development Complete 工作区代码**，不是
   HEAD 单独的旧实现。QA 保留了开始时已有的 staged/unstaged 修改。
 - QA 没有修复或改写产品业务逻辑；新增独立测试、历史 fixtures、测试模块注册、
@@ -272,12 +274,13 @@ LOCAL_M7_BLACK_BOX_E2E=PASS
 和 linker warning 保留在日志；实际 serde/migration fail-closed 边界及所有必要
 构建/测试通过。没有用 `cargo fix` 扩大改动。
 
-Portable verification 仅证明构建、文件/图标/manifest 和 Runtime smoke；没有
-声称桌面布局、可读性或人工升级体验通过。没有修改真实用户 production config。
+Portable verification 证明构建、文件/图标/manifest 和 Runtime smoke；人工验收
+使用上述独立 M7 最新包并确认 checklist 全部 PASS。没有修改真实用户 production
+config。
 临时 Workspace/config 已清理；测试产生的旧 untracked evidence 被保留并用
 SHA-256 核对搬入 QA 归档，没有删除无关工作区修改。
 
-本次不宣称 Activity 为 durable audit storage、External ChatGPT/M8 完成、Manual
-Acceptance 通过或 V3 ACCEPTED / FROZEN。人工验收使用上述独立 M7 最新包。
+本次不宣称 Activity 为 durable audit storage，也不宣称 External ChatGPT/M8 已完成。
+M7 Manual Acceptance 已通过；V3 ACCEPTED / FROZEN 仍留给 M8。
 
-**M7 Automated QA PASS — Ready for Manual Acceptance**
+**M7 — ACCEPTED / FROZEN**

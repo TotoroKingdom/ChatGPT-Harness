@@ -60,6 +60,6 @@ Rust 最终细分：Runtime 345、默认 transport regression 1、Tauri library 
 
 ## 阶段边界
 
-未生成或开展 M7 独立 Integration、Local Black-box E2E、Manual Acceptance 流程，未构建 Portable 验收包。规定的 `cargo test --workspace` / `npm test` 默认选择包含仓库既有、命名为 Integration 的代码级用例和默认 transport regression；这些结果仅作为全量开发回归，不升级为 M7 独立 QA 或验收结论。
+本报告生成时尚未开展 M7 独立 Integration、Local Black-box E2E、Manual Acceptance 流程，也未构建 Portable 验收包。规定的 `cargo test --workspace` / `npm test` 默认选择包含仓库既有、命名为 Integration 的代码级用例和默认 transport regression；这些结果仅作为全量开发回归，不升级为 M7 独立 QA 或验收结论。后续独立 QA 与人工验收结果以 `QA_REPORT.md` 和 `MANUAL_ACCEPTANCE_CHECKLIST.md` 为准。
 
-没有改动 Bash production limits、Policy precedence、Approval scope、Tool schemas、Workspace boundary，也未增加 DB、protocol/v2 或新工具。M7/V3 没有被标记 ACCEPTED / FROZEN；本轮结论仅为 **M7 Development Complete**。
+没有改动 Bash production limits、Policy precedence、Approval scope、Tool schemas、Workspace boundary，也未增加 DB、protocol/v2 或新工具。本报告记录的开发阶段结论为 **M7 Development Complete**；独立 QA 与人工验收完成后，当前最终状态为 **M7 — ACCEPTED / FROZEN**，V3 最终状态仍留给 M8。

@@ -1,6 +1,6 @@
 # M7 Manual Acceptance Checklist — Migration, Evidence & UX Hardening
 
-> Status: DRAFT / READY FOR FINAL HUMAN REVIEW  
+> Status: M7 — ACCEPTED / FROZEN
 > Milestone: M7 — Migration, Evidence & UX Hardening  
 > Inputs: `SPEC.md`, `PLAN.md`, `TASKS.md`, `INTEGRATION_TEST_PLAN.md`, `E2E_TEST_PLAN.md`  
 > Owner: Human Reviewer  
@@ -60,11 +60,11 @@ LOCAL_M7_BLACK_BOX_E2E=PASS
 
 ## 3. Build / Source Identity
 
-- [ ] 记录 M7 production implementation commit。
-- [ ] 记录 QA/evidence commit。
-- [ ] 记录人工验收 build / Portable目录。
-- [ ] 记录 Runtime binary SHA-256。
-- [ ] 确认 acceptance build之后没有未经重新验证的 migration/evidence production change。
+- [x] 记录 M7 production implementation commit。
+- [x] 记录 QA/evidence commit。
+- [x] 记录人工验收 build / Portable目录。
+- [x] 记录 Runtime binary SHA-256。
+- [x] 确认 acceptance build之后没有未经重新验证的 migration/evidence production change。
 
 记录：
 
@@ -81,35 +81,35 @@ Date:
 
 ### 4.1 Migration
 
-- [ ] pure V2-era v1 → v2 PASS。
-- [ ] transitional M2–M6 v1 → v2 PASS。
-- [ ] existing Tool/Policy/Bash/Language values preserved。
-- [ ] configRevision preserved during migration。
-- [ ] invalid migration leaves original bytes unchanged。
-- [ ] future schema leaves original bytes unchanged。
-- [ ] SecretStore/raw-secret safety PASS。
-- [ ] atomicity/idempotency PASS。
+- [x] pure V2-era v1 → v2 PASS。
+- [x] transitional M2–M6 v1 → v2 PASS。
+- [x] existing Tool/Policy/Bash/Language values preserved。
+- [x] configRevision preserved during migration。
+- [x] invalid migration leaves original bytes unchanged。
+- [x] future schema leaves original bytes unchanged。
+- [x] SecretStore/raw-secret safety PASS。
+- [x] atomicity/idempotency PASS。
 
 ### 4.2 Evidence / Counters
 
-- [ ] file-tool sanitized arguments PASS。
-- [ ] Policy matched-rule evidence PASS。
-- [ ] Approval ID/decision correlation PASS。
-- [ ] duration/result scalar evidence PASS。
-- [ ] Bash evidence remains bounded PASS。
-- [ ] `activeRequests`真实 instrumentation PASS。
-- [ ] `pendingApprovals`真实 instrumentation PASS。
-- [ ] `runningExecutions`真实 instrumentation PASS。
-- [ ] failure/cancel/shutdown counters归零 PASS。
+- [x] file-tool sanitized arguments PASS。
+- [x] Policy matched-rule evidence PASS。
+- [x] Approval ID/decision correlation PASS。
+- [x] duration/result scalar evidence PASS。
+- [x] Bash evidence remains bounded PASS。
+- [x] `activeRequests`真实 instrumentation PASS。
+- [x] `pendingApprovals`真实 instrumentation PASS。
+- [x] `runningExecutions`真实 instrumentation PASS。
+- [x] failure/cancel/shutdown counters归零 PASS。
 
 ### 4.3 UX / Regression
 
-- [ ] typed ToolStatusReason PASS。
-- [ ] remediation mapping PASS。
-- [ ] desired/effective/restart truthfulness PASS。
-- [ ] en/zh-CN M7 resource coverage PASS。
-- [ ] M0–M6 regression PASS。
-- [ ] `LOCAL_M7_BLACK_BOX_E2E=PASS`。
+- [x] typed ToolStatusReason PASS。
+- [x] remediation mapping PASS。
+- [x] desired/effective/restart truthfulness PASS。
+- [x] en/zh-CN M7 resource coverage PASS。
+- [x] M0–M6 regression PASS。
+- [x] `LOCAL_M7_BLACK_BOX_E2E=PASS`。
 
 ## 5. Migration Success UX
 
@@ -127,14 +127,14 @@ Date:
 
 确认：
 
-- [ ] 应用能正常进入主 UI。
-- [ ] 没有重新要求填写已存在的 Workspace/Tunnel信息。
-- [ ] config已升级为 schemaVersion 2。
-- [ ] 原 Workspace保持。
-- [ ] Tunnel ID保持。
-- [ ] proxy/Tunnel client settings保持。
-- [ ] API key reference仍有效/仍显示已配置状态。
-- [ ] Security Mode保持。
+- [x] 应用能正常进入主 UI。
+- [x] 没有重新要求填写已存在的 Workspace/Tunnel信息。
+- [x] config已升级为 schemaVersion 2。
+- [x] 原 Workspace保持。
+- [x] Tunnel ID保持。
+- [x] proxy/Tunnel client settings保持。
+- [x] API key reference仍有效/仍显示已配置状态。
+- [x] Security Mode保持。
 
 ### MA-02 — Transitional V3 settings survive migration
 
@@ -142,18 +142,18 @@ Date:
 
 确认：
 
-- [ ] Tool OFF状态保留。
-- [ ] User Policies保留。
-- [ ] Bash配置保留。
-- [ ] language偏好保留。
-- [ ] 不被默认值重置。
+- [x] Tool OFF状态保留。
+- [x] User Policies保留。
+- [x] Bash配置保留。
+- [x] language偏好保留。
+- [x] 不被默认值重置。
 
 ### MA-03 — Migration does not create fake Restart Required
 
 迁移完成后：
 
-- [ ] 不仅因为 schemaVersion 1→2 就出现 Restart Required。
-- [ ] configRevision与 migration前一致。
+- [x] 不仅因为 schemaVersion 1→2 就出现 Restart Required。
+- [x] configRevision与 migration前一致。
 
 若随后人工修改真正 Runtime-affecting配置，Restart Required应正常出现。
 
@@ -167,36 +167,36 @@ Date:
 
 确认：
 
-- [ ] 应用显示明确 configuration/migration error。
-- [ ] UI仍可操作 recovery surface。
-- [ ] 不出现空白页/无限 loading。
-- [ ] 明确说明原配置未被覆盖。
+- [x] 应用显示明确 configuration/migration error。
+- [x] UI仍可操作 recovery surface。
+- [x] 不出现空白页/无限 loading。
+- [x] 明确说明原配置未被覆盖。
 
 ### MA-05 — Config location remains visible
 
 migration失败时：
 
-- [ ] 能看到 config file/path位置。
-- [ ] 用户知道应该检查哪个文件。
-- [ ] 不要求猜测 AppData目录。
+- [x] 能看到 config file/path位置。
+- [x] 用户知道应该检查哪个文件。
+- [x] 不要求猜测 AppData目录。
 
 ### MA-06 — Recovery actions are explicit
 
 至少检查：
 
-- [ ] Retry/reload action可理解。
-- [ ] Inspect/repair guidance可执行。
-- [ ] Reset明确为 destructive last resort。
-- [ ] Reset需要明确确认。
-- [ ] 不会自动 reset。
+- [x] Retry/reload action可理解。
+- [x] Inspect/repair guidance可执行。
+- [x] Reset明确为 destructive last resort。
+- [x] Reset需要明确确认。
+- [x] 不会自动 reset。
 
 ### MA-07 — Error does not expose secrets
 
 观察错误页、detail、Diagnostics：
 
-- [ ] 不显示 raw API key。
-- [ ] 不显示完整 config JSON。
-- [ ] 不显示不必要的 secret-like raw value。
+- [x] 不显示 raw API key。
+- [x] 不显示完整 config JSON。
+- [x] 不显示不必要的 secret-like raw value。
 
 ## 7. Tools Status Hardening
 
@@ -206,10 +206,10 @@ migration失败时：
 
 确认 Tools UI：
 
-- [ ] 状态明确是 Disabled。
-- [ ] 不显示成 Denied。
-- [ ] 不显示成 Runtime unavailable。
-- [ ] remediation指向 Enable + Restart流程。
+- [x] 状态明确是 Disabled。
+- [x] 不显示成 Denied。
+- [x] 不显示成 Runtime unavailable。
+- [x] remediation指向 Enable + Restart流程。
 
 ### MA-09 — Policy DENY is distinct
 
@@ -217,9 +217,9 @@ migration失败时：
 
 确认：
 
-- [ ] 状态明确是 Denied by Policy/equivalent。
-- [ ] Tool仍可与 Disabled概念区分。
-- [ ] remediation指向 Policies而非 Tool toggle。
+- [x] 状态明确是 Denied by Policy/equivalent。
+- [x] Tool仍可与 Disabled概念区分。
+- [x] remediation指向 Policies而非 Tool toggle。
 
 ### MA-10 — ASK is distinct
 
@@ -227,9 +227,9 @@ migration失败时：
 
 确认：
 
-- [ ] 状态明确说明 Requires Approval/Ask。
-- [ ] 不显示成 unavailable/error。
-- [ ] remediation指向 Approval Center或解释运行时会请求审批。
+- [x] 状态明确说明 Requires Approval/Ask。
+- [x] 不显示成 unavailable/error。
+- [x] remediation指向 Approval Center或解释运行时会请求审批。
 
 ### MA-11 — Runtime/Bash Unavailable is distinct
 
@@ -237,9 +237,9 @@ migration失败时：
 
 确认：
 
-- [ ] Unavailable与 Disabled/Denied/Ask视觉语义不同。
-- [ ] reason清楚。
-- [ ] remediation指向 Bash配置/Restart/Diagnostics等正确位置。
+- [x] Unavailable与 Disabled/Denied/Ask视觉语义不同。
+- [x] reason清楚。
+- [x] remediation指向 Bash配置/Restart/Diagnostics等正确位置。
 
 ## 8. Desired vs Effective Truthfulness
 
@@ -249,10 +249,10 @@ Harness运行中修改例如 Tool enabled或Policy。
 
 确认：
 
-- [ ] Desired State立即显示新值。
-- [ ] Effective State仍显示当前 Runtime旧值。
-- [ ] Restart Required出现。
-- [ ] UI没有把 desired冒充为 effective。
+- [x] Desired State立即显示新值。
+- [x] Effective State仍显示当前 Runtime旧值。
+- [x] Restart Required出现。
+- [x] UI没有把 desired冒充为 effective。
 
 ### MA-13 — Restart convergence
 
@@ -260,17 +260,17 @@ Harness运行中修改例如 Tool enabled或Policy。
 
 确认：
 
-- [ ] Restart Required消失。
-- [ ] Effective与 Desired收敛。
-- [ ] 状态/remediation同步更新。
+- [x] Restart Required消失。
+- [x] Effective与 Desired收敛。
+- [x] 状态/remediation同步更新。
 
 ### MA-14 — Language-only change remains immediate
 
 切换 English / 简体中文：
 
-- [ ] 即时切换。
-- [ ] 不产生新的 Restart Required。
-- [ ] Runtime无需重启。
+- [x] 即时切换。
+- [x] 不产生新的 Restart Required。
+- [x] Runtime无需重启。
 
 ## 9. Activity Evidence UX
 
@@ -282,13 +282,13 @@ Harness运行中修改例如 Tool enabled或Policy。
 
 Activity中确认能回答：
 
-- [ ] 哪个 Tool。
-- [ ] 哪个 sanitized target/path。
-- [ ] Policy decision。
-- [ ] matched rule（适用时）。
-- [ ] 是否执行成功。
-- [ ] duration。
-- [ ] safe result scalar。
+- [x] 哪个 Tool。
+- [x] 哪个 sanitized target/path。
+- [x] Policy decision。
+- [x] matched rule（适用时）。
+- [x] 是否执行成功。
+- [x] duration。
+- [x] safe result scalar。
 
 ### MA-16 — Content is not leaked
 
@@ -296,10 +296,10 @@ Activity中确认能回答：
 
 Activity UI：
 
-- [ ] 不显示 write content。
-- [ ] 不显示 edit oldText/newText。
-- [ ] 不显示完整 file content。
-- [ ] 仍有足够 path/result evidence理解发生了什么。
+- [x] 不显示 write content。
+- [x] 不显示 edit oldText/newText。
+- [x] 不显示完整 file content。
+- [x] 仍有足够 path/result evidence理解发生了什么。
 
 ### MA-17 — DENY is explainable
 
@@ -307,11 +307,11 @@ Activity UI：
 
 确认 Activity：
 
-- [ ] request/tool可识别。
-- [ ] decision=DENY。
-- [ ] matched rule IDs/readable policy evidence可用。
-- [ ] no execution success。
-- [ ] terminal outcome明确。
+- [x] request/tool可识别。
+- [x] decision=DENY。
+- [x] matched rule IDs/readable policy evidence可用。
+- [x] no execution success。
+- [x] terminal outcome明确。
 
 ### MA-18 — Approval chain is explainable
 
@@ -335,10 +335,10 @@ Request
 
 确认：
 
-- [ ] failure category明确。
-- [ ] 不只是 generic Error。
-- [ ] duration可见/可诊断。
-- [ ] remediation如果适用则正确。
+- [x] failure category明确。
+- [x] 不只是 generic Error。
+- [x] duration可见/可诊断。
+- [x] remediation如果适用则正确。
 
 ## 10. Runtime Counters / Diagnostics UX
 
@@ -348,16 +348,16 @@ Request
 
 确认 Diagnostics/Overview（实际产品暴露位置）：
 
-- [ ] pending approvals反映 1/equivalent。
-- [ ] resolve后回到 0。
+- [x] pending approvals反映 1/equivalent。
+- [x] resolve后回到 0。
 
 ### MA-21 — Active/running counters do not lie
 
 review自动化 E2E evidence为主；若 UI可自然观察长运行 Bash：
 
-- [ ] active request在运行时非 0。
-- [ ] running execution在 executor阶段非 0。
-- [ ] 完成后归零。
+- [x] active request在运行时非 0。
+- [x] running execution在 executor阶段非 0。
+- [x] 完成后归零。
 
 若人工 UI窗口太短，不要求为了观察而制造危险命令；自动化 evidence可作为 acceptance依据。
 
@@ -380,19 +380,19 @@ Migration Error → Config recovery
 
 确认：
 
-- [ ] 不出现无关 action。
-- [ ] 不建议用 Approval绕过 DENY。
-- [ ] 不建议用 Tool enable解决 Policy DENY。
-- [ ] 不建议重启解决必须先修配置的问题而不说明修复步骤。
+- [x] 不出现无关 action。
+- [x] 不建议用 Approval绕过 DENY。
+- [x] 不建议用 Tool enable解决 Policy DENY。
+- [x] 不建议重启解决必须先修配置的问题而不说明修复步骤。
 
 ### MA-23 — No false authority claims
 
 检查状态/帮助文案：
 
-- [ ] UI不声称自己是 Policy authority。
-- [ ] Runtime effective state明确来自 Runtime。
-- [ ] Bash仍不声称 OS sandbox。
-- [ ] Activity被描述为 bounded/runtime evidence，不冒充 durable compliance audit database。
+- [x] UI不声称自己是 Policy authority。
+- [x] Runtime effective state明确来自 Runtime。
+- [x] Bash仍不声称 OS sandbox。
+- [x] Activity被描述为 bounded/runtime evidence，不冒充 durable compliance audit database。
 
 ## 12. English / 简体中文 Hardening
 
@@ -406,34 +406,34 @@ English和简体中文分别检查：
 
 要求：
 
-- [ ] 语义一致。
-- [ ] 中文不弱化“原文件未覆盖”“Reset destructive”等安全含义。
+- [x] 语义一致。
+- [x] 中文不弱化“原文件未覆盖”“Reset destructive”等安全含义。
 
 ### MA-25 — Tool status/remediation bilingual
 
 两种语言检查 Disabled / Denied / Ask / Unavailable / Restart Required。
 
-- [ ] 不混淆状态含义。
-- [ ] action labels完整。
-- [ ] technical identifiers保持原文。
+- [x] 不混淆状态含义。
+- [x] action labels完整。
+- [x] technical identifiers保持原文。
 
 ### MA-26 — Activity evidence bilingual presentation
 
-- [ ] labels/解释可翻译。
-- [ ] tool name / rule ID / request ID / machine code等保持原值。
-- [ ] user-authored Policy name/reason不被自动翻译。
+- [x] labels/解释可翻译。
+- [x] tool name / rule ID / request ID / machine code等保持原值。
+- [x] user-authored Policy name/reason不被自动翻译。
 
 ## 13. Regression Smoke
 
 人工只执行高价值 smoke，不重复自动化全矩阵：
 
-- [ ] read_file正常。
-- [ ] write/edit正常。
-- [ ] Tool OFF状态正确。
-- [ ] Policy DENY状态正确。
-- [ ] ASK Approval仍 same-request resume。
-- [ ] Bash页面仍明确 Developer/Test + no-sandbox boundary。
-- [ ] language切换仍正常。
+- [x] read_file正常。
+- [x] write/edit正常。
+- [x] Tool OFF状态正确。
+- [x] Policy DENY状态正确。
+- [x] ASK Approval仍 same-request resume。
+- [x] Bash页面仍明确 Developer/Test + no-sandbox boundary。
+- [x] language切换仍正常。
 
 ## 14. M8 Boundary Review
 
@@ -441,9 +441,9 @@ M7 Manual Acceptance **不等于 V3最终验收**。
 
 确认：
 
-- [ ] 未将 M7 标记为 `V3 ACCEPTED / FROZEN`。
-- [ ] 未用本地 MCP/Runtime测试代替 External ChatGPT。
-- [ ] M8 Full External Acceptance仍待执行。
+- [x] 未将 M7 标记为 `V3 ACCEPTED / FROZEN`。
+- [x] 未用本地 MCP/Runtime测试代替 External ChatGPT。
+- [x] M8 Full External Acceptance仍待执行。
 
 M7完成后只允许：
 
@@ -474,24 +474,24 @@ M7 — ACCEPTED / FROZEN
 
 全部满足后：
 
-- [ ] Development PASS
-- [ ] Unit PASS
-- [ ] Integration PASS
-- [ ] Local Black-box E2E PASS
-- [ ] Manual Acceptance PASS
-- [ ] M7 — ACCEPTED / FROZEN
+- [x] Development PASS
+- [x] Unit PASS
+- [x] Integration PASS
+- [x] Local Black-box E2E PASS
+- [x] Manual Acceptance PASS
+- [x] M7 — ACCEPTED / FROZEN
 
 最终记录：
 
 ```text
-M7 Decision:
-Reviewer:
-Date:
-Production commit:
-Evidence commit:
-Acceptance build:
-Runtime SHA-256:
-Notes:
+M7 Decision: M7 — ACCEPTED / FROZEN
+Reviewer: Human Reviewer（用户确认全部 Manual Acceptance 项 PASS）
+Date: 2026-10-04 (Asia/Shanghai)
+Production commit: 63c63c833528fb0560652e9d032f08563a64f453
+Evidence commit: eb9cc67853321e21bfe68ffe6fdac34437a86bf3
+Acceptance build: artifacts/M7-Migration-Evidence-Hardening/ChatGPT-Harness_0.1.1_x64-portable/
+Runtime SHA-256: 90CD62C0081366386A933EA919CDC490132FB76FD90C72DD033AA103EE0DB0CB
+Notes: Development、Unit、Integration、Local Black-box E2E 与 Manual Acceptance 全部 PASS；无未关闭 FAIL / BLOCKED。M8 Full External Acceptance 与 V3 最终状态仍待后续执行。本次收口未修改 M7 已验收产品行为。
 ```
 
 M7冻结后，下一步是 **M8 Full V3 External Acceptance**。M8才执行完整 External ChatGPT golden paths，并决定是否可以最终标记：
