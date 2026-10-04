@@ -38,3 +38,21 @@ pub type ToolsListParams = EmptyParams;
 pub struct ToolsListResult {
     pub items: Vec<ToolDescriptor>,
 }
+
+/// Machine meaning for blocked/available tools; UI never parses prose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolStatusReason {
+    Available,
+    ApprovalRequired,
+    ToolDisabled,
+    DeveloperModeRequired,
+    RuntimeNotReady,
+    CapabilityUnavailable,
+    BashExecutableUnavailable,
+    PolicyDenied,
+    InvalidPolicySnapshot,
+    InvalidPolicyContext,
+    UnsupportedCapability,
+    MetadataInvalid,
+}

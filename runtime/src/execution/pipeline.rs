@@ -117,6 +117,7 @@ pub(crate) struct ExecutionReport<T> {
 
 /// One immutable initialized Runtime snapshot shared by every execution entry.
 pub(crate) struct ExecutionPipeline {
+    counters: Arc<super::RequestCounters>,
     guard: Arc<WorkspaceGuard>,
     registry: Arc<ToolRegistry>,
     policy: PolicyEngine,
@@ -142,6 +143,7 @@ impl ExecutionPipeline {
         readiness: Arc<AtomicBool>,
     ) -> Self {
         Self {
+            counters: Arc::new(super::RequestCounters::default()),
             guard,
             registry,
             policy,
@@ -156,6 +158,15 @@ impl ExecutionPipeline {
             bash_runtime: None,
             bash_cancellation_observer: Arc::new(NoopBashCancellationObserver),
         }
+    }
+
+    pub(crate) fn with_counters(mut self, counters: Arc<super::RequestCounters>) -> Self {
+        self.counters = counters;
+        self
+    }
+    #[cfg(test)]
+    pub(crate) fn request_counts(&self) -> (u32, u32) {
+        self.counters.snapshot()
     }
 
     pub(crate) fn with_bash_runtime(mut self, bash_runtime: Arc<BashRuntime>) -> Self {
@@ -219,7 +230,21 @@ impl ExecutionPipeline {
         &self,
         prepare: impl FnOnce() -> Result<E, ExecutionError>,
     ) -> ExecutionReport<E::Output> {
+        let _active = self.counters.active_guard();
         let mut context = RequestContext::new(E::TOOL_NAME, self.security.clone());
+        context.tool_enabled = !self.registry.is_disabled(E::TOOL_NAME);
+        context.capability = self
+            .registry
+            .declared_capability(E::TOOL_NAME)
+            .map(|capability| {
+                use crate::tools::ToolCapability as R;
+                use harness_control_protocol::control_read::ToolCapability as W;
+                match capability {
+                    R::WorkspaceRead => W::WorkspaceRead,
+                    R::WorkspaceWrite => W::WorkspaceWrite,
+                    R::DeveloperShell => W::DeveloperShell,
+                }
+            });
         let mut audit_events = Vec::new();
         self.emit(&context, PipelineEvent::RequestReceived, &mut audit_events);
         let mut result = self.run(&mut context, prepare, &mut audit_events);
@@ -231,6 +256,14 @@ impl ExecutionPipeline {
         {
             if let Err(error) = self.transition(&mut context, RequestState::Failed) {
                 result = Err(error);
+            }
+        }
+        if let Err(error) = &result {
+            if context.state() == RequestState::Failed
+                && !audit_events.last().is_some_and(|e| e.duration_ms.is_some())
+            {
+                context.mark_failure_category(audit_failure_category(error));
+                self.emit(&context, PipelineEvent::ExecutionFailed, &mut audit_events);
             }
         }
         // Finished means this invocation returned, NOT approval/completion.
@@ -263,7 +296,21 @@ impl ExecutionPipeline {
     where
         E::Output: Send,
     {
+        let _active = self.counters.active_guard();
         let mut context = RequestContext::new(E::TOOL_NAME, self.security.clone());
+        context.tool_enabled = !self.registry.is_disabled(E::TOOL_NAME);
+        context.capability = self
+            .registry
+            .declared_capability(E::TOOL_NAME)
+            .map(|capability| {
+                use crate::tools::ToolCapability as R;
+                use harness_control_protocol::control_read::ToolCapability as W;
+                match capability {
+                    R::WorkspaceRead => W::WorkspaceRead,
+                    R::WorkspaceWrite => W::WorkspaceWrite,
+                    R::DeveloperShell => W::DeveloperShell,
+                }
+            });
         let mut audit_events = Vec::new();
         let cancellation_guard = RequestCancellationGuard::new(
             request_cancel.clone(),
@@ -288,6 +335,14 @@ impl ExecutionPipeline {
         {
             if let Err(error) = self.transition(&mut context, RequestState::Failed) {
                 result = Err(error);
+            }
+        }
+        if let Err(error) = &result {
+            if context.state() == RequestState::Failed
+                && !audit_events.last().is_some_and(|e| e.duration_ms.is_some())
+            {
+                context.mark_failure_category(audit_failure_category(error));
+                self.emit(&context, PipelineEvent::ExecutionFailed, &mut audit_events);
             }
         }
         self.emit(&context, PipelineEvent::RequestFinished, &mut audit_events);
@@ -363,6 +418,7 @@ impl ExecutionPipeline {
                 }
             }
         }
+        context.sanitized_arguments = executor.arguments_evidence(&self.guard);
         self.transition(context, RequestState::PolicyEvaluating)?;
         let policy_context = executor.policy_context(&self.security);
         let evaluation = self.policy.evaluate(&policy_context, &self.registry);
@@ -383,10 +439,12 @@ impl ExecutionPipeline {
             PolicyDecision::Allow => {
                 self.require_ready()?;
                 self.transition(context, RequestState::Executing)?;
+                let _running = self.counters.running_guard();
                 self.emit(context, PipelineEvent::ExecutionStarted, audit_events);
                 let permit = ExecutionPermit { _private: () };
                 match executor.execute(&permit, &self.guard, self.max_read_bytes) {
                     Ok(output) => {
+                        executor.record_output(context, &output);
                         self.transition(context, RequestState::Completed)?;
                         self.emit(context, PipelineEvent::ExecutionCompleted, audit_events);
                         Ok(output)
@@ -529,6 +587,7 @@ impl ExecutionPipeline {
         if let Some(snapshot) = context.bash_evidence_snapshot() {
             cancellation_state.set_snapshot(snapshot);
         }
+        context.sanitized_arguments = executor.arguments_evidence(&self.guard);
         self.transition(context, RequestState::PolicyEvaluating)?;
         let policy_context = executor.policy_context(&self.security);
         let evaluation = self.policy.evaluate(&policy_context, &self.registry);
@@ -645,6 +704,7 @@ impl ExecutionPipeline {
                         let decision = resolution
                             .decision
                             .ok_or(ExecutionError::ApprovalCancelled)?;
+                        context.approval_decision = Some(decision);
                         self.emit(
                             context,
                             PipelineEvent::ApprovalResolved { decision },
@@ -667,6 +727,8 @@ impl ExecutionPipeline {
                             .await
                     }
                     harness_control_protocol::ApprovalStatus::Denied => {
+                        context.approval_decision =
+                            Some(harness_control_protocol::ApprovalDecision::Deny);
                         self.emit(
                             context,
                             PipelineEvent::ApprovalResolved {
@@ -798,10 +860,12 @@ impl ExecutionPipeline {
             return Err(error);
         }
         self.transition(context, RequestState::Executing)?;
+        let _running = self.counters.running_guard();
         self.emit(context, PipelineEvent::ExecutionStarted, audit_events);
         let permit = ExecutionPermit { _private: () };
         match executor.execute(&permit, &self.guard, self.max_read_bytes) {
             Ok(output) => {
+                executor.record_output(context, &output);
                 self.transition(context, RequestState::Completed)?;
                 self.emit(context, PipelineEvent::ExecutionCompleted, audit_events);
                 Ok(output)
@@ -833,6 +897,7 @@ impl ExecutionPipeline {
             return Err(error);
         }
         self.transition(context, RequestState::Executing)?;
+        let _running = self.counters.running_guard();
         self.emit(context, PipelineEvent::ExecutionStarted, audit_events);
         let permit = ExecutionPermit { _private: () };
         let started = std::time::Instant::now();
@@ -931,7 +996,7 @@ struct RequestCancellationGuard {
 struct BashCancellationState {
     snapshot: std::sync::Mutex<Option<BashEvidenceSnapshot>>,
     kind: std::sync::Mutex<BashCancellationKind>,
-    started_at: std::time::Instant,
+    execution_started_at: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 impl BashCancellationState {
@@ -939,7 +1004,7 @@ impl BashCancellationState {
         Arc::new(Self {
             snapshot: std::sync::Mutex::new(None),
             kind: std::sync::Mutex::new(BashCancellationKind::ExecutionWait),
-            started_at: std::time::Instant::now(),
+            execution_started_at: std::sync::Mutex::new(None),
         })
     }
 
@@ -952,6 +1017,12 @@ impl BashCancellationState {
 
     fn set_kind(&self, kind: BashCancellationKind) {
         *self.kind.lock().unwrap_or_else(|error| error.into_inner()) = kind;
+        if kind == BashCancellationKind::ExecutionWait {
+            self.execution_started_at
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get_or_insert_with(std::time::Instant::now);
+        }
     }
 }
 
@@ -990,13 +1061,18 @@ impl Drop for RequestCancellationGuard {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
             if let Some(mut snapshot) = snapshot {
-                snapshot.duration_ms = Some(
+                snapshot.duration_ms = if snapshot.tool_name == "bash"
+                    && kind == BashCancellationKind::ExecutionWait
+                {
                     self.state
-                        .started_at
-                        .elapsed()
-                        .as_millis()
-                        .min(u64::MAX as u128) as u64,
-                );
+                        .execution_started_at
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .as_ref()
+                        .map(|start| start.elapsed().as_millis().min(u64::MAX as u128) as u64)
+                } else {
+                    None
+                };
                 self.observer.on_bash_cancelled(snapshot, kind);
             }
         }

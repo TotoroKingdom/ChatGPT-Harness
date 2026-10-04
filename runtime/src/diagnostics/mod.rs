@@ -24,6 +24,7 @@ pub(crate) struct RuntimeDiagnosticsSnapshot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeDiagnostics {
+    pub config_revision: Option<harness_control_protocol::DecimalU64>,
     pub runtime_id: Option<uuid::Uuid>,
     pub started_at: Option<String>,
     pub lifecycle: RuntimeLifecycle,
@@ -80,6 +81,7 @@ pub(crate) struct ToolDiagnostics {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ToolDiagnostic {
+    pub status_reason: harness_control_protocol::ToolStatusReason,
     /// Source-controlled registry identifier, never a request-supplied name.
     pub name: String,
     pub declared_capability: Option<ToolCapability>,
@@ -108,6 +110,7 @@ impl From<EffectiveTool> for ToolDiagnostic {
     fn from(tool: EffectiveTool) -> Self {
         let reason = (tool.name == "bash").then(|| tool.reason.clone());
         Self {
+            status_reason: tool.status_reason,
             name: tool.name,
             declared_capability: tool.declared_capability,
             availability: match tool.availability {
@@ -139,12 +142,15 @@ impl From<EffectiveTool> for ToolDiagnostic {
 pub(crate) struct RequestDiagnostics {
     pub observation: RequestObservation,
     pub active_count: Option<u32>,
+    pub active_requests: u32,
+    pub pending_approvals: u32,
+    pub running_executions: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RequestObservation {
-    NotInstrumented,
+    Instrumented,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -240,6 +246,7 @@ impl RuntimeDiagnosticsSnapshot {
             schema_version: 1,
             captured_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             runtime: RuntimeDiagnostics {
+                config_revision: core.config.as_ref().map(|c| c.config_revision),
                 // Canonicalization prevents public String fields becoming an export escape hatch.
                 runtime_id: uuid::Uuid::parse_str(&core.runtime_id).ok(),
                 started_at: chrono::DateTime::parse_from_rfc3339(&core.started_at)
@@ -283,8 +290,11 @@ impl RuntimeDiagnosticsSnapshot {
                 items,
             },
             requests: RequestDiagnostics {
-                observation: RequestObservation::NotInstrumented,
-                active_count: None,
+                observation: RequestObservation::Instrumented,
+                active_count: Some(core.request_counts().0),
+                active_requests: core.request_counts().0,
+                pending_approvals: core.approval_manager().pending_count() as u32,
+                running_executions: core.request_counts().1,
             },
             last_error: LastErrorDiagnostics {
                 observation: if core.last_error.is_some() {

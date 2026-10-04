@@ -19,6 +19,11 @@ pub(crate) struct SecurityContext {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BashEvidenceSnapshot {
     pub(crate) request_id: Uuid,
+    pub(crate) tool_name: &'static str,
+    pub(crate) tool_enabled: bool,
+    pub(crate) capability: Option<harness_control_protocol::control_read::ToolCapability>,
+    pub(crate) sanitized_arguments: Option<harness_control_protocol::SanitizedArgumentsEvidence>,
+    pub(crate) started_at: std::time::Instant,
     pub(crate) mode: SecurityMode,
     pub(crate) details: Option<BashApprovalDetails>,
     pub(crate) policy_evaluation: Option<PolicyEvaluation>,
@@ -28,7 +33,8 @@ pub(crate) struct BashEvidenceSnapshot {
     pub(crate) duration_ms: Option<u64>,
 }
 
-/// Bounded request metadata. No payload, paths, credentials, or tool output.
+/// Bounded request metadata and safe logical paths. No raw payload, physical
+/// paths, credentials, environment or tool output bodies.
 #[derive(Debug)]
 #[allow(dead_code)] // request_id/context are intentionally observable only through hooks/reports
 pub(crate) struct RequestContext {
@@ -38,7 +44,7 @@ pub(crate) struct RequestContext {
     pub(crate) policy: PolicyContext<'static>,
     pub(crate) policy_evaluation: Option<PolicyEvaluation>,
     pub(crate) failure_category: Option<AuditFailureCategory>,
-    /// Sanitized Bash-only evidence populated by the Pipeline.  These fields
+    /// Sanitized Bash display facts populated by the Pipeline. These fields
     /// never contain the raw command, exact normalized grant scope, env, or
     /// process output.
     pub(crate) bash_details: Option<BashApprovalDetails>,
@@ -46,6 +52,12 @@ pub(crate) struct RequestContext {
     pub(crate) bash_duration_ms: Option<u64>,
     pub(crate) approval_request_id: Option<String>,
     pub(crate) session_grant_hit: bool,
+    pub(crate) tool_enabled: bool,
+    pub(crate) capability: Option<harness_control_protocol::control_read::ToolCapability>,
+    pub(crate) sanitized_arguments: Option<harness_control_protocol::SanitizedArgumentsEvidence>,
+    pub(crate) result_evidence: Option<harness_control_protocol::ExecutionResultEvidence>,
+    pub(crate) approval_decision: Option<harness_control_protocol::ApprovalDecision>,
+    pub(crate) started_at: std::time::Instant,
     lifecycle: RequestLifecycle,
 }
 
@@ -63,6 +75,12 @@ impl RequestContext {
             bash_duration_ms: None,
             approval_request_id: None,
             session_grant_hit: false,
+            tool_enabled: true,
+            capability: None,
+            sanitized_arguments: None,
+            result_evidence: None,
+            approval_decision: None,
+            started_at: std::time::Instant::now(),
             lifecycle: RequestLifecycle::new(),
         }
     }
@@ -112,8 +130,13 @@ impl RequestContext {
     }
 
     pub(crate) fn bash_evidence_snapshot(&self) -> Option<BashEvidenceSnapshot> {
-        (self.tool_name == "bash").then(|| BashEvidenceSnapshot {
+        Some(BashEvidenceSnapshot {
             request_id: self.request_id,
+            tool_name: self.tool_name,
+            tool_enabled: self.tool_enabled,
+            capability: self.capability,
+            sanitized_arguments: self.sanitized_arguments.clone(),
+            started_at: self.started_at,
             mode: self.security.mode.clone(),
             details: self.bash_details.clone(),
             policy_evaluation: self.policy_evaluation.clone(),

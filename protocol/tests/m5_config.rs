@@ -7,6 +7,9 @@ fn legacy_fixture(name: &str) -> Value {
         .join(name);
     let mut value: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     value.as_object_mut().unwrap().remove("bash");
+    if value.get("schemaVersion").is_some() {
+        value["schemaVersion"] = json!(1);
+    }
     value
 }
 

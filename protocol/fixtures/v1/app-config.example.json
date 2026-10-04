@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "configRevision": "7",
   "workspace": { "rootPath": "<workspace>" },
   "tunnel": { "tunnelId": "example-tunnel-id", "autoDetect": true, "apiKeyRef": { "provider": "os_secret_store", "key": "chatgpt-harness-api-key" } },

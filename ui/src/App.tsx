@@ -15,7 +15,7 @@ function RoutedContent() {
   const { page, navigate, policyDraft } = useAppRouter();
   const [setupComplete, setSetupComplete] = useState(false);
   const [setupActive, setSetupActive] = useState(false);
-  const configBlocked = data.configError?.code === "CONFIG_INVALID";
+  const configBlocked = ["CONFIG_INVALID", "CONFIG_SCHEMA_UNSUPPORTED", "CONFIG_MIGRATION_FAILED"].includes(data.configError?.code ?? "");
 
   useEffect(() => {
     if (!setupComplete && (data.setupRequired || configBlocked)) setSetupActive(true);

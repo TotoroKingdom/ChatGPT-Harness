@@ -40,6 +40,7 @@ describe("M6 real Provider/client boundary Integration", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Configuration needs attention");
     const resetButton = screen.getByRole("button", { name: "Reset configuration" });
     expect(resetButton).toBeEnabled();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(resetButton);
     await waitFor(() => expect(reset).toHaveBeenCalledOnce());
     expect(configGet).toHaveBeenCalled();

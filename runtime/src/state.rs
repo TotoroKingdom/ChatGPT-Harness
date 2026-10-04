@@ -44,23 +44,39 @@ struct RuntimeBashCancellationObserver {
 impl BashCancellationObserver for RuntimeBashCancellationObserver {
     fn on_bash_cancelled(&self, snapshot: BashEvidenceSnapshot, kind: BashCancellationKind) {
         let approval_wait = matches!(kind, BashCancellationKind::ApprovalWait);
-        let bash = snapshot.details.map(|details| {
-            harness_control_protocol::control_read::BashActivityEvidence {
-                mode: snapshot.mode.clone(),
-                mode_eligible: snapshot.mode
-                    == harness_control_protocol::SecurityMode::DeveloperTest,
-                capability: harness_control_protocol::control_read::ToolCapability::DeveloperShell,
-                cwd: details.cwd,
-                command_preview: Some(details.command_preview),
-                classification: Some(details.classification),
-                risk_flags: details.risk_flags,
-                approval_request_id: snapshot.approval_request_id.clone(),
-                session_grant_hit: snapshot.session_grant_hit,
-                exit_code: snapshot.exit_code,
-                duration_ms: snapshot.duration_ms,
-            }
-        });
+        let bash = snapshot
+            .details
+            .filter(|_| snapshot.tool_name == "bash")
+            .map(
+                |details| harness_control_protocol::control_read::BashActivityEvidence {
+                    mode: snapshot.mode.clone(),
+                    mode_eligible: snapshot.mode
+                        == harness_control_protocol::SecurityMode::DeveloperTest,
+                    capability:
+                        harness_control_protocol::control_read::ToolCapability::DeveloperShell,
+                    cwd: details.cwd,
+                    command_preview: Some(details.command_preview),
+                    classification: Some(details.classification),
+                    risk_flags: details.risk_flags,
+                    approval_request_id: snapshot.approval_request_id.clone(),
+                    session_grant_hit: snapshot.session_grant_hit,
+                    exit_code: snapshot.exit_code,
+                    duration_ms: snapshot.duration_ms,
+                },
+            );
         let event = AuditEvent {
+            tool_enabled: Some(snapshot.tool_enabled),
+            capability: snapshot.capability,
+            sanitized_arguments: snapshot.sanitized_arguments.clone(),
+            approval_id: snapshot.approval_request_id.clone(),
+            duration_ms: Some(
+                snapshot
+                    .started_at
+                    .elapsed()
+                    .as_millis()
+                    .min(u64::MAX as u128) as u64,
+            ),
+            result_evidence: None,
             event_id: uuid::Uuid::new_v4(),
             request_id: snapshot.request_id,
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -69,7 +85,7 @@ impl BashCancellationObserver for RuntimeBashCancellationObserver {
             } else {
                 AuditEventType::ExecutionFailed
             },
-            tool_name: "bash".into(),
+            tool_name: snapshot.tool_name.into(),
             lifecycle_state: AuditLifecycleState::Failed,
             workspace_id: "active".into(),
             workspace_validation: WorkspaceValidation::NotAttempted,
@@ -80,7 +96,14 @@ impl BashCancellationObserver for RuntimeBashCancellationObserver {
             matched_rule_ids: snapshot
                 .policy_evaluation
                 .as_ref()
-                .map(|evaluation| evaluation.matched_rule_ids.clone())
+                .map(|evaluation| {
+                    evaluation
+                        .matched_rule_ids
+                        .iter()
+                        .take(64)
+                        .map(|id| crate::audit::event::sanitize_rule_id(id))
+                        .collect()
+                })
                 .unwrap_or_default(),
             policy_reason: snapshot
                 .policy_evaluation
@@ -88,7 +111,13 @@ impl BashCancellationObserver for RuntimeBashCancellationObserver {
                 .map(|evaluation| crate::policy::to_wire_reason(evaluation.reason)),
             approval_decision: None,
             outcome: AuditOutcome::Failed,
-            failure_category: (!approval_wait).then_some(AuditFailureCategory::BashCancelled),
+            failure_category: Some(if approval_wait {
+                AuditFailureCategory::ApprovalCancelled
+            } else if snapshot.tool_name == "bash" {
+                AuditFailureCategory::BashCancelled
+            } else {
+                AuditFailureCategory::ExecutionFailed
+            }),
             bash,
         };
         self.audit_sink.on_audit_event(&event);
@@ -112,6 +141,7 @@ pub struct RuntimeCore {
     tool_registry: Arc<ToolRegistry>,
     policy_engine: PolicyEngine,
     execution_pipeline: Option<Arc<ExecutionPipeline>>,
+    request_counters: Arc<crate::execution::RequestCounters>,
     approval_manager: Arc<ApprovalManager>,
     session_grants: Arc<SessionGrantStore>,
     activity: Arc<ActivityStore>,
@@ -143,6 +173,7 @@ impl RuntimeCore {
             tool_registry,
             policy_engine,
             execution_pipeline: None,
+            request_counters: Arc::new(crate::execution::RequestCounters::default()),
             approval_manager: ApprovalManager::new(runtime_id.clone()),
             session_grants: Arc::new(SessionGrantStore::new(runtime_id)),
             last_error: None,
@@ -193,6 +224,7 @@ impl RuntimeCore {
         )
         .with_bash_runtime(Arc::clone(&bash_runtime))
         .with_bash_cancellation_observer(bash_cancellation_observer)
+        .with_counters(Arc::clone(&self.request_counters))
         .with_approval_state(Arc::clone(&approval_manager), Arc::clone(&session_grants))
         .with_audit_sink(audit_sink);
         let pipeline = pipeline.with_activity_event_sender(activity_event_sender);
@@ -453,6 +485,10 @@ impl RuntimeCore {
         )
     }
 
+    pub(crate) fn request_counts(&self) -> (u32, u32) {
+        self.request_counters.snapshot()
+    }
+
     pub fn status(&self) -> Option<RuntimeState> {
         let config = self.config.as_ref()?;
         let pending_approvals = self.approval_manager.pending_count() as u32;
@@ -464,7 +500,14 @@ impl RuntimeCore {
                 RuntimeLifecycle::Initializing,
                 RuntimeReadiness::Initializing,
             ),
-            Phase::Ready => (RuntimeLifecycle::Ready, RuntimeReadiness::Ready),
+            Phase::Ready => (
+                RuntimeLifecycle::Ready,
+                if self.mcp_readiness.load(Ordering::Acquire) {
+                    RuntimeReadiness::Ready
+                } else {
+                    RuntimeReadiness::NotReady
+                },
+            ),
             Phase::Stopping => (RuntimeLifecycle::Stopping, RuntimeReadiness::NotReady),
         };
         Some(RuntimeState {
@@ -476,9 +519,9 @@ impl RuntimeCore {
             active_workspace: config.workspace.root_path.clone(),
             security_mode: config.security.mode.clone(),
             exposed_tool_catalog: self.exposed_tool_catalog(),
-            active_requests: 0,
+            active_requests: self.request_counts().0,
             pending_approvals,
-            running_executions: 0,
+            running_executions: self.request_counts().1,
             last_error: self.last_error.clone(),
         })
     }

@@ -505,6 +505,6 @@ fn int_25(fixture: &Fixture) -> QaResult<()> {
     check!(!activity.contains(sentinel));
     let workspace_path = fixture.workspace.to_string_lossy();
     check!(!activity.contains(workspace_path.as_ref()));
-    check!(!activity.contains("int-25.txt"));
+    check!(activity.contains("int-25.txt")); // M7 explicitly permits validated logical path evidence.
     Ok(())
 }

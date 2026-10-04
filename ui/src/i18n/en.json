@@ -181,7 +181,10 @@
       "bashConcurrencyLimit": "Bash concurrency limit reached",
       "bashSpawnFailed": "Could not start Bash",
       "bashCancelled": "Bash command cancelled",
-      "bashProcessFailed": "Bash process failed"
+      "bashProcessFailed": "Bash process failed",
+      "approvalDenied": "Approval denied",
+      "approvalExpired": "Approval expired",
+      "approvalCancelled": "Approval cancelled"
     },
     "bashClassification": {
       "classified": "Classified",
@@ -674,7 +677,9 @@
       "controlPlaneUnavailable": "The Control Plane is unavailable.",
       "tunnelProcessExited": "The tunnel process exited unexpectedly.",
       "harnessLifecycleFailed": "Harness lifecycle operation failed.",
-      "configRevisionOverflow": "The configuration revision limit was exceeded."
+      "configRevisionOverflow": "The configuration revision limit was exceeded.",
+      "configSchemaUnsupported": "This configuration schema is unsupported. The original file is unchanged.",
+      "configMigrationFailed": "Configuration migration failed. Repair the original configuration and retry."
     }
   },
   "policy": {
@@ -722,6 +727,78 @@
       "ruleInvalid": "User policy rule is invalid.",
       "duplicateRuleId": "Duplicate user policy rule ID '{{id}}'.",
       "saveConfigurationFirst": "Save configuration before editing policy."
+    }
+  },
+  "m7": {
+    "revision": {
+      "title": "Configuration revisions",
+      "saved": "Saved revision",
+      "active": "Active revision",
+      "stopped": "No active Runtime"
+    },
+    "recovery": {
+      "unchanged": "The original configuration has not been overwritten.",
+      "repair": "Inspect and repair the original config, then retry. Reset local config only as a last resort.",
+      "path": "Config file path",
+      "retry": "Retry reload / migration",
+      "copy": "Copy config path"
+    },
+    "reasons": {
+      "available": "Available",
+      "approval_required": "Approval required",
+      "tool_disabled": "Tool disabled",
+      "developer_mode_required": "Developer/Test mode required",
+      "runtime_not_ready": "Runtime not ready",
+      "capability_unavailable": "Capability unavailable",
+      "bash_executable_unavailable": "Git Bash unavailable",
+      "policy_denied": "Denied by Policy",
+      "invalid_policy_snapshot": "Invalid Policy snapshot",
+      "invalid_policy_context": "Invalid Policy context",
+      "unsupported_capability": "Unsupported capability",
+      "metadata_invalid": "Invalid tool metadata"
+    },
+    "remediation": {
+      "available": "Invoke the tool. Inspect Activity if execution fails.",
+      "approval_required": "Invoke the tool and resolve the request in Approval Center.",
+      "tool_disabled": "Enable the tool, save, and restart Harness.",
+      "developer_mode_required": "Switch to Developer/Test mode, save, and restart Harness.",
+      "bash_executable_unavailable": "Configure or auto-detect a valid Git Bash executable, then restart Harness.",
+      "policy_denied": "Review the matched User Policy rules, save changes, and restart Harness.",
+      "invalid_policy_snapshot": "Repair invalid Policy configuration and restart. Execution remains denied until valid.",
+      "invalid_policy_context": "Restart Runtime and inspect Diagnostics if the problem persists.",
+      "runtime_not_ready": "Start or restart Harness; inspect Diagnostics if readiness does not recover.",
+      "capability_unavailable": "Restart Harness and inspect Diagnostics for the unavailable capability.",
+      "unsupported_capability": "Use a supported tool and inspect Diagnostics.",
+      "metadata_invalid": "Restart Harness and inspect Diagnostics for invalid tool metadata.",
+      "execution_failure": "Inspect the failure category and evidence in Activity before retrying."
+    },
+    "evidence": {
+      "detail": "Diagnostic detail",
+      "request": "Request ID",
+      "event": "Event ID",
+      "arguments": "Sanitized arguments",
+      "enabled": "Tool enabled",
+      "capability": "Capability",
+      "policyReason": "Policy reason",
+      "matched": "Matched rule IDs",
+      "approval": "Approval ID",
+      "approvalDecision": "Approval decision",
+      "result": "Result evidence",
+      "duration": "Request duration (ms)",
+      "bash": "Bash evidence",
+      "failure": "Failure category",
+      "notApplicable": "Not applicable",
+      "yes": "Yes",
+      "no": "No"
+    },
+    "diagnostics": {
+      "active": "Active requests",
+      "pending": "Pending approvals",
+      "running": "Running executions",
+      "lastError": "Last safe error code"
+    },
+    "states": {
+      "denied": "Denied"
     }
   }
 }

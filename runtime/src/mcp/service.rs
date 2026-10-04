@@ -440,6 +440,12 @@ mod tests {
             .find(|entry| entry.event_type == crate::audit::AuditEventType::ApprovalCancelled)
             .expect("approval cancellation evidence");
         assert_eq!(cancelled.tool_name.as_deref(), Some(BASH));
+        assert!(cancelled.duration_ms.is_some());
+        assert!(cancelled.bash.as_ref().unwrap().duration_ms.is_none());
+        assert_eq!(
+            cancelled.failure_category,
+            Some(crate::audit::AuditFailureCategory::ApprovalCancelled)
+        );
         assert_eq!(
             cancelled.bash.as_ref().unwrap().cwd,
             harness_control_protocol::BashWorkingDirectory::ActiveWorkspace
@@ -477,9 +483,11 @@ mod tests {
             }
         });
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(core.request_counts(), (1, 1));
         cancellation.cancel();
         let result = call.await.expect("cancelled Bash call task");
         assert_eq!(error_code(&result), "BASH_CANCELLED");
+        assert_eq!(core.request_counts(), (0, 0));
     }
 
     #[cfg(windows)]
@@ -507,6 +515,7 @@ mod tests {
         core.stop();
         let result = call.await.expect("runtime-stopped Bash call task");
         assert_eq!(error_code(&result), "BASH_CANCELLED");
+        assert_eq!(core.request_counts(), (0, 0));
     }
 
     #[cfg(windows)]
@@ -603,6 +612,15 @@ mod tests {
             .approval_manager()
             .list(Some(harness_control_protocol::ApprovalStatus::Pending));
         assert_eq!(pending.len(), 1);
+        let status = core.status().unwrap();
+        assert_eq!(
+            (
+                status.active_requests,
+                status.pending_approvals,
+                status.running_executions
+            ),
+            (1, 1, 0)
+        );
         assert_eq!(pending[0].tool, WRITE);
         assert_eq!(pending[0].scope_summary, "approved.txt");
         assert_eq!(
@@ -622,6 +640,33 @@ mod tests {
             fs::read_to_string(workspace.root.join("approved.txt")).unwrap(),
             "approved"
         );
+        let entries = core.activity_snapshot(256);
+        let lifecycle: Vec<_> = entries
+            .iter()
+            .filter(|e| e.request_id.to_string() == pending[0].request_id)
+            .collect();
+        for entry in lifecycle.iter().filter(|e| {
+            matches!(
+                e.event_type,
+                crate::audit::AuditEventType::ApprovalRequired
+                    | crate::audit::AuditEventType::ApprovalResolved
+                    | crate::audit::AuditEventType::ExecutionCompleted
+            )
+        }) {
+            assert_eq!(
+                entry.approval_id.as_deref(),
+                Some(pending[0].request_id.as_str())
+            );
+        }
+        let terminal = lifecycle.last().unwrap();
+        assert!(terminal.duration_ms.is_some());
+        assert_eq!(
+            terminal.approval_decision,
+            Some(harness_control_protocol::ApprovalDecision::AllowOnce)
+        );
+        assert!(terminal.result_evidence.is_some());
+
+        assert_eq!(core.request_counts(), (0, 0));
     }
 
     #[tokio::test]
@@ -655,6 +700,7 @@ mod tests {
         let result = pending_call.await.expect("same invocation task");
         assert_eq!(error_code(&result), "APPROVAL_DENIED");
         assert!(!workspace.root.join("denied.txt").exists());
+        assert_eq!(core.request_counts(), (0, 0));
     }
 
     #[tokio::test]
@@ -720,6 +766,7 @@ mod tests {
         let result = call.await.expect("call task");
         assert_eq!(error_code(&result), "APPROVAL_CANCELLED");
         assert!(!workspace.root.join("stopped.txt").exists());
+        assert_eq!(core.request_counts(), (0, 0));
     }
 
     #[tokio::test]
@@ -759,6 +806,15 @@ mod tests {
             1
         );
         assert!(!workspace.root.join("disconnected.txt").exists());
+        let terminal = core.activity_snapshot(1).pop().unwrap();
+        assert_eq!(
+            terminal.event_type,
+            crate::audit::AuditEventType::ApprovalCancelled
+        );
+        assert_eq!(terminal.approval_id, Some(terminal.request_id.to_string()));
+        assert!(terminal.duration_ms.is_some());
+
+        assert_eq!(core.request_counts(), (0, 0));
     }
 
     #[tokio::test]
@@ -903,6 +959,28 @@ mod tests {
             "APPROVAL_DENIED"
         );
         assert!(!workspace.root.join("other.txt").exists());
+        assert_eq!(core.request_counts(), (0, 0));
+        let entries = core.activity_snapshot(256);
+        let grant = entries
+            .iter()
+            .find(|e| e.event_type == crate::audit::AuditEventType::SessionGrantMatched)
+            .unwrap();
+        assert_ne!(grant.request_id.to_string(), request_id);
+        assert_eq!(
+            grant.decision_summary,
+            Some(harness_control_protocol::PolicyDecision::Ask)
+        );
+        assert!(grant.duration_ms.is_none());
+        assert!(grant.result_evidence.is_none());
+        let terminal = entries
+            .iter()
+            .find(|e| {
+                e.request_id == grant.request_id
+                    && e.event_type == crate::audit::AuditEventType::ExecutionCompleted
+            })
+            .unwrap();
+        assert!(terminal.duration_ms.is_some());
+        assert!(terminal.result_evidence.is_some());
     }
 
     #[tokio::test]

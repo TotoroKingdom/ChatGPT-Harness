@@ -10,6 +10,12 @@ use std::{fs, path::PathBuf, thread};
 
 fn event(id: u128) -> AuditEvent {
     AuditEvent {
+        tool_enabled: None,
+        capability: None,
+        sanitized_arguments: None,
+        approval_id: None,
+        duration_ms: None,
+        result_evidence: None,
         event_id: Uuid::from_u128(id),
         request_id: Uuid::from_u128(900),
         timestamp: "2026-09-08T01:02:03.004Z".into(),
@@ -122,6 +128,7 @@ fn redaction_drops_all_free_text_and_has_a_closed_serialized_shape() {
         assert_eq!(
             keys,
             [
+                "capability",
                 "category",
                 "decisionSummary",
                 "eventId",
@@ -131,6 +138,7 @@ fn redaction_drops_all_free_text_and_has_a_closed_serialized_shape() {
                 "outcomeSummary",
                 "requestId",
                 "timestamp",
+                "toolEnabled",
                 "toolName"
             ]
         );
@@ -320,7 +328,6 @@ fn runtime_and_mcp_share_the_sink_with_identical_audit_ids_and_no_payload_leaks(
     let snapshot = core.activity_snapshot(usize::MAX);
     let json = serde_json::to_string(&snapshot).unwrap();
     for secret in [
-        "private.txt",
         "OUTSIDE-SECRET",
         "TOOL-RESULT-SECRET",
         fixture.0.to_str().unwrap(),
@@ -328,6 +335,7 @@ fn runtime_and_mcp_share_the_sink_with_identical_audit_ids_and_no_payload_leaks(
         assert!(!json.contains(secret));
         assert!(!format!("{snapshot:?}").contains(secret));
     }
+    assert!(json.contains("private.txt")); // M7 records validated logical paths.
     let after = core.diagnostics();
     assert_eq!(before.security, after.security);
     assert_eq!(before.tools, after.tools);

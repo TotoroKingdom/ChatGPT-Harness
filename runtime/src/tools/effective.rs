@@ -17,6 +17,7 @@ pub enum ToolAvailability {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectiveTool {
+    pub status_reason: harness_control_protocol::ToolStatusReason,
     pub name: String,
     pub description: String,
     pub availability: ToolAvailability,
@@ -46,7 +47,9 @@ impl EffectiveToolCatalog {
             .into_iter()
             .map(|descriptor| {
                 let capability = registry.declared_capability(&descriptor.name);
+                use harness_control_protocol::ToolStatusReason as R;
                 let mut effective = EffectiveTool {
+                    status_reason: R::CapabilityUnavailable,
                     name: descriptor.name.clone(),
                     description: descriptor.description.clone(),
                     availability: ToolAvailability::UnavailableByRuntime,
@@ -66,12 +69,14 @@ impl EffectiveToolCatalog {
                     || !descriptor.implemented
                     || capability.is_none()
                 {
+                    effective.status_reason = R::MetadataInvalid;
                     effective.reason = "tool metadata or declared capability is missing".into();
                     return effective;
                 }
                 if capability == Some(ToolCapability::DeveloperShell)
                     && matches!(&security_mode, SecurityMode::Normal)
                 {
+                    effective.status_reason = R::DeveloperModeRequired;
                     effective.availability = ToolAvailability::UnavailableByMode;
                     effective.reason =
                         "DeveloperShell is available only in Developer/Test mode".into();
@@ -79,12 +84,20 @@ impl EffectiveToolCatalog {
                     return effective;
                 }
                 if !descriptor.enabled || !descriptor.exposed {
+                    effective.status_reason = R::ToolDisabled;
                     effective.availability = ToolAvailability::UnavailableDisabled;
                     effective.reason = "tool is disabled or not exposed".into();
                     effective.policy_reason = PolicyReason::ToolDisabled;
                     return effective;
                 }
                 if !runtime_ready || descriptor.readiness != ToolReadiness::Ready {
+                    effective.status_reason = if !runtime_ready {
+                        R::RuntimeNotReady
+                    } else if descriptor.name == "bash" {
+                        R::BashExecutableUnavailable
+                    } else {
+                        R::CapabilityUnavailable
+                    };
                     if descriptor.readiness != ToolReadiness::Ready {
                         effective.reason = registry
                             .readiness_reason(&descriptor.name)
@@ -101,14 +114,24 @@ impl EffectiveToolCatalog {
                 effective.policy_reason = to_wire_reason(evaluation.reason);
                 match evaluation.decision {
                     PolicyDecision::Allow => {
+                        effective.status_reason = R::Available;
                         effective.availability = ToolAvailability::Available;
                         effective.reason = "allowed by policy".into();
                     }
                     PolicyDecision::Ask => {
+                        effective.status_reason = R::ApprovalRequired;
                         effective.availability = ToolAvailability::AvailableWithApproval;
                         effective.reason = "approval is required by policy".into();
                     }
                     PolicyDecision::Deny => {
+                        effective.status_reason = match evaluation.reason {
+                            PolicyEvaluationReason::InvalidRuleSet => R::InvalidPolicySnapshot,
+                            PolicyEvaluationReason::InvalidContext => R::InvalidPolicyContext,
+                            PolicyEvaluationReason::UnsupportedCapability => {
+                                R::UnsupportedCapability
+                            }
+                            _ => R::PolicyDenied,
+                        };
                         effective.availability = ToolAvailability::UnavailableByPolicy;
                         effective.reason = policy_reason(evaluation.reason).into();
                     }
@@ -370,5 +393,67 @@ mod tests {
                 assert!(observation.get("readinessReason").is_none());
             }
         }
+    }
+    #[test]
+    fn m7_reason_codes_are_deterministic_for_eligibility_and_policy_states() {
+        use harness_control_protocol::ToolStatusReason as R;
+        for (decision, reason) in [
+            (PolicyDecision::Allow, R::Available),
+            (PolicyDecision::Ask, R::ApprovalRequired),
+            (PolicyDecision::Deny, R::PolicyDenied),
+        ] {
+            assert!(catalog(vec![rule("user", decision)], true)
+                .iter()
+                .all(|t| t.status_reason == reason));
+        }
+        assert!(catalog(vec![rule("user", PolicyDecision::Allow)], false)
+            .iter()
+            .all(|t| t.status_reason == R::RuntimeNotReady));
+        let mut invalid = rule("bad", PolicyDecision::Allow);
+        invalid.scope = "bad-scope".into();
+        assert!(catalog(vec![invalid], true)
+            .iter()
+            .all(|t| t.status_reason == R::InvalidPolicySnapshot));
+        let registry = ToolRegistry::normal_mode().with_test_enabled(0, false);
+        let tools = EffectiveToolCatalog::compute(
+            &registry,
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::Normal,
+            true,
+        );
+        assert_eq!(tools[0].status_reason, R::ToolDisabled);
+        assert_eq!(
+            tools.last().unwrap().status_reason,
+            R::DeveloperModeRequired
+        );
+        let mut config = harness_control_protocol::ToolConfig::default();
+        config.bash.enabled = true;
+        let registry = ToolRegistry::from_config(&config);
+        let tools = EffectiveToolCatalog::compute(
+            &registry,
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::DeveloperTest,
+            true,
+        );
+        assert_eq!(
+            tools.last().unwrap().status_reason,
+            R::BashExecutableUnavailable
+        );
+        let registry = ToolRegistry::normal_mode().with_test_scope(0, "");
+        let metadata = EffectiveToolCatalog::compute(
+            &registry,
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::Normal,
+            true,
+        );
+        assert_eq!(metadata[0].status_reason, R::MetadataInvalid);
+        let registry = ToolRegistry::normal_mode().with_test_scope(0, "invalid-scope");
+        let context = EffectiveToolCatalog::compute(
+            &registry,
+            &PolicyEngine::new(PolicyEngine::system_rules()),
+            SecurityMode::Normal,
+            true,
+        );
+        assert_eq!(context[0].status_reason, R::InvalidPolicyContext);
     }
 }

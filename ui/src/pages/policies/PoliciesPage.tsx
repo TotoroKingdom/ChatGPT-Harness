@@ -1,3 +1,4 @@
+import { ConfigRevisionStatus } from "@/components/status/ConfigRevisionStatus";
 import type {
   AppConfig,
   EffectivePolicyRule,
@@ -17,6 +18,8 @@ import { useHarnessData } from "@/app/providers/HarnessDataProvider";
 import type { PolicyDraftHandoff } from "@/app/router/routes";
 import { Card, SectionHeading, StatusBadge } from "@/components/common/primitives";
 import {
+  toolAvailabilityKey,
+  toolRemediationKey,
   policyDecisionKey,
   policyReasonKey,
   policySnapshotStatusKey,
@@ -363,7 +366,7 @@ export function PoliciesPage({ initialDraft = null }: { initialDraft?: PolicyDra
       action={<StatusBadge tone={effective?.valid === false ? "danger" : "neutral"}>{effective ? (effective.valid ? t("policies.runtimeSnapshotValid") : t("policies.failClosed")) : t("policies.runtimeNotObserved")}</StatusBadge>}
     />
 
-    {data.restartRequired && <div className="notice notice-warning" role="status"><strong>{t("policies.restartRequired")}</strong><span>{t("policies.restartRequiredDescription")}</span><button className="button button-warning" onClick={() => void data.restartHarness()}>{t("policies.restartHarness")}</button></div>}
+    <ConfigRevisionStatus descriptionKey="policies.restartRequiredDescription" onRestart={() => void data.restartHarness()} />
     {error && <div className="notice notice-danger" role="alert"><strong>{t("policies.saveFailed")}</strong><span>{t(error.key, error.values)}{error.detail && <><br /><small>{error.detail}</small></>}{error.code && <><br /><small className="mono">{error.code}</small></>}</span></div>}
     {message && <div className="notice notice-success" role="status">{renderMessage(t, message)}</div>}
 
@@ -425,15 +428,16 @@ function EffectivePolicySection({ t, effective, systemRules, userRules, status }
   return <Card className="settings-section">
     <SectionHeading eyebrow={t("policies.effectiveObservation")} title={t("policies.currentGeneration")} description={t("policies.effectiveDescription")} />
     {!effective && status !== "success" && status !== "empty" ? <p className="muted">{t("policies.effectiveUnavailable")}</p> : null}
-    {effective && !effective.valid && <div className="notice notice-danger" role="status"><strong>{t("policies.invalidSnapshot")}</strong><span>{t("policies.invalidSnapshotDescription")}</span></div>}
+    {effective && !effective.valid && <div className="notice notice-danger" role="status"><strong>{t("policies.invalidSnapshot")}</strong><span>{t("policies.invalidSnapshotDescription")}</span><span>{t("m7.remediation.invalid_policy_snapshot")}</span></div>}
     {observed && <>
       {effective && <div className="policy-effective-status"><StatusBadge tone={effective.valid ? "success" : "danger"}>{t(policySnapshotStatusKey(effective.status))}</StatusBadge>{effective.statusReason && <span className="muted">{reasonLabel(t, effective.statusReason)}</span>}</div>}
-      <h3>{t("policies.systemGuardrails")}</h3>
+      {effective?.valid !== false && <><h3>{t("policies.systemGuardrails")}</h3>
       <div className="policy-list">{systemRules.map((rule) => <EffectiveRuleRow key={rule.id} rule={rule} t={t} />)}</div>
       <h3>{t("policies.userRulesCurrentGeneration")}</h3>
       {userRules.length ? <div className="policy-list">{userRules.map((rule) => <EffectiveRuleRow key={rule.id} rule={rule} t={t} />)}</div> : <p className="muted">{t("policies.noCompiledUserRules")}</p>}
+      </>}
       {effective && <><h3>{t("policies.perToolDecision")}</h3>
-      <div className="observation-table-wrap"><table className="observation-table"><thead><tr><th scope="col">{t("policies.tool")}</th><th scope="col">{t("policies.decision")}</th><th scope="col">{t("policies.matchedIds")}</th><th scope="col">{t("policies.reason")}</th></tr></thead><tbody>{effective.perTool.map((tool) => <tr key={tool.tool}><td className="mono">{tool.tool}</td><td>{t(policyDecisionKey(tool.decision))}</td><td className="mono">{tool.matchedRuleIds.length ? tool.matchedRuleIds.join(", ") : t("policies.none")}</td><td>{reasonLabel(t, tool.reason)}</td></tr>)}</tbody></table></div></>}
+      <div className="observation-table-wrap"><table className="observation-table"><thead><tr><th scope="col">{t("policies.tool")}</th><th scope="col">{t("policies.decision")}</th><th scope="col">{t("tools.table.availability")}</th><th scope="col">{t("policies.matchedIds")}</th><th scope="col">{t("policies.reason")}</th></tr></thead><tbody>{effective.perTool.map((tool) => <tr key={tool.tool}><td className="mono">{tool.tool}</td><td>{t(policyDecisionKey(tool.decision))}</td><td>{tool.availability === "unavailable_by_policy" && <><StatusBadge tone="danger">{t("m7.states.denied")}</StatusBadge><br /></>}{t(toolAvailabilityKey(tool.availability))}</td><td className="mono">{tool.matchedRuleIds.length ? tool.matchedRuleIds.join(", ") : t("policies.none")}</td><td>{reasonLabel(t, tool.reason)}<p>{t(toolRemediationKey(policyToolRemediation(tool)))}</p></td></tr>)}</tbody></table></div></>}
     </>}
   </Card>;
 }
@@ -442,4 +446,15 @@ function EffectiveRuleRow({ t, rule }: { t: TFunction; rule: EffectivePolicyRule
   const displayName = rule.source === "system" ? t(systemPolicyNameKey(rule.id)) : rule.name;
   const displayReason = rule.source === "system" ? t(systemPolicyReasonKey(rule.id)) : rule.reason;
   return <Card className="policy-row"><div><div className="policy-title"><strong>{displayName}</strong><StatusBadge tone={rule.source === "system" ? "neutral" : tone(rule.decision)}>{t(policySourceKey(rule.source))}</StatusBadge></div><p>{displayReason}</p></div><div className="policy-facts"><span><small>{t("policies.source")}</small><b>{t(policySourceKey(rule.source))}</b></span><span><small>{t("policies.ruleId")}</small><b className="mono">{rule.id}</b></span><span><small>{t("policies.matcherLabel")}</small><b className="mono">{matcherLabel(t, rule.matcher)}</b></span><span><small>{t("policies.decision")}</small><b>{t(policyDecisionKey(rule.decision))}</b></span><span><small>{t("policies.mode")}</small><b>{t("policies.readOnly")}</b></span></div></Card>;
+}
+
+function policyToolRemediation(tool: import("@protocol/v1").EffectivePolicyTool): import("@protocol/v1").ToolStatusReason {
+  if (tool.reason === "invalid_policy_snapshot") return "invalid_policy_snapshot";
+  if (tool.reason === "invalid_context") return "invalid_policy_context";
+  if (tool.availability === "disabled") return "tool_disabled";
+  if (tool.availability === "available_with_approval") return "approval_required";
+  if (tool.availability === "available") return "available";
+  if (tool.reason === "unsupported_capability") return "unsupported_capability";
+  if (tool.availability === "unavailable_by_policy") return "policy_denied";
+  return "runtime_not_ready";
 }

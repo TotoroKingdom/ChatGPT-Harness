@@ -62,7 +62,7 @@ function placeholders(value: string): string[] {
 
 function config(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     configRevision: "7",
     workspace: { rootPath: "C:\\workspace\\project" },
     tunnel: { tunnelId: "tunnel", autoDetect: true },

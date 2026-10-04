@@ -42,7 +42,7 @@ const effectiveCatalog = (): ToolDiagnostic[] => descriptors.map((tool) => ({
 
 function config(): AppConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     configRevision: "7",
     workspace: { rootPath: "D:\\workspace" },
     tunnel: { tunnelId: "tunnel", autoDetect: true },
@@ -338,4 +338,30 @@ describe("ToolsPage M2 desired/effective controls", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("无法保存配置。");
     expect(screen.getByRole("alert")).toHaveTextContent("Configuration write failed");
   });
+});
+
+it.each([
+  ["tool_disabled", "disabled", "Enable the tool, save, and restart Harness."],
+  ["developer_mode_required", "unavailable_by_mode", "Switch to Developer/Test mode, save, and restart Harness."],
+  ["bash_executable_unavailable", "unavailable_by_runtime", "Configure or auto-detect a valid Git Bash executable, then restart Harness."],
+  ["policy_denied", "unavailable_by_policy", "Review the matched User Policy rules, save changes, and restart Harness."],
+  ["invalid_policy_snapshot", "unavailable_by_policy", "Repair invalid Policy configuration and restart. Execution remains denied until valid."],
+  ["approval_required", "available_with_approval", "Invoke the tool and resolve the request in Approval Center."],
+] as const)("M7 presents actionable remediation for %s", async (statusReason, availability, remediation) => {
+  await i18n.changeLanguage("en");
+  state.effective.mockResolvedValue([{ name: "write", statusReason, availability, decision: statusReason === "approval_required" ? "ask" : "deny" }]);
+  render(<ToolsPage />);
+  expect(await screen.findByText(remediation)).toBeInTheDocument();
+  if (availability === "unavailable_by_policy") expect(screen.getByText("Denied")).toBeInTheDocument();
+  expect(screen.getByText(statusReason === "tool_disabled" ? "Tool disabled" : statusReason === "approval_required" ? "Approval required" : statusReason === "invalid_policy_snapshot" ? "Invalid Policy snapshot" : statusReason === "developer_mode_required" ? "Developer/Test mode required" : statusReason === "bash_executable_unavailable" ? "Git Bash unavailable" : "Denied by Policy")).toBeInTheDocument();
+});
+
+it("M7 shared revision view preserves raw revisions and clears active identity when stopped", async () => {
+  await i18n.changeLanguage("en");
+  state.context = makeContext({ config: { ...config(), configRevision: "48" }, activeRevision: "47", restartRequired: true });
+  const { rerender } = render(<ToolsPage />);
+  expect(screen.getByText("48")).toBeInTheDocument(); expect(screen.getByText("47")).toBeInTheDocument(); expect(screen.getByText("Restart Required")).toBeInTheDocument();
+  state.context = { ...state.context, components: { runtime: "stopped", tunnel: "stopped", mcp: "stopped" } };
+  rerender(<ToolsPage />);
+  expect(screen.getByText("No active Runtime")).toBeInTheDocument(); expect(screen.queryByText("47")).not.toBeInTheDocument(); expect(screen.queryByText("Restart Required")).not.toBeInTheDocument();
 });

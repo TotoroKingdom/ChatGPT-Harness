@@ -1,14 +1,16 @@
 //! M8-C local read contracts. Wire DTOs mirror the frozen safe M8-A/M8-B
 //! projections; they are not Runtime authorities or MCP schemas.
 use crate::{MachineErrorCode, PolicyDecision, PolicyReason, RuntimeLifecycle, RuntimeReadiness};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 pub const DIAGNOSTICS_GET: &str = "control.diagnostics.get";
 pub const ACTIVITY_SNAPSHOT: &str = "control.activity.snapshot";
 pub const EFFECTIVE_TOOLS_GET: &str = "control.effective_tools.get";
 pub const MAX_ACTIVITY_LIMIT: u64 = 256;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ReadErrorCode {
     RuntimeUnavailable,
@@ -39,7 +41,7 @@ impl ReadErrorCode {
 #[serde(deny_unknown_fields)]
 pub struct ReadParams {}
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ActivitySnapshotParams {
     pub limit: u64,
@@ -54,7 +56,7 @@ impl ActivitySnapshotParams {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCapability {
     WorkspaceRead,
@@ -62,7 +64,7 @@ pub enum ToolCapability {
     DeveloperShell,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeDiagnosticsSnapshot {
     pub schema_version: u32,
@@ -75,9 +77,12 @@ pub struct RuntimeDiagnosticsSnapshot {
     pub tunnel: TunnelDiagnostics,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeDiagnostics {
+    #[serde(default)]
+    #[ts(type = "string")]
+    pub config_revision: Option<crate::DecimalU64>,
     pub runtime_id: Option<String>,
     pub started_at: Option<String>,
     pub lifecycle: RuntimeLifecycle,
@@ -85,7 +90,7 @@ pub struct RuntimeDiagnostics {
     pub initialized_modules: Vec<InitializedModule>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum InitializedModule {
     ToolRegistry,
@@ -96,7 +101,7 @@ pub enum InitializedModule {
     EventBus,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SecurityDiagnostics {
     pub workspace_validation: WorkspaceValidation,
@@ -107,14 +112,14 @@ pub struct SecurityDiagnostics {
     pub execution_pipeline: PipelineState,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceValidation {
     NotInitialized,
     ValidatedAtInitialization,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineState {
     NotInitialized,
@@ -122,7 +127,7 @@ pub enum PipelineState {
     Ready,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolDiagnostics {
     pub declared_count: usize,
@@ -131,9 +136,12 @@ pub struct ToolDiagnostics {
     pub items: Vec<ToolDiagnostic>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolDiagnostic {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub status_reason: Option<crate::ToolStatusReason>,
     /// Source-controlled registry identifier, never a request-supplied name.
     pub name: String,
     pub declared_capability: Option<ToolCapability>,
@@ -154,6 +162,8 @@ impl<'de> Deserialize<'de> for ToolDiagnostic {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
         struct Raw {
+            #[serde(default)]
+            status_reason: Option<crate::ToolStatusReason>,
             name: String,
             declared_capability: Option<ToolCapability>,
             availability: DiagnosticToolAvailability,
@@ -177,6 +187,7 @@ impl<'de> Deserialize<'de> for ToolDiagnostic {
         }
         let raw: Raw = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
         Ok(Self {
+            status_reason: raw.status_reason,
             name: raw.name,
             declared_capability: raw.declared_capability,
             availability: raw.availability,
@@ -188,7 +199,7 @@ impl<'de> Deserialize<'de> for ToolDiagnostic {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticToolAvailability {
     Available,
@@ -199,20 +210,27 @@ pub enum DiagnosticToolAvailability {
     Disabled,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RequestDiagnostics {
     pub observation: RequestObservation,
     pub active_count: Option<u32>,
+    #[serde(default)]
+    pub active_requests: u32,
+    #[serde(default)]
+    pub pending_approvals: u32,
+    #[serde(default)]
+    pub running_executions: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestObservation {
     NotInstrumented,
+    Instrumented,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LastErrorDiagnostics {
     pub observation: ErrorObservation,
@@ -221,14 +239,14 @@ pub struct LastErrorDiagnostics {
     pub code: Option<MachineErrorCode>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorObservation {
     NotRecorded,
     Recorded,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TunnelDiagnostics {
     /// Runtime does not own Launcher config or process observations.
@@ -238,25 +256,25 @@ pub struct TunnelDiagnostics {
     pub blocked_reason: TunnelBlockedReason,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TunnelProcessObservation {
     NotObserved,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TunnelConnectionObservation {
     NotEstablished,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TunnelBlockedReason {
     M7CBlocked,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditEventType {
     RequestReceived,
@@ -267,9 +285,13 @@ pub enum AuditEventType {
     ExecutionFailed,
     RequestDenied,
     ApprovalRequired,
+    ApprovalResolved,
+    ApprovalExpired,
+    ApprovalCancelled,
+    SessionGrantMatched,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditLifecycleState {
     Received,
@@ -283,7 +305,7 @@ pub enum AuditLifecycleState {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditOutcome {
     InProgress,
@@ -293,7 +315,7 @@ pub enum AuditOutcome {
     ApprovalRequired,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivityCategory {
     Request,
@@ -305,7 +327,7 @@ pub enum ActivityCategory {
 
 /// A safe display projection, not an audit record or a security decision.
 /// Bash evidence excludes argv, raw command, environment and process output.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BashActivityEvidence {
     pub mode: crate::SecurityMode,
@@ -324,12 +346,16 @@ pub struct BashActivityEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ActivityFailureCategory {
+    ApprovalDenied,
+    ApprovalExpired,
+    ApprovalCancelled,
     ToolDisabled,
     TargetChanged,
     AtomicFailure,
@@ -349,7 +375,7 @@ pub enum ActivityFailureCategory {
 }
 
 /// A safe display projection, not an audit record or a security decision.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ActivityEntry {
     pub event_id: String,
@@ -372,4 +398,26 @@ pub struct ActivityEntry {
     pub failure_category: Option<ActivityFailureCategory>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bash: Option<BashActivityEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tool_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub capability: Option<ToolCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sanitized_arguments: Option<crate::SanitizedArgumentsEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub approval_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub approval_decision: Option<crate::ApprovalDecision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "number")]
+    pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub result_evidence: Option<crate::ExecutionResultEvidence>,
 }

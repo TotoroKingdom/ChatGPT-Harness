@@ -1248,6 +1248,9 @@ mod m3_config_integration;
 mod m6_i18n_qa;
 
 #[cfg(test)]
+mod m7_e2e;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use harness_control_protocol::{
@@ -1261,7 +1264,7 @@ mod tests {
 
     fn config(revision: u64) -> AppConfig {
         AppConfig {
-            schema_version: 1,
+            schema_version: 2,
             config_revision: DecimalU64::new(revision),
             workspace: WorkspaceConfig {
                 root_path: format!("D:/workspace-{revision}"),

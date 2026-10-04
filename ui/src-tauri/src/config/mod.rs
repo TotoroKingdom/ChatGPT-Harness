@@ -9,7 +9,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+mod migration;
+pub use harness_control_protocol::CURRENT_SCHEMA_VERSION;
+
+#[cfg(test)]
+mod m7_qa;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,18 +26,28 @@ pub struct ConfigMetadata {
 pub enum ConfigError {
     Invalid(String),
     Io(String),
+    UnsupportedSchema,
+    Migration(&'static str),
 }
 impl ConfigError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Invalid(_) => "CONFIG_INVALID",
             Self::Io(_) => "CONFIG_WRITE_FAILED",
+            Self::UnsupportedSchema => "CONFIG_SCHEMA_UNSUPPORTED",
+            Self::Migration(_) => "CONFIG_MIGRATION_FAILED",
         }
     }
     pub fn message(&self) -> String {
         match self {
             Self::Invalid(e) => format!("Configuration needs attention: {e}"),
             Self::Io(e) => format!("Could not save configuration: {e}"),
+            Self::UnsupportedSchema => {
+                "Configuration schema is not supported; original file unchanged.".into()
+            }
+            Self::Migration(stage) => {
+                format!("Configuration migration failed at {stage}; original file unchanged.")
+            }
         }
     }
 }
@@ -59,21 +73,42 @@ impl ConfigStore {
             return Ok(None);
         }
         let text = fs::read_to_string(&self.file).map_err(|e| ConfigError::Io(e.to_string()))?;
-        let mut config: AppConfig =
-            serde_json::from_str(&text).map_err(|e| ConfigError::Invalid(e.to_string()))?;
-        if config.schema_version != CURRENT_SCHEMA_VERSION {
-            return Err(ConfigError::Invalid(format!(
-                "unsupported schemaVersion {}",
-                config.schema_version
-            )));
+        let raw: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| ConfigError::Invalid("invalid JSON".into()))?;
+        let migrated = match raw.get("schemaVersion").and_then(|v| v.as_u64()) {
+            Some(1) => true,
+            Some(2) => false,
+            _ => return Err(ConfigError::UnsupportedSchema),
+        };
+        let mut config = if migrated {
+            migration::migrate_v1_to_v2(raw)?
+        } else {
+            if ["tools", "policies", "bash"]
+                .iter()
+                .any(|key| raw.get(*key).is_none())
+            {
+                return Err(ConfigError::Invalid("incomplete v2 config".into()));
+            }
+            migration::validate_shape(&raw)
+                .map_err(|_| ConfigError::Invalid("invalid v2 shape".into()))?;
+            serde_json::from_value(raw)
+                .map_err(|_| ConfigError::Invalid("invalid config shape".into()))?
+        };
+        validate_v2(&mut config).map_err(|error| {
+            if migrated {
+                let _ = error;
+                ConfigError::Migration("validation")
+            } else {
+                error
+            }
+        })?;
+        if migrated {
+            let bytes = serde_json::to_vec_pretty(&config)
+                .map_err(|_| ConfigError::Migration("serialization"))?;
+            atomic_write(&self.file, &bytes).map_err(|_| {
+                ConfigError::Io("atomic migration persist failed; original file unchanged".into())
+            })?;
         }
-        if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
-            let normalized = crate::platform::normalize_tunnel_client_directory(path);
-            *path = normalized.display().to_string();
-        }
-        normalize_and_validate_control_plane_http_proxy(
-            &mut config.tunnel.control_plane_http_proxy,
-        )?;
         Ok(Some(config))
     }
     pub fn load_or_create_defaults(&self) -> Result<AppConfig, ConfigError> {
@@ -112,17 +147,7 @@ impl ConfigStore {
         if config.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(ConfigError::Invalid("unsupported schemaVersion".into()));
         }
-        config
-            .policies
-            .validate_for_save()
-            .map_err(ConfigError::Invalid)?;
-        if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
-            let normalized = crate::platform::normalize_tunnel_client_directory(path);
-            *path = normalized.display().to_string();
-        }
-        normalize_and_validate_control_plane_http_proxy(
-            &mut config.tunnel.control_plane_http_proxy,
-        )?;
+        validate_v2(&mut config)?;
         let previous = self.load()?;
         config.config_revision = match previous {
             None => DecimalU64::new(1),
@@ -163,6 +188,23 @@ impl ConfigStore {
         }
         Ok(())
     }
+}
+
+fn validate_v2(config: &mut AppConfig) -> Result<(), ConfigError> {
+    if config.schema_version != CURRENT_SCHEMA_VERSION {
+        return Err(ConfigError::UnsupportedSchema);
+    }
+    config.security.developer_test_mode = config.security.mode == SecurityMode::DeveloperTest;
+    config
+        .policies
+        .validate_for_save()
+        .map_err(|_| ConfigError::Invalid("invalid policy configuration".into()))?;
+    if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
+        *path = crate::platform::normalize_tunnel_client_directory(path)
+            .display()
+            .to_string();
+    }
+    normalize_and_validate_control_plane_http_proxy(&mut config.tunnel.control_plane_http_proxy)
 }
 
 pub(crate) fn normalize_and_validate_control_plane_http_proxy(
@@ -220,12 +262,17 @@ fn same_restart_semantics(a: &AppConfig, b: &AppConfig) -> bool {
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("json.tmp");
-    {
+    let result = (|| {
         let mut file = fs::File::create(&tmp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
+        drop(file);
+        replace_file(&tmp, path)
+    })();
+    if result.is_err() && tmp.is_file() {
+        let _ = fs::remove_file(&tmp);
     }
-    replace_file(&tmp, path)
+    result
 }
 
 #[cfg(not(windows))]
@@ -272,7 +319,7 @@ mod tests {
     };
     fn c() -> AppConfig {
         AppConfig {
-            schema_version: 1,
+            schema_version: CURRENT_SCHEMA_VERSION,
             config_revision: DecimalU64::ZERO,
             workspace: WorkspaceConfig {
                 root_path: std::env::temp_dir().display().to_string(),
@@ -319,6 +366,7 @@ mod tests {
     fn legacy_schema_v1_without_tools_loads_safe_tool_defaults() {
         let d = tempfile::tempdir().unwrap();
         let mut value = serde_json::to_value(c()).unwrap();
+        value["schemaVersion"] = serde_json::json!(1);
         value.as_object_mut().unwrap().remove("tools");
         fs::write(
             d.path().join("config.json"),
@@ -338,6 +386,7 @@ mod tests {
     fn legacy_schema_v1_without_policies_loads_safe_policy_defaults() {
         let d = tempfile::tempdir().unwrap();
         let mut value = serde_json::to_value(c()).unwrap();
+        value["schemaVersion"] = serde_json::json!(1);
         value.as_object_mut().unwrap().remove("policies");
         fs::write(
             d.path().join("config.json"),
@@ -360,6 +409,7 @@ mod tests {
     fn legacy_schema_v1_without_bash_loads_safe_bash_defaults() {
         let d = tempfile::tempdir().unwrap();
         let mut value = serde_json::to_value(c()).unwrap();
+        value["schemaVersion"] = serde_json::json!(1);
         value.as_object_mut().unwrap().remove("bash");
         fs::write(
             d.path().join("config.json"),
@@ -379,6 +429,7 @@ mod tests {
     fn legacy_schema_v1_without_language_loads_with_system_follow_default() {
         let d = tempfile::tempdir().unwrap();
         let mut value = serde_json::to_value(c()).unwrap();
+        value["schemaVersion"] = serde_json::json!(1);
         value["ui"].as_object_mut().unwrap().remove("language");
         fs::write(
             d.path().join("config.json"),
@@ -662,9 +713,7 @@ mod tests {
             matcher: PolicyMatcherConfig::tool("write"),
             reason: "invalid duplicate".into(),
         });
-        assert!(
-            matches!(store.save(invalid), Err(ConfigError::Invalid(message)) if message.contains("Duplicate user policy rule ID"))
-        );
+        assert!(matches!(store.save(invalid), Err(ConfigError::Invalid(_))));
         assert_eq!(store.load().unwrap().unwrap(), first);
     }
 
@@ -681,9 +730,7 @@ mod tests {
             matcher: PolicyMatcherConfig::tool("not_a_tool"),
             reason: "unknown tool must remain rejected".into(),
         });
-        assert!(
-            matches!(store.save(config), Err(ConfigError::Invalid(message)) if message.contains("unknown or unavailable tool"))
-        );
+        assert!(matches!(store.save(config), Err(ConfigError::Invalid(_))));
     }
 
     #[test]
@@ -707,7 +754,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             ConfigStore::new(d.path().into()).load(),
-            Err(ConfigError::Invalid(message)) if message.contains("unknown field")
+            Err(ConfigError::Invalid(_))
         ));
     }
 
@@ -950,7 +997,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             ConfigStore::new(d.path().into()).load(),
-            Err(ConfigError::Invalid(message)) if message.contains("unsupported schemaVersion")
+            Err(ConfigError::UnsupportedSchema)
         ));
     }
 
@@ -998,5 +1045,319 @@ mod tests {
         fs::write(d.path().join("config.json"), b"{").unwrap();
         store.reset().unwrap();
         assert!(!d.path().join("config.json").exists());
+    }
+    #[test]
+    fn m7_dual_source_preservation_and_idempotency() {
+        for transitional in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let store = ConfigStore::new(d.path().into());
+            let mut original = c();
+            original.schema_version = 1;
+            original.config_revision = DecimalU64::new(47);
+            original.tunnel.api_key_ref = Some(harness_control_protocol::SecretReference {
+                provider: "fake-provider".into(),
+                key: "opaque-reference".into(),
+            });
+            original.tunnel.control_plane_http_proxy = Some("http://127.0.0.1:8080".into());
+            original.security.mode = SecurityMode::DeveloperTest;
+            original.security.developer_test_mode = false;
+            original.tools.write.enabled = false;
+            original.bash.auto_detect = false;
+            original.bash.executable_path = Some(r"C:\fake\bash.exe".into());
+            original.ui.language = Some(UiLanguage::ZhCn);
+            original.ui.theme = Some("dark".into());
+            original.policies.user_rules.push(UserPolicyRuleConfig {
+                id: "deny-write".into(),
+                name: "deny".into(),
+                enabled: true,
+                decision: PolicyDecision::Deny,
+                matcher: PolicyMatcherConfig::tool("write"),
+                reason: "test".into(),
+            });
+            let mut raw = serde_json::to_value(&original).unwrap();
+            if !transitional {
+                for field in ["tools", "policies", "bash"] {
+                    raw.as_object_mut().unwrap().remove(field);
+                }
+                raw["ui"].as_object_mut().unwrap().remove("language");
+            }
+            fs::write(&store.file, serde_json::to_vec(&raw).unwrap()).unwrap();
+            let migrated = store.load().unwrap().unwrap();
+            assert_eq!(migrated.schema_version, 2);
+            assert_eq!(migrated.config_revision, original.config_revision);
+            assert_eq!(migrated.workspace, original.workspace);
+            assert_eq!(migrated.tunnel, original.tunnel);
+            assert_eq!(migrated.ui.theme, original.ui.theme);
+            assert_eq!(migrated.security.mode, original.security.mode);
+            assert!(migrated.security.developer_test_mode);
+            if transitional {
+                assert_eq!(migrated.tools, original.tools);
+                assert_eq!(migrated.policies, original.policies);
+                assert_eq!(migrated.bash, original.bash);
+                assert_eq!(migrated.ui.language, original.ui.language);
+            } else {
+                assert_eq!(migrated.tools, ToolConfig::default());
+                assert_eq!(migrated.policies, PolicyConfig::default());
+                assert_eq!(migrated.bash, BashConfig::default());
+                assert_eq!(migrated.ui.language, None);
+            }
+            let bytes = fs::read(&store.file).unwrap();
+            let modified = fs::metadata(&store.file).unwrap().modified().unwrap();
+            assert_eq!(store.load().unwrap().unwrap(), migrated);
+            assert_eq!(fs::read(&store.file).unwrap(), bytes);
+            assert_eq!(
+                fs::metadata(&store.file).unwrap().modified().unwrap(),
+                modified
+            );
+            assert_eq!(
+                store
+                    .set_ui_language(Some(UiLanguage::En))
+                    .unwrap()
+                    .config_revision,
+                original.config_revision
+            );
+        }
+    }
+
+    #[test]
+    fn m7_malformed_sources_preserve_exact_bytes_and_safe_errors() {
+        let mut base = serde_json::to_value(c()).unwrap();
+        base["schemaVersion"] = serde_json::json!(1);
+        let mutations = [
+            ("tools", serde_json::json!({"write":{"enabled":false}})),
+            ("policies", serde_json::json!({})),
+            ("bash", serde_json::json!({"autoDetect":"SECRET_SENTINEL"})),
+            ("ui", serde_json::json!({"language":"SECRET_SENTINEL"})),
+            (
+                "security",
+                serde_json::json!({"mode":"SECRET_SENTINEL", "developerTestMode":false}),
+            ),
+            ("unexpectedSecret", serde_json::json!("SECRET_SENTINEL")),
+        ];
+        for (key, value) in mutations {
+            let d = tempfile::tempdir().unwrap();
+            let store = ConfigStore::new(d.path().into());
+            let mut raw = base.clone();
+            raw[key] = value;
+            let bytes = serde_json::to_vec(&raw).unwrap();
+            fs::write(&store.file, &bytes).unwrap();
+            let error = store.load().unwrap_err();
+            assert_eq!(error.code(), "CONFIG_MIGRATION_FAILED", "{key}");
+            assert!(!error.message().contains("SECRET_SENTINEL"));
+            assert_eq!(fs::read(&store.file).unwrap(), bytes);
+            assert!(!store.file.with_extension("json.tmp").exists());
+        }
+        for version in [
+            serde_json::Value::Null,
+            serde_json::json!(0),
+            serde_json::json!(3),
+            serde_json::json!("1"),
+            serde_json::json!(-1),
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let store = ConfigStore::new(d.path().into());
+            let mut raw = base.clone();
+            raw["schemaVersion"] = version;
+            let bytes = serde_json::to_vec(&raw).unwrap();
+            fs::write(&store.file, &bytes).unwrap();
+            assert_eq!(
+                store.load().unwrap_err().code(),
+                "CONFIG_SCHEMA_UNSUPPORTED"
+            );
+            assert_eq!(fs::read(&store.file).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn m7_migration_persist_failure_preserves_source() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let mut raw = serde_json::to_value(c()).unwrap();
+        raw["schemaVersion"] = serde_json::json!(1);
+        let bytes = serde_json::to_vec(&raw).unwrap();
+        fs::write(&store.file, &bytes).unwrap();
+        // A reserved temporary pathname deterministically prevents temp creation.
+        fs::create_dir(store.file.with_extension("json.tmp")).unwrap();
+        assert_eq!(store.load().unwrap_err().code(), "CONFIG_WRITE_FAILED");
+        assert_eq!(fs::read(&store.file).unwrap(), bytes);
+    }
+
+    #[test]
+    fn m7_invalid_policy_proxy_and_missing_version_preserve_source() {
+        let mut base = serde_json::to_value(c()).unwrap();
+        base["schemaVersion"] = serde_json::json!(1);
+        for case in ["policy", "proxy", "missing-version", "raw-secret"] {
+            let d = tempfile::tempdir().unwrap();
+            let store = ConfigStore::new(d.path().into());
+            let mut raw = base.clone();
+            match case {
+                "policy" => {
+                    raw["policies"]["userRules"] = serde_json::json!([{
+                        "id":"bad", "name":"bad", "enabled":true, "decision":"allow",
+                        "matcher":{"type":"tool","tool":"unknown-tool"}, "reason":"SECRET_SENTINEL"
+                    }])
+                }
+                "proxy" => {
+                    raw["tunnel"]["controlPlaneHttpProxy"] =
+                        serde_json::json!("http://user:SECRET_SENTINEL@127.0.0.1")
+                }
+                "raw-secret" => raw["tunnel"]["apiKey"] = serde_json::json!("SECRET_SENTINEL"),
+                _ => {
+                    raw.as_object_mut().unwrap().remove("schemaVersion");
+                }
+            }
+            let bytes = serde_json::to_vec(&raw).unwrap();
+            fs::write(&store.file, &bytes).unwrap();
+            let error = store.load().unwrap_err();
+            assert_eq!(
+                error.code(),
+                if case == "missing-version" {
+                    "CONFIG_SCHEMA_UNSUPPORTED"
+                } else {
+                    "CONFIG_MIGRATION_FAILED"
+                }
+            );
+            assert!(!error.message().contains("SECRET_SENTINEL"));
+            assert_eq!(fs::read(&store.file).unwrap(), bytes);
+            assert!(!store.file.with_extension("json.tmp").exists());
+        }
+    }
+    #[cfg(windows)]
+    #[test]
+    fn m7_failed_atomic_replace_cleans_created_temp_and_keeps_original() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let mut raw = serde_json::to_value(c()).unwrap();
+        raw["schemaVersion"] = serde_json::json!(1);
+        let bytes = serde_json::to_vec(&raw).unwrap();
+        fs::write(&store.file, &bytes).unwrap();
+        let mut permissions = fs::metadata(&store.file).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&store.file, permissions.clone()).unwrap();
+        assert_eq!(store.load().unwrap_err().code(), "CONFIG_WRITE_FAILED");
+        assert_eq!(fs::read(&store.file).unwrap(), bytes);
+        assert!(!store.file.with_extension("json.tmp").exists());
+        permissions.set_readonly(false);
+        fs::set_permissions(&store.file, permissions).unwrap();
+    }
+
+    #[test]
+    fn m7_current_schema_rejects_partial_and_null_fields_without_defaulting() {
+        for field in ["tools", "policies", "bash"] {
+            for value in [serde_json::Value::Null, serde_json::json!({})] {
+                let d = tempfile::tempdir().unwrap();
+                let store = ConfigStore::new(d.path().into());
+                let mut raw = serde_json::to_value(c()).unwrap();
+                raw[field] = value;
+                let bytes = serde_json::to_vec(&raw).unwrap();
+                fs::write(&store.file, &bytes).unwrap();
+                assert_eq!(store.load().unwrap_err().code(), "CONFIG_INVALID");
+                assert_eq!(fs::read(&store.file).unwrap(), bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn m7_historical_fixture_regression_matrix() {
+        let fixtures = [
+            (
+                "v1-v2-era",
+                include_str!("../../../../fixtures/config/v1-v2-era.json"),
+                true,
+            ),
+            (
+                "v1-transitional-m6",
+                include_str!("../../../../fixtures/config/v1-transitional-m6.json"),
+                true,
+            ),
+            (
+                "v1-invalid-policy",
+                include_str!("../../../../fixtures/config/v1-invalid-policy.json"),
+                false,
+            ),
+            (
+                "v1-invalid-proxy",
+                include_str!("../../../../fixtures/config/v1-invalid-proxy.json"),
+                false,
+            ),
+            (
+                "v1-unsupported-field",
+                include_str!("../../../../fixtures/config/v1-unsupported-field.json"),
+                false,
+            ),
+            (
+                "v2-current",
+                include_str!("../../../../fixtures/config/v2-current.json"),
+                true,
+            ),
+        ];
+        for (name, source, valid) in fixtures {
+            let directory = tempfile::tempdir().unwrap();
+            let store = ConfigStore::new(directory.path().into());
+            fs::write(&store.file, source.as_bytes()).unwrap();
+            let before = fs::read(&store.file).unwrap();
+            let raw: serde_json::Value = serde_json::from_slice(&before).unwrap();
+            let original: AppConfig = serde_json::from_value(raw.clone())
+                .unwrap_or_else(|_| ConfigStore::safe_defaults());
+            let result = store.load();
+            if !valid {
+                let error = result.unwrap_err();
+                assert_eq!(error.code(), "CONFIG_MIGRATION_FAILED", "{name}");
+                assert_eq!(fs::read(&store.file).unwrap(), before, "{name}");
+                assert!(!error.message().contains("FAKE_SECRET_SENTINEL"));
+            } else {
+                let config = result.unwrap().unwrap();
+                assert_eq!(config.schema_version, 2);
+                assert_eq!(config.config_revision, DecimalU64::new(41));
+                assert_eq!(config.workspace, original.workspace);
+                assert_eq!(config.tunnel, original.tunnel);
+                assert_eq!(config.security.mode, original.security.mode);
+                assert!(config.security.developer_test_mode);
+                assert_eq!(config.ui, original.ui);
+                assert_eq!(config.tools, original.tools);
+                assert_eq!(config.policies, original.policies);
+                assert_eq!(config.bash, original.bash);
+                let after = fs::read(&store.file).unwrap();
+                assert!(!String::from_utf8_lossy(&after).contains("FAKE_SECRET_SENTINEL"));
+                if name == "v2-current" {
+                    assert_eq!(after, before);
+                }
+                let modified = fs::metadata(&store.file).unwrap().modified().unwrap();
+                assert_eq!(store.load().unwrap().unwrap(), config);
+                assert_eq!(fs::read(&store.file).unwrap(), after);
+                assert_eq!(
+                    fs::metadata(&store.file).unwrap().modified().unwrap(),
+                    modified
+                );
+            }
+            assert!(!store.file.with_extension("json.tmp").exists());
+        }
+    }
+
+    #[test]
+    fn m7_migration_preserves_opaque_reference_without_materializing_secret_store_value() {
+        use crate::secrets::SecretStore;
+        let secrets = crate::secrets::MemorySecretStore::default();
+        secrets
+            .set("opaque-fake-reference", "API_SECRET_CONTENT_SENTINEL")
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(directory.path().into());
+        fs::write(
+            &store.file,
+            include_bytes!("../../../../fixtures/config/v1-v2-era.json"),
+        )
+        .unwrap();
+        let config = store.load().unwrap().unwrap();
+        assert_eq!(
+            config.tunnel.api_key_ref.unwrap().key,
+            "opaque-fake-reference"
+        );
+        let persisted = fs::read_to_string(&store.file).unwrap();
+        assert!(!persisted.contains("API_SECRET_CONTENT_SENTINEL"));
+        assert_eq!(
+            secrets.get("opaque-fake-reference").unwrap().as_deref(),
+            Some("API_SECRET_CONTENT_SENTINEL")
+        );
     }
 }

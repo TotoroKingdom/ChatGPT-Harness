@@ -192,3 +192,30 @@ describe("M8-D Control Plane response rendering", () => {
     noSensitiveDOM(container);
   });
 });
+
+it("M7 expands authoritative safe Activity detail and preserves raw identifiers", async () => {
+  await i18n.changeLanguage("en");
+  tauri.invoke.mockResolvedValue([{ ...entry("write"), eventType: "execution_completed", decisionSummary: "ask", outcomeSummary: "success", requestId: "request-Raw123", toolEnabled: true, capability: "workspace_write", matchedRuleIds: ["rule-Raw123"], policyReason: "matched_user_rules", approvalId: "approval-Raw123", approvalDecision: "allow_once", durationMs: 47, sanitizedArguments: { tool: "write", logicalPath: "safe.txt", content: "WRITE_CONTENT_SENTINEL" }, resultEvidence: { tool: "write", bytesWritten: 7, disposition: "created", content: "RESULT_SENTINEL" } }]);
+  const { container } = render(<ActivityPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Diagnostic detail" }));
+  const detail = screen.getByRole("region", { name: "Diagnostic detail" });
+  for (const id of ["request-Raw123", "rule-Raw123", "approval-Raw123"]) expect(within(detail).getByText(id)).toBeInTheDocument();
+  expect(within(detail).getByText("47")).toBeInTheDocument();
+  expect(within(detail).getByText(/safe.txt/)).toBeInTheDocument();
+  expect(within(detail).getByText(/bytesWritten/)).toBeInTheDocument();
+  expect(container.innerHTML).not.toContain("WRITE_CONTENT_SENTINEL"); expect(container.innerHTML).not.toContain("RESULT_SENTINEL");
+});
+it("M7 missing evidence is visibly unrecorded without invented arguments or results", async () => {
+  await i18n.changeLanguage("en"); tauri.invoke.mockResolvedValue([entry("read_file")]);
+  render(<ActivityPage />); fireEvent.click(await screen.findByRole("button", { name: "Diagnostic detail" }));
+  const detail = screen.getByRole("region", { name: "Diagnostic detail" });
+  expect(within(detail).getAllByText("Not recorded").length).toBeGreaterThan(5);
+  expect(within(detail).getByText("Not applicable")).toBeInTheDocument();
+  expect(within(detail).queryByText(/bytesRead/)).not.toBeInTheDocument();
+});
+it("M7 Overview shows real counters and safe error code", async () => {
+  await i18n.changeLanguage("en");
+  tauri.invoke.mockResolvedValue({ ...diagnostics(), requests: { observation: "instrumented", activeRequests: 3, pendingApprovals: 2, runningExecutions: 1 }, lastError: { code: "BASH_TIMEOUT", message: "SECRET_ERROR_SENTINEL" } });
+  const { container } = render(<RuntimeOverview />);
+  await screen.findByText("Active requests"); expect(screen.getByText("3")).toBeInTheDocument(); expect(screen.getByText("2")).toBeInTheDocument(); expect(screen.getByText("1")).toBeInTheDocument(); expect(screen.getByText("BASH_TIMEOUT")).toBeInTheDocument(); noSensitiveDOM(container);
+});

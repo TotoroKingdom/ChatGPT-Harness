@@ -205,6 +205,15 @@ async fn default_ask_resumes_exact_original_call_once_and_records_safe_correlati
         Some(approval.request_id.as_str())
     );
     assert!(bash.duration_ms.is_some());
+    assert_eq!(
+        completion.approval_id.as_deref(),
+        Some(approval.request_id.as_str())
+    );
+    assert!(completion.duration_ms.is_some());
+    assert!(matches!(
+        completion.result_evidence,
+        Some(harness_control_protocol::ExecutionResultEvidence::Bash { exit_code: 0 })
+    ));
     let serialized = serde_json::to_string(&entries).unwrap();
     assert!(!serialized.contains("stdout"));
     assert!(!serialized.contains("stderr"));

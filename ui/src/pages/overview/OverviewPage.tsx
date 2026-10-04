@@ -1,3 +1,4 @@
+import { ConfigRevisionStatus } from "@/components/status/ConfigRevisionStatus";
 import { useState } from "react";
 import { Card, SectionHeading, StatusBadge } from "@/components/common/primitives";
 import { useHarnessData } from "@/app/providers/HarnessDataProvider";
@@ -25,7 +26,7 @@ export function OverviewPage() {
         <div><div className="eyebrow">{t("overview.harnessStatus")}</div><div className="hero-status"><span className="hero-orb" /><div><h2>{t("overview.harnessIs", { status: t(overallStatusKey(data.overall)) })}</h2><p>{t("overview.authority")}</p></div></div></div>
         <div className="hero-actions">{data.overall === "stopped" || data.overall === "error" ? <button className="button button-primary" onClick={() => void run(data.startHarness)} disabled={!canStart}>{t("overview.start")}</button> : <button className="button button-secondary" disabled={data.overall === "stopping" || data.overall === "starting"} onClick={() => void run(data.stopHarness)}>{t("overview.stop")}</button>}{data.restartRequired && <button className="button button-warning" onClick={() => void run(data.restartHarness)}>{t("overview.restart")}</button>}</div>
       </Card>
-      {data.restartRequired && <div className="notice notice-warning"><strong>{t("overview.restartRequired")}</strong><span>{t("overview.configChanged")}</span></div>}{(data.overall === "stopped" || data.overall === "error") && data.eligibility && <div className={`notice ${data.eligibility.canStart ? "notice-success" : "notice-warning"}`}><strong>{t(startEligibilityKey(data.eligibility.status))}</strong><span>{t(`overview.eligibility.${data.eligibility.status}`)}</span></div>}
+      <ConfigRevisionStatus />{(data.overall === "stopped" || data.overall === "error") && data.eligibility && <div className={`notice ${data.eligibility.canStart ? "notice-success" : "notice-warning"}`}><strong>{t(startEligibilityKey(data.eligibility.status))}</strong><span>{t(`overview.eligibility.${data.eligibility.status}`)}</span></div>}
       {actionError && <div className="notice notice-danger">{t(actionError)}</div>}{message && <div className="notice notice-success">{t(message)}</div>}
       {tunnelReadiness && !tunnelReadiness.controlPlaneConnected && (
         <div className="notice notice-warning">

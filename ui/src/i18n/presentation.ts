@@ -297,6 +297,9 @@ export function activityOutcomeKey(value: ActivityOutcome): TranslationKey {
 }
 
 const activityFailureCategoryKeys: Record<ActivityFailureCategory, TranslationKey> = {
+  approval_denied: "enum.activityFailure.approvalDenied",
+  approval_expired: "enum.activityFailure.approvalExpired",
+  approval_cancelled: "enum.activityFailure.approvalCancelled",
   tool_disabled: "enum.activityFailure.toolDisabled",
   target_changed: "enum.activityFailure.targetChanged",
   atomic_failure: "enum.activityFailure.atomicFailure",
@@ -375,6 +378,8 @@ export type HostErrorCode =
   | "IO_FAILURE"
   | "INVALID_ARGUMENTS"
   | "EXECUTION_FAILED"
+  | "CONFIG_SCHEMA_UNSUPPORTED"
+  | "CONFIG_MIGRATION_FAILED"
   | "CONFIG_INVALID"
   | "CONFIG_WRITE_FAILED"
   | "CONFIG_NOT_FOUND"
@@ -451,6 +456,8 @@ const errorKeys: Record<KnownErrorCode, TranslationKey> = {
   IO_FAILURE: "errors.codes.ioFailure",
   INVALID_ARGUMENTS: "errors.codes.invalidArguments",
   EXECUTION_FAILED: "errors.codes.executionFailed",
+  CONFIG_SCHEMA_UNSUPPORTED: "errors.codes.configSchemaUnsupported",
+  CONFIG_MIGRATION_FAILED: "errors.codes.configMigrationFailed",
   CONFIG_INVALID: "errors.codes.configInvalid",
   CONFIG_WRITE_FAILED: "errors.codes.configWriteFailed",
   CONFIG_NOT_FOUND: "errors.codes.configNotFound",
@@ -559,3 +566,34 @@ export function systemPolicyNameKey(ruleId: string): TranslationKey {
 export function systemPolicyReasonKey(ruleId: string): TranslationKey {
   return systemPolicyKeys(ruleId).reason;
 }
+
+const toolReasonKeys: Record<import("@protocol/v1").ToolStatusReason, TranslationKey> = {
+  available: "m7.reasons.available",
+  approval_required: "m7.reasons.approval_required",
+  tool_disabled: "m7.reasons.tool_disabled",
+  developer_mode_required: "m7.reasons.developer_mode_required",
+  runtime_not_ready: "m7.reasons.runtime_not_ready",
+  capability_unavailable: "m7.reasons.capability_unavailable",
+  bash_executable_unavailable: "m7.reasons.bash_executable_unavailable",
+  policy_denied: "m7.reasons.policy_denied",
+  invalid_policy_snapshot: "m7.reasons.invalid_policy_snapshot",
+  invalid_policy_context: "m7.reasons.invalid_policy_context",
+  unsupported_capability: "m7.reasons.unsupported_capability",
+  metadata_invalid: "m7.reasons.metadata_invalid",
+};
+const toolRemediationKeys: Record<import("@protocol/v1").ToolStatusReason, TranslationKey> = {
+  available: "m7.remediation.available",
+  approval_required: "m7.remediation.approval_required",
+  tool_disabled: "m7.remediation.tool_disabled",
+  developer_mode_required: "m7.remediation.developer_mode_required",
+  runtime_not_ready: "m7.remediation.runtime_not_ready",
+  capability_unavailable: "m7.remediation.capability_unavailable",
+  bash_executable_unavailable: "m7.remediation.bash_executable_unavailable",
+  policy_denied: "m7.remediation.policy_denied",
+  invalid_policy_snapshot: "m7.remediation.invalid_policy_snapshot",
+  invalid_policy_context: "m7.remediation.invalid_policy_context",
+  unsupported_capability: "m7.remediation.unsupported_capability",
+  metadata_invalid: "m7.remediation.metadata_invalid",
+};
+export const toolStatusReasonKey = (reason: import("@protocol/v1").ToolStatusReason) => toolReasonKeys[reason];
+export const toolRemediationKey = (reason: import("@protocol/v1").ToolStatusReason) => toolRemediationKeys[reason];

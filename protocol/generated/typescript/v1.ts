@@ -48,6 +48,7 @@ startedAt: string, lifecycle: RuntimeLifecycle, readiness: RuntimeReadiness, con
 export type RuntimeStopResult = { accepted: boolean, };
 export type McpEndpointResult = { url: string, };
 export type ToolReadiness = "ready" | "unavailable";
+export type ToolStatusReason = "available" | "approval_required" | "tool_disabled" | "developer_mode_required" | "runtime_not_ready" | "capability_unavailable" | "bash_executable_unavailable" | "policy_denied" | "invalid_policy_snapshot" | "invalid_policy_context" | "unsupported_capability" | "metadata_invalid";
 export type RiskLevel = "low" | "medium" | "high";
 export type ToolDescriptor = { name: string, description: string, implemented: boolean, enabled: boolean, exposed: boolean, effectivePolicy: PolicyDecision, scope: string, readiness: ToolReadiness, riskLevel: RiskLevel, };
 export type ToolsListResult = { items: Array<ToolDescriptor>, };
@@ -66,7 +67,30 @@ export type EffectivePolicyTool = { tool: string, decision: PolicyDecision, matc
 export type PolicyEffectiveSnapshot = { valid: boolean, status: PolicySnapshotStatus, statusReason?: PolicyReason, systemRules: Array<EffectivePolicyRule>, userRules: Array<EffectivePolicyRule>, toolDefaults: ToolPolicyDefaults, perTool: Array<EffectivePolicyTool>, };
 export type PoliciesEffectiveResult = { snapshot: PolicyEffectiveSnapshot, };
 export type PoliciesListResult = { items: Array<PolicyRule>, effective?: PolicyEffectiveSnapshot, };
-export type ActivityEventType = "runtime_started" | "runtime_stopped" | "tool_requested" | "validation_failed" | "workspace_violation" | "policy_evaluated" | "approval_requested" | "approval_resolved" | "approval_denied" | "approval_expired" | "approval_cancelled" | "execution_started" | "execution_completed" | "execution_failed" | "execution_timed_out" | "execution_cancelled";
+export type SanitizedArgumentsEvidence = { "tool": "read_file", logicalPath: string, } | { "tool": "glob", pattern: string, } | { "tool": "write", logicalPath: string, } | { "tool": "edit", logicalPath: string, } | { "tool": "bash", commandPreview: string, };
+export type ExecutionResultEvidence = { "tool": "read_file", bytesRead: number, } | { "tool": "glob", matchCount: number, } | { "tool": "write", bytesWritten: number, disposition: WriteDisposition, } | { "tool": "edit", replacements: number, bytesWritten: number, } | { "tool": "bash", exitCode: number, };
+export type WriteDisposition = "created" | "overwritten";
+export type AuditEventType = "request_received" | "workspace_validated" | "policy_evaluated" | "execution_started" | "execution_completed" | "execution_failed" | "request_denied" | "approval_required" | "approval_resolved" | "approval_expired" | "approval_cancelled" | "session_grant_matched";
+export type AuditLifecycleState = "received" | "validating" | "workspace_validating" | "policy_evaluating" | "denied" | "awaiting_approval" | "executing" | "completed" | "failed";
+export type AuditOutcome = "in_progress" | "success" | "failed" | "denied" | "approval_required";
+export type ActivityCategory = "request" | "workspace" | "policy" | "execution" | "approval";
+export type ActivityFailureCategory = "approval_denied" | "approval_expired" | "approval_cancelled" | "tool_disabled" | "target_changed" | "atomic_failure" | "io_failure" | "workspace_violation" | "invalid_arguments" | "execution_failed" | "bash_unavailable" | "bash_invalid_command" | "bash_command_too_long" | "bash_timeout" | "bash_output_limit" | "bash_concurrency_limit" | "bash_spawn_failed" | "bash_cancelled" | "bash_process_failed";
+export type BashActivityEvidence = { mode: SecurityMode, modeEligible: boolean, capability: ToolCapability, cwd: BashWorkingDirectory, commandPreview?: string | null, classification?: BashClassification | null, riskFlags?: Array<BashRiskFlag>, approvalRequestId?: string | null, sessionGrantHit: boolean, exitCode?: number | null, durationMs?: number, };
+export type ToolCapability = "workspace_read" | "workspace_write" | "developer_shell";
+export type ActivityEntry = { eventId: string, requestId: string,
+/**
+ * Normalized UTC; None when the source timestamp is invalid.
+ */
+timestamp: string | null, category: ActivityCategory, eventType: AuditEventType, lifecycleState: AuditLifecycleState,
+/**
+ * Only a source-controlled registry identifier, otherwise None.
+ */
+toolName: string | null,
+/**
+ * None means policy was not evaluated, never an implicit ALLOW.
+ */
+decisionSummary: PolicyDecision | null, matchedRuleIds?: Array<string>, policyReason?: PolicyReason | null, outcomeSummary: AuditOutcome, failureCategory?: ActivityFailureCategory | null, bash?: BashActivityEvidence | null, toolEnabled?: boolean, capability?: ToolCapability, sanitizedArguments?: SanitizedArgumentsEvidence, approvalId?: string, approvalDecision?: ApprovalDecision, durationMs?: number, resultEvidence?: ExecutionResultEvidence, };
+export type ActivityEventType = "runtime_started" | "runtime_stopped" | "tool_requested" | "validation_failed" | "workspace_violation" | "policy_evaluated" | "approval_requested" | "approval_resolved" | "approval_denied" | "approval_expired" | "approval_cancelled" | "session_grant_matched" | "execution_started" | "execution_completed" | "execution_failed" | "execution_timed_out" | "execution_cancelled";
 export type ActivityEvent = { eventId: string,
 /**
  * Runtime-local monotonically increasing sequence number.

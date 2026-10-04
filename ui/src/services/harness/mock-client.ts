@@ -24,7 +24,7 @@ function decrementDecimal(value: string): string {
   }
   return "0";
 }
-const completeConfig = (): AppConfig => ({ schemaVersion: 1, configRevision: "7", workspace: { rootPath: "D:\\example-project" }, tunnel: { tunnelId: "mock-tunnel", tunnelClientPath: "D:\\example-project\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] } });
+const completeConfig = (): AppConfig => ({ schemaVersion: 2, configRevision: "7", workspace: { rootPath: "D:\\example-project" }, tunnel: { tunnelId: "mock-tunnel", tunnelClientPath: "D:\\example-project\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] } });
 const safeConfig = (): AppConfig => {
  const config = completeConfig();
  return {

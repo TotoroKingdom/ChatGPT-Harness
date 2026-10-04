@@ -4,8 +4,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Persistent host configuration version, independent of wire protocol v1.
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppConfig {
     pub schema_version: u32,
     #[ts(type = "string")]
@@ -183,7 +186,7 @@ pub struct WorkspaceConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TunnelConfig {
     pub tunnel_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,7 +203,7 @@ pub struct TunnelConfig {
 
 /// An opaque SecretStore lookup reference; it never contains a raw secret.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SecretReference {
     pub provider: String,
     pub key: String,
@@ -221,7 +224,7 @@ pub struct SecurityConfig {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

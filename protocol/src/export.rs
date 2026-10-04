@@ -59,6 +59,7 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         RuntimeStopResult,
         McpEndpointResult,
         ToolReadiness,
+        ToolStatusReason,
         RiskLevel,
         ToolDescriptor,
         ToolsListResult,
@@ -77,6 +78,17 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         PolicyEffectiveSnapshot,
         PoliciesEffectiveResult,
         PoliciesListResult,
+        SanitizedArgumentsEvidence,
+        ExecutionResultEvidence,
+        WriteDisposition,
+        control_read::AuditEventType,
+        control_read::AuditLifecycleState,
+        control_read::AuditOutcome,
+        control_read::ActivityCategory,
+        control_read::ActivityFailureCategory,
+        control_read::BashActivityEvidence,
+        control_read::ToolCapability,
+        control_read::ActivityEntry,
         ActivityEventType,
         ActivityEvent,
         ActivityListParams,
@@ -122,6 +134,7 @@ pub fn generate_json_schema(root: &Path) -> io::Result<()> {
         "policies-list-result.schema.json" => PoliciesListResult,
         "activity-list-result.schema.json" => ActivityListResult,
         "activity-event.schema.json" => ActivityEvent,
+        "activity-entry.schema.json" => control_read::ActivityEntry,
         "approvals-list-result.schema.json" => ApprovalsListResult,
         "approvals-resolve-params.schema.json" => ApprovalsResolveParams,
         "diagnostic-run.schema.json" => DiagnosticRun,
@@ -149,12 +162,32 @@ fn write_schema<T: JsonSchema>(root: &Path, file: &str) -> io::Result<()> {
             "$comment".to_owned(),
             serde_json::Value::String("GENERATED FILE — DO NOT EDIT".to_owned()),
         );
+    canonicalize_json(&mut schema);
     let json = serde_json::to_string_pretty(&schema)
         .expect("schemas derived from protocol models must serialize");
     write(
         root.join("generated/json-schema").join(file),
         format!("{json}\n"),
     )
+}
+
+/// Host dependency features can preserve schema object insertion order.
+/// Artifacts must stay byte-identical in standalone and workspace builds.
+fn canonicalize_json(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.sort_keys();
+            for value in map.values_mut() {
+                canonicalize_json(value);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                canonicalize_json(value);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn write(path: impl AsRef<Path>, content: String) -> io::Result<()> {

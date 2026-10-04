@@ -98,7 +98,7 @@ describe("TauriHarnessControlClient", () => {
   });
 
   it("persists the isolated UI language command without using configSave", async () => {
-    const persisted = { schemaVersion: 1, configRevision: "7", ui: { language: "zh-CN" } };
+    const persisted = { schemaVersion: 2, configRevision: "7", ui: { language: "zh-CN" } };
     tauri.invoke.mockResolvedValue(persisted);
     const client = new TauriHarnessControlClient();
 

@@ -2,9 +2,9 @@
 // (protocol/src/v1/control_read.rs). These parsers deliberately do not
 // evaluate policy, read persisted config, or infer Runtime readiness from a
 // desired path or mode.
-import type { PolicyDecision, PolicyReason, RuntimeReadiness } from "@protocol/v1";
+import type { ToolStatusReason, SanitizedArgumentsEvidence, ExecutionResultEvidence, ToolCapability as SharedToolCapability, AuditEventType as SharedAuditEventType, AuditLifecycleState as SharedAuditLifecycleState, AuditOutcome as SharedAuditOutcome, ActivityCategory as SharedActivityCategory, ActivityFailureCategory as SharedActivityFailureCategory, ApprovalDecision, PolicyDecision, PolicyReason, RuntimeReadiness } from "@protocol/v1";
 
-export type ToolCapability = "workspace_read" | "workspace_write" | "developer_shell";
+export type ToolCapability = SharedToolCapability;
 export type ToolAvailability =
   | "available"
   | "available_with_approval"
@@ -16,6 +16,7 @@ export type ToolReadiness = "ready" | "unavailable";
 
 export type ToolDiagnostic = {
   name: string;
+  statusReason?: ToolStatusReason;
   availability: ToolAvailability;
   decision: PolicyDecision;
   // M4 read responses omitted these fields, so they remain optional at this
@@ -29,7 +30,9 @@ export type ToolDiagnostic = {
 export type RuntimeDiagnostics = {
   schemaVersion: 1;
   capturedAt: string;
-  runtime: { readiness: RuntimeReadiness };
+  runtime: { readiness: RuntimeReadiness; configRevision?: string | null };
+  requests?: { activeRequests: number; pendingApprovals: number; runningExecutions: number };
+  lastError?: { code: string | null };
   security: {
     workspaceValidation: "not_initialized" | "validated_at_initialization";
     policyEngineLoaded: boolean;
@@ -64,49 +67,12 @@ export type BashActivityEvidence = {
   durationMs?: number;
 };
 
-export type ActivityFailureCategory =
-  | "tool_disabled"
-  | "target_changed"
-  | "atomic_failure"
-  | "io_failure"
-  | "workspace_violation"
-  | "invalid_arguments"
-  | "execution_failed"
-  | "bash_unavailable"
-  | "bash_invalid_command"
-  | "bash_command_too_long"
-  | "bash_timeout"
-  | "bash_output_limit"
-  | "bash_concurrency_limit"
-  | "bash_spawn_failed"
-  | "bash_cancelled"
-  | "bash_process_failed";
+export type ActivityFailureCategory = SharedActivityFailureCategory;
 
-export type ActivityCategory = "request" | "workspace" | "policy" | "execution" | "approval";
-export type ActivityEventType =
-  | "request_received"
-  | "workspace_validated"
-  | "policy_evaluated"
-  | "execution_started"
-  | "execution_completed"
-  | "execution_failed"
-  | "request_denied"
-  | "approval_required"
-  | "approval_resolved"
-  | "approval_expired"
-  | "approval_cancelled"
-  | "session_grant_matched";
-export type ActivityLifecycleState =
-  | "received"
-  | "validating"
-  | "workspace_validating"
-  | "policy_evaluating"
-  | "denied"
-  | "awaiting_approval"
-  | "executing"
-  | "completed"
-  | "failed";
-export type ActivityOutcome = "in_progress" | "success" | "failed" | "denied" | "approval_required";
+export type ActivityCategory = SharedActivityCategory;
+export type ActivityEventType = SharedAuditEventType;
+export type ActivityLifecycleState = SharedAuditLifecycleState;
+export type ActivityOutcome = SharedAuditOutcome;
 
 export type ActivityEntry = {
   // New control-read responses carry IDs/category/lifecycle. They are optional
@@ -124,6 +90,13 @@ export type ActivityEntry = {
   outcomeSummary: ActivityOutcome;
   failureCategory?: ActivityFailureCategory;
   bash?: BashActivityEvidence;
+  toolEnabled?: boolean;
+  capability?: ToolCapability;
+  sanitizedArguments?: SanitizedArgumentsEvidence;
+  approvalId?: string;
+  approvalDecision?: ApprovalDecision;
+  durationMs?: number;
+  resultEvidence?: ExecutionResultEvidence;
 };
 
 export interface ControlReadClient {
@@ -177,9 +150,10 @@ function ruleId(value: unknown): string {
 const decisions = ["allow", "ask", "deny"] as const;
 const policyReasons = ["system_guardrail", "matched_user_rules", "tool_default", "invalid_policy_snapshot", "invalid_context", "unsupported_capability", "tool_disabled"] as const;
 const capabilities = ["workspace_read", "workspace_write", "developer_shell"] as const;
+const statusReasons = ["available", "approval_required", "tool_disabled", "developer_mode_required", "runtime_not_ready", "capability_unavailable", "bash_executable_unavailable", "policy_denied", "invalid_policy_snapshot", "invalid_policy_context", "unsupported_capability", "metadata_invalid"] as const;
 const availability = ["available", "available_with_approval", "unavailable_by_mode", "unavailable_by_policy", "unavailable_by_runtime", "disabled"] as const;
 const readiness = ["ready", "unavailable"] as const;
-const failureCategories = ["tool_disabled", "target_changed", "atomic_failure", "io_failure", "workspace_violation", "invalid_arguments", "execution_failed", "bash_unavailable", "bash_invalid_command", "bash_command_too_long", "bash_timeout", "bash_output_limit", "bash_concurrency_limit", "bash_spawn_failed", "bash_cancelled", "bash_process_failed"] as const;
+const failureCategories = ["approval_denied", "approval_expired", "approval_cancelled", "tool_disabled", "target_changed", "atomic_failure", "io_failure", "workspace_violation", "invalid_arguments", "execution_failed", "bash_unavailable", "bash_invalid_command", "bash_command_too_long", "bash_timeout", "bash_output_limit", "bash_concurrency_limit", "bash_spawn_failed", "bash_cancelled", "bash_process_failed"] as const;
 const activityCategories = ["request", "workspace", "policy", "execution", "approval"] as const;
 const activityEventTypes = ["request_received", "workspace_validated", "policy_evaluated", "execution_started", "execution_completed", "execution_failed", "request_denied", "approval_required", "approval_resolved", "approval_expired", "approval_cancelled", "session_grant_matched"] as const;
 const lifecycleStates = ["received", "validating", "workspace_validating", "policy_evaluating", "denied", "awaiting_approval", "executing", "completed", "failed"] as const;
@@ -216,7 +190,7 @@ export function parseDiagnostics(value: unknown): RuntimeDiagnostics {
   const data = record(value);
   if (data.schemaVersion !== 1) return invalid();
   const runtime = record(data.runtime), security = record(data.security), tools = record(data.tools);
-  return {
+  const parsed: RuntimeDiagnostics = {
     schemaVersion: 1, capturedAt: timestamp(data.capturedAt),
     runtime: { readiness: enumeration(runtime.readiness, ["not_ready", "initializing", "ready", "degraded"]) },
     security: {
@@ -225,6 +199,21 @@ export function parseDiagnostics(value: unknown): RuntimeDiagnostics {
     },
     tools: { declaredCount: count(tools.declaredCount), effectiveCount: count(tools.effectiveCount) },
   };
+  if (runtime.configRevision !== undefined && runtime.configRevision !== null) {
+    if (typeof runtime.configRevision !== "string" || !/^(0|[1-9][0-9]*)$/.test(runtime.configRevision)) return invalid();
+    parsed.runtime.configRevision = runtime.configRevision;
+  }
+  if (data.requests !== undefined) {
+    const requests = record(data.requests);
+    // Old responses may be explicitly not instrumented; never invent zero.
+    if (requests.observation === "instrumented") parsed.requests = { activeRequests: count(requests.activeRequests), pendingApprovals: count(requests.pendingApprovals), runningExecutions: count(requests.runningExecutions) };
+  }
+  if (data.lastError !== undefined) {
+    const error = record(data.lastError);
+    const safeCodes = ["NOT_INITIALIZED", "ALREADY_INITIALIZED", "PROTOCOL_VERSION_MISMATCH", "RUNTIME_NOT_READY", "INVALID_ARGUMENT", "APPROVAL_NOT_FOUND", "APPROVAL_ALREADY_RESOLVED", "APPROVAL_SESSION_GRANT_UNAVAILABLE", "BASH_UNAVAILABLE", "BASH_INVALID_COMMAND", "BASH_COMMAND_TOO_LONG", "BASH_TIMEOUT", "BASH_OUTPUT_LIMIT", "BASH_CONCURRENCY_LIMIT", "BASH_SPAWN_FAILED", "BASH_CANCELLED", "BASH_PROCESS_FAILED", "INTERNAL_ERROR"];
+    parsed.lastError = { code: typeof error.code === "string" && safeCodes.includes(error.code) ? error.code : null };
+  }
+  return parsed;
 }
 
 export function parseTools(value: unknown): ToolDiagnostic[] {
@@ -237,6 +226,7 @@ export function parseTools(value: unknown): ToolDiagnostic[] {
       availability: enumeration(tool.availability, availability),
       decision: enumeration(tool.decision, decisions),
     };
+    if (tool.statusReason !== undefined && tool.statusReason !== null) parsed.statusReason = enumeration(tool.statusReason, statusReasons);
     if (tool.declaredCapability !== undefined && tool.declaredCapability !== null) {
       parsed.declaredCapability = enumeration(tool.declaredCapability, capabilities);
     } else if (tool.declaredCapability === null) {
@@ -255,6 +245,27 @@ export function parseTools(value: unknown): ToolDiagnostic[] {
     if (parsedReadinessReason !== undefined) parsed.readinessReason = parsedReadinessReason;
     return parsed;
   });
+}
+
+function parseArguments(value: unknown): SanitizedArgumentsEvidence {
+  const args = record(value);
+  const tool = enumeration(args.tool, ["read_file", "glob", "write", "edit", "bash"] as const);
+  if (tool === "glob") return { tool, pattern: boundedText(args.pattern, 1027) };
+  if (tool === "bash") return { tool, commandPreview: boundedText(args.commandPreview, 1027) };
+  const logicalPath = boundedText(args.logicalPath);
+  if (!logicalPath || logicalPath.startsWith("/") || logicalPath.includes("\\") || logicalPath.includes(":") || logicalPath.split("/").includes("..")) return invalid();
+  return { tool, logicalPath };
+}
+function parseResult(value: unknown): ExecutionResultEvidence {
+  const result = record(value);
+  const tool = enumeration(result.tool, ["read_file", "glob", "write", "edit", "bash"] as const);
+  switch (tool) {
+    case "read_file": return { tool, bytesRead: count(result.bytesRead) };
+    case "glob": return { tool, matchCount: count(result.matchCount) };
+    case "write": return { tool, bytesWritten: count(result.bytesWritten), disposition: enumeration(result.disposition, ["created", "overwritten"] as const) };
+    case "edit": return { tool, replacements: count(result.replacements), bytesWritten: count(result.bytesWritten) };
+    case "bash": return { tool, exitCode: integer(result.exitCode) };
+  }
 }
 
 export function parseActivity(value: unknown): ActivityEntry[] {
@@ -280,6 +291,13 @@ export function parseActivity(value: unknown): ActivityEntry[] {
     if (category !== undefined) parsed.category = category;
     if (lifecycleState !== undefined) parsed.lifecycleState = lifecycleState;
     if (failureCategory !== undefined) parsed.failureCategory = failureCategory;
+    if (entry.toolEnabled !== undefined && entry.toolEnabled !== null) parsed.toolEnabled = boolean(entry.toolEnabled);
+    if (entry.capability !== undefined && entry.capability !== null) parsed.capability = enumeration(entry.capability, capabilities);
+    if (entry.sanitizedArguments !== undefined && entry.sanitizedArguments !== null) parsed.sanitizedArguments = parseArguments(entry.sanitizedArguments);
+    if (entry.approvalId !== undefined && entry.approvalId !== null) parsed.approvalId = safeIdentifier(entry.approvalId);
+    if (entry.approvalDecision !== undefined && entry.approvalDecision !== null) parsed.approvalDecision = enumeration(entry.approvalDecision, ["allow_once", "allow_for_session", "deny"] as const);
+    if (entry.durationMs !== undefined && entry.durationMs !== null) parsed.durationMs = count(entry.durationMs);
+    if (entry.resultEvidence !== undefined && entry.resultEvidence !== null) parsed.resultEvidence = parseResult(entry.resultEvidence);
     if (entry.bash !== undefined && entry.bash !== null) parsed.bash = parseBashEvidence(entry.bash);
     return parsed;
   });

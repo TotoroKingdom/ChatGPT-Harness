@@ -1,12 +1,15 @@
+import { ConfigRevisionStatus } from "@/components/status/ConfigRevisionStatus";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, BashConfig, ToolConfig, ToolDescriptor } from "@protocol/v1";
 import { useHarnessData } from "@/app/providers/HarnessDataProvider";
 import { useControlRead } from "@/app/providers/useControlRead";
 import type { ToolDiagnostic } from "@/services/harness/control-read";
-import { Card, SectionHeading } from "@/components/common/primitives";
+import { Card, SectionHeading, StatusBadge } from "@/components/common/primitives";
 import { ControlReadView } from "@/components/status/ControlReadView";
 import {
+  toolStatusReasonKey,
+  toolRemediationKey,
   policyDecisionKey,
   presentError,
   toolAvailabilityKey,
@@ -79,7 +82,7 @@ function metadataFromPersistedConfig(config: AppConfig): ToolMetadata[] {
 function effectiveReason(tool: ToolDiagnostic | undefined, running: boolean): { key: TranslationKey; detail?: string } {
   if (!running) return { key: "tools.availabilityReasons.noActiveRuntime" };
   if (!tool) return { key: "tools.availabilityReasons.notReported" };
-  return { key: availabilityReasonKeys[tool.availability], detail: tool.reason };
+  return { key: tool.statusReason ? toolStatusReasonKey(tool.statusReason) : availabilityReasonKeys[tool.availability], detail: tool.reason };
 }
 
 function effectiveDecision(tool: ToolDiagnostic | undefined, running: boolean, translate: (key: string) => string): string {
@@ -90,9 +93,9 @@ function effectiveDecision(tool: ToolDiagnostic | undefined, running: boolean, t
   return translate(policyDecisionKey(tool.decision));
 }
 
-function availabilityLabel(tool: ToolDiagnostic | undefined, running: boolean, translate: (key: string) => string): string {
+function availabilityLabel(tool: ToolDiagnostic | undefined, running: boolean, translate: (key: string) => string) {
   if (!running || !tool) return translate("tools.notReported");
-  return translate(toolAvailabilityKey(tool.availability));
+  return <>{tool.availability === "unavailable_by_policy" && <><StatusBadge tone="danger">{translate("m7.states.denied")}</StatusBadge><br /></>}{translate(toolAvailabilityKey(tool.availability))}</>;
 }
 
 function LegacyEffectiveTools({ tools }: { tools: ToolDiagnostic[] }) {
@@ -103,7 +106,7 @@ function LegacyEffectiveTools({ tools }: { tools: ToolDiagnostic[] }) {
       <caption className="muted">{t("tools.table.legacyCaption")}</caption>
       <thead><tr><th scope="col">{t("tools.table.toolName")}</th><th scope="col">{t("tools.table.availability")}</th><th scope="col">{t("tools.table.decision")}</th><th scope="col">{t("tools.table.reason")}</th></tr></thead>
       <tbody>{tools.map((tool) => <tr key={tool.name}>
-        <td className="mono">{tool.name}</td><td>{t(toolAvailabilityKey(tool.availability))}</td><td>{t(policyDecisionKey(tool.decision))}</td><td>{t("tools.notReportedByControlPlane")}</td>
+        <td className="mono">{tool.name}</td><td>{availabilityLabel(tool, true, t)}</td><td>{t(policyDecisionKey(tool.decision))}</td><td>{t("tools.notReportedByControlPlane")}</td>
       </tr>)}</tbody>
     </table></div></Card>;
 }
@@ -115,7 +118,6 @@ export function ToolsPage() {
     config,
     tools: registry,
     components,
-    restartRequired,
     saveConfig,
   } = useHarnessData();
   const running = components.runtime === "ready" || components.runtime === "degraded";
@@ -213,7 +215,7 @@ export function ToolsPage() {
     : null;
   const reason = (tool: ToolDiagnostic | undefined) => {
     const presentation = effectiveReason(tool, running);
-    return <>{t(presentation.key)}{technicalDetail(presentation.detail)}</>;
+    return <>{t(presentation.key)}{technicalDetail(presentation.detail)}{tool?.statusReason && <p>{t(toolRemediationKey(tool.statusReason))}</p>}</>;
   };
   const readiness = (tool: ToolDiagnostic | undefined) => tool?.readiness
     ? t(toolReadinessKey(tool.readiness))
@@ -229,10 +231,7 @@ export function ToolsPage() {
       action={<button className="button button-secondary" onClick={refresh} disabled={!running}>{t("tools.refresh")}</button>}
     />
 
-    {restartRequired && <div className="notice notice-warning" role="status">
-      <strong>{t("tools.restartRequired")}</strong>
-      <span>{t("tools.restartDescription")}</span>
-    </div>}
+    <ConfigRevisionStatus descriptionKey="tools.restartDescription" />
     {saveError && <div className="notice notice-danger" role="alert"><strong>{t("tools.saveFailed")}</strong><span>{t(saveError.summaryKey)}</span>{saveError.detail && <span className="muted mono">{t("tools.technicalDetail")}: {saveError.detail}</span>}</div>}
     {saveMessageKey && <div className="notice notice-success" role="status"><span>{t(saveMessageKey)}</span></div>}
 

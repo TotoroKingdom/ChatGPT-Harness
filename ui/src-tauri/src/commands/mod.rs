@@ -141,19 +141,28 @@ pub fn config_reset(
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<(), ControlError> {
     let config_store = store(&app)?;
+    let backend = state
+        .lock()
+        .map_err(|_| secret_error("Secret store unavailable."))?;
+    reset_local_config(&config_store, backend.secrets.as_ref())
+}
+
+fn reset_local_config(
+    config_store: &ConfigStore,
+    secrets: &dyn SecretStore,
+) -> Result<(), ControlError> {
     let api_key = match config_store.load() {
         Ok(Some(config)) => config.tunnel.api_key_ref.map(|reference| reference.key),
         Ok(None) => None,
-        Err(ConfigError::Invalid(_)) => Some(api_key_ref().key),
+        // A broken/unsupported file is not trusted as a source of arbitrary
+        // credential identifiers. Only the known app-owned default is cleared.
+        Err(
+            ConfigError::Invalid(_) | ConfigError::Migration(_) | ConfigError::UnsupportedSchema,
+        ) => Some(api_key_ref().key),
         Err(error) => return Err(error.into()),
     };
     if let Some(key) = api_key {
-        state
-            .lock()
-            .map_err(|_| secret_error("Secret store unavailable."))?
-            .secrets
-            .delete(&key)
-            .map_err(secret_error)?;
+        secrets.delete(&key).map_err(secret_error)?;
     }
     config_store.reset().map_err(Into::into)
 }
@@ -704,5 +713,41 @@ mod validation_tests {
                 .code,
             "WORKSPACE_INVALID"
         );
+    }
+}
+
+#[cfg(test)]
+mod m7_recovery_tests {
+    use super::*;
+    #[test]
+    fn explicit_reset_can_recover_migration_and_unsupported_files_without_reading_secrets() {
+        struct SecretDouble;
+        impl SecretStore for SecretDouble {
+            fn get(&self, _: &str) -> Result<Option<String>, String> {
+                panic!("raw secret must never be read")
+            }
+            fn exists(&self, _: &str) -> Result<bool, String> {
+                panic!("not needed")
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), String> {
+                panic!("not needed")
+            }
+            fn delete(&self, key: &str) -> Result<(), String> {
+                assert_eq!(key, api_key_ref().key);
+                Ok(())
+            }
+        }
+        for source in [
+            r#"{"schemaVersion":1,"unexpectedSecret":"SENTINEL"}"#,
+            r#"{"schemaVersion":99}"#,
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = ConfigStore::new(directory.path().into());
+            let path = directory.path().join("config.json");
+            std::fs::write(&path, source).unwrap();
+            reset_local_config(&store, &SecretDouble).unwrap();
+            assert!(!path.exists());
+            assert!(!directory.path().join("config.json.tmp").exists());
+        }
     }
 }

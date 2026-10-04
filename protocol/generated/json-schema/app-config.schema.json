@@ -99,6 +99,7 @@
       ]
     },
     "SecretReference": {
+      "additionalProperties": false,
       "description": "An opaque SecretStore lookup reference; it never contains a raw secret.",
       "properties": {
         "key": {
@@ -205,6 +206,7 @@
       "type": "object"
     },
     "TunnelConfig": {
+      "additionalProperties": false,
       "properties": {
         "apiKeyRef": {
           "anyOf": [
@@ -242,6 +244,7 @@
       "type": "object"
     },
     "UiConfig": {
+      "additionalProperties": false,
       "properties": {
         "language": {
           "anyOf": [
@@ -316,6 +319,7 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "properties": {
     "bash": {
       "$ref": "#/$defs/BashConfig",

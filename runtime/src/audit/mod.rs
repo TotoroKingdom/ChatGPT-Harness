@@ -6,7 +6,7 @@
 //! output are excluded. M5 adds a bounded sanitized command preview and scalar
 //! execution evidence; private grant scopes and logical argv remain internal.
 
-mod event;
+pub(crate) mod event;
 mod redaction;
 
 pub(crate) use event::{

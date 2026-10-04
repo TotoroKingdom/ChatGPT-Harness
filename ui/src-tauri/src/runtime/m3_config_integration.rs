@@ -101,6 +101,7 @@ fn int_01(fixture: &Fixture) -> QaResult<()> {
     fs::create_dir_all(&directory).map_err(|_| "create INT-01 config directory")?;
     let mut value =
         serde_json::to_value(base_config(fixture)).map_err(|_| "encode INT-01 config")?;
+    value["schemaVersion"] = serde_json::json!(1);
     value.as_object_mut().unwrap().remove("policies");
     fs::write(
         directory.join("config.json"),
@@ -111,7 +112,7 @@ fn int_01(fixture: &Fixture) -> QaResult<()> {
         .load()
         .map_err(|_| "load INT-01 config")?
         .ok_or_else(|| "INT-01 config missing".to_owned())?;
-    check!(loaded.schema_version == 1);
+    check!(loaded.schema_version == 2);
     check!(loaded.policies.tool_defaults.read_file == PolicyDecision::Allow);
     check!(loaded.policies.tool_defaults.glob == PolicyDecision::Allow);
     check!(loaded.policies.tool_defaults.write == PolicyDecision::Allow);

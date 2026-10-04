@@ -55,7 +55,7 @@ impl ActivityEventInput {
             }
             InternalAuditEventType::ApprovalExpired => ActivityEventType::ApprovalExpired,
             InternalAuditEventType::ApprovalCancelled => ActivityEventType::ApprovalCancelled,
-            InternalAuditEventType::SessionGrantMatched => ActivityEventType::ApprovalResolved,
+            InternalAuditEventType::SessionGrantMatched => ActivityEventType::SessionGrantMatched,
         };
 
         let mut metadata = vec![("tool".into(), event.tool_name.clone())];
@@ -101,6 +101,27 @@ impl ActivityEventInput {
             }
         }
 
+        if let Some(id) = &event.approval_id {
+            metadata.push(("approvalId".into(), id.clone()));
+        }
+        if let Some(duration) = event.duration_ms {
+            metadata.push(("durationMs".into(), duration.to_string()));
+        }
+        if let Some(enabled) = event.tool_enabled {
+            metadata.push(("toolEnabled".into(), enabled.to_string()));
+        }
+        if let Some(arguments) = &event.sanitized_arguments {
+            metadata.push((
+                "sanitizedArguments".into(),
+                serde_json::to_string(arguments).unwrap_or_default(),
+            ));
+        }
+        if let Some(result) = &event.result_evidence {
+            metadata.push((
+                "resultEvidence".into(),
+                serde_json::to_string(result).unwrap_or_default(),
+            ));
+        }
         let summary = activity_summary(event_type.clone());
         Some(Self {
             event_type,
@@ -157,6 +178,7 @@ fn activity_summary(event_type: ActivityEventType) -> &'static str {
         ActivityEventType::ExecutionFailed => "Tool execution failed.",
         ActivityEventType::ApprovalRequested => "Tool approval requested.",
         ActivityEventType::ApprovalResolved => "Tool approval resolved.",
+        ActivityEventType::SessionGrantMatched => "Session grant matched.",
         ActivityEventType::ApprovalDenied => "Tool approval denied.",
         ActivityEventType::ApprovalExpired => "Tool approval expired.",
         ActivityEventType::ApprovalCancelled => "Tool approval cancelled.",
@@ -170,6 +192,10 @@ fn activity_summary(event_type: ActivityEventType) -> &'static str {
 
 fn failure_category_name(category: crate::audit::AuditFailureCategory) -> &'static str {
     match category {
+        crate::audit::AuditFailureCategory::ApprovalDenied => "approval_denied",
+        crate::audit::AuditFailureCategory::ApprovalExpired => "approval_expired",
+        crate::audit::AuditFailureCategory::ApprovalCancelled => "approval_cancelled",
+
         crate::audit::AuditFailureCategory::ToolDisabled => "tool_disabled",
         crate::audit::AuditFailureCategory::TargetChanged => "target_changed",
         crate::audit::AuditFailureCategory::AtomicFailure => "atomic_failure",
@@ -264,6 +290,12 @@ mod tests {
     #[test]
     fn policy_evidence_is_projected_without_raw_or_unsafe_rule_ids() {
         let input = ActivityEventInput::from_audit(&AuditEvent {
+            tool_enabled: None,
+            capability: None,
+            sanitized_arguments: None,
+            approval_id: None,
+            duration_ms: None,
+            result_evidence: None,
             event_id: Uuid::new_v4(),
             request_id: Uuid::new_v4(),
             timestamp: "2026-10-02T00:00:00.000Z".into(),

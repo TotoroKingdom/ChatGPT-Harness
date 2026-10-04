@@ -1,4 +1,6 @@
 //! Runtime-owned enforcement. Transport adapters only parse and format data.
+mod counters;
+pub(crate) use counters::RequestCounters;
 mod context;
 mod executor;
 mod pipeline;

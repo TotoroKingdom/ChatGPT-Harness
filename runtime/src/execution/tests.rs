@@ -6,8 +6,8 @@ use crate::audit::{
 use crate::mcp::{McpExecutionContext, McpService};
 use crate::policy::{PolicyEngine, PolicyEvaluationReason};
 use crate::tools::{
-    AtomicPhase, EditError, EditRequest, GlobRequest, ReadFileError, ToolRegistry, WriteError,
-    WriteRequest,
+    AtomicPhase, EditError, EditRequest, GlobRequest, ReadFileError, ReadFileRequest, ToolRegistry,
+    WriteError, WriteRequest,
 };
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{PolicyDecision, PolicyRule, PolicySource, SecurityMode};
@@ -932,4 +932,437 @@ fn mcp_tools_list_exposes_only_available_effective_tools() {
             .collect::<Vec<_>>(),
         ["glob", "write", "edit"]
     );
+}
+
+#[test]
+fn m7_file_evidence_records_only_safe_arguments_results_and_terminal_duration() {
+    use harness_control_protocol::{ExecutionResultEvidence as R, SanitizedArgumentsEvidence as A};
+    let fixture = Fixture::new();
+    let pipeline = fixture.pipeline(PolicyEngine::system_rules());
+    let read = pipeline.execute(|| Ok(ReadFileRequest::new("sample.txt")));
+    assert_eq!(
+        read.audit_events.last().unwrap().result_evidence,
+        Some(R::ReadFile { bytes_read: 8 })
+    );
+    assert_eq!(
+        read.context.sanitized_arguments,
+        Some(A::ReadFile {
+            logical_path: "sample.txt".into()
+        })
+    );
+    let glob = pipeline.execute(|| Ok(GlobRequest::new("*.txt")));
+    assert_eq!(
+        glob.audit_events.last().unwrap().result_evidence,
+        Some(R::Glob { match_count: 1 })
+    );
+    let write = pipeline.execute(|| Ok(WriteRequest::new("new.txt", "WRITE_CONTENT_SENTINEL")));
+    let edit = pipeline.execute(|| {
+        Ok(EditRequest::new(
+            "new.txt",
+            "WRITE_CONTENT_SENTINEL",
+            "EDIT_NEW_SENTINEL",
+        ))
+    });
+    assert!(matches!(
+        write.audit_events.last().unwrap().result_evidence,
+        Some(R::Write {
+            bytes_written: 22,
+            disposition: harness_control_protocol::WriteDisposition::Created
+        })
+    ));
+    assert!(matches!(
+        edit.audit_events.last().unwrap().result_evidence,
+        Some(R::Edit {
+            replacements: 1,
+            bytes_written: 17
+        })
+    ));
+    for events in [
+        &read.audit_events,
+        &glob.audit_events,
+        &write.audit_events,
+        &edit.audit_events,
+    ] {
+        assert!(events.last().unwrap().duration_ms.is_some());
+        for event in &events[..events.len() - 1] {
+            assert!(event.duration_ms.is_none());
+            assert!(event.result_evidence.is_none());
+        }
+        let text = serde_json::to_string(events).unwrap();
+        for secret in [
+            "WRITE_CONTENT_SENTINEL",
+            "EDIT_NEW_SENTINEL",
+            fixture.root.to_str().unwrap(),
+        ] {
+            assert!(!text.contains(secret));
+        }
+        for event in events.iter() {
+            assert_eq!(event.tool_enabled, Some(true));
+            assert!(event.capability.is_some());
+        }
+    }
+    let invalid = pipeline.execute::<ReadFileRequest>(|| Err(ExecutionError::InvalidArguments));
+    let terminal = invalid.audit_events.last().unwrap();
+    assert_eq!(
+        terminal.failure_category,
+        Some(crate::audit::AuditFailureCategory::InvalidArguments)
+    );
+    assert!(terminal.duration_ms.is_some());
+    assert!(terminal.result_evidence.is_none());
+}
+
+#[test]
+fn m7_counters_observe_validation_executor_concurrency_and_all_exit_paths() {
+    use super::RequestCounters;
+    struct CountsHook(Arc<RequestCounters>);
+    impl ExecutionHook for CountsHook {
+        fn on_event(&self, _: &RequestContext, event: PipelineEvent) {
+            let (active, running) = self.0.snapshot();
+            if event == PipelineEvent::RequestReceived {
+                assert_eq!((active, running), (1, 0));
+            }
+            if event == PipelineEvent::PolicyDecision {
+                assert_eq!((active, running), (1, 0));
+            }
+            if event == PipelineEvent::ExecutionStarted {
+                assert_eq!((active, running), (1, 1));
+            }
+        }
+    }
+    for decision in [
+        PolicyDecision::Allow,
+        PolicyDecision::Deny,
+        PolicyDecision::Ask,
+    ] {
+        let fixture = Fixture::new();
+        let counters = Arc::new(RequestCounters::default());
+        let pipeline = fixture
+            .pipeline(rules(decision))
+            .with_counters(counters.clone())
+            .with_hook(Arc::new(CountsHook(counters.clone())));
+        pipeline.execute(|| {
+            assert_eq!(counters.snapshot(), (1, 0));
+            Ok(fixture.spy("sample.txt", false))
+        });
+        assert_eq!(counters.snapshot(), (0, 0));
+        pipeline.execute::<ReadFileRequest>(|| Err(ExecutionError::InvalidArguments));
+        assert_eq!(counters.snapshot(), (0, 0));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pipeline.execute::<ReadFileRequest>(|| panic!("test unwind"))
+        }));
+        assert_eq!(counters.snapshot(), (0, 0));
+    }
+    let fixture = Fixture::new();
+    let pipeline = fixture.pipeline(PolicyEngine::system_rules());
+    let entered = Arc::new(std::sync::Barrier::new(3));
+    let release = Arc::new(std::sync::Barrier::new(3));
+    std::thread::scope(|scope| {
+        for _ in 0..2 {
+            let entered = entered.clone();
+            let release = release.clone();
+            let pipeline = &pipeline;
+            let fixture = &fixture;
+            scope.spawn(move || {
+                pipeline.execute(|| {
+                    entered.wait();
+                    release.wait();
+                    Ok(fixture.spy("sample.txt", false))
+                })
+            });
+        }
+        entered.wait();
+        assert_eq!(pipeline.request_counts(), (2, 0));
+        release.wait();
+    });
+    assert_eq!(pipeline.request_counts(), (0, 0));
+    pipeline.execute(|| Ok(fixture.spy("sample.txt", true)));
+    assert_eq!(pipeline.request_counts(), (0, 0));
+    pipeline.execute(|| Ok(ReadFileRequest::new("../outside-secret.txt")));
+    assert_eq!(pipeline.request_counts(), (0, 0));
+}
+
+#[tokio::test]
+async fn m7_approval_lifecycle_releases_counters_and_preserves_correlation() {
+    struct Clock;
+    impl crate::approval::ApprovalClock for Clock {
+        fn now(&self) -> chrono::DateTime<chrono::Utc> {
+            chrono::Utc::now()
+        }
+    }
+    for action in ["allow", "deny", "expire", "cancel"] {
+        let fixture = Fixture::new();
+        let manager = crate::approval::ApprovalManager::with_test_clock(
+            "r",
+            "g",
+            std::time::Duration::from_millis(25),
+            Arc::new(Clock),
+        );
+        let pipeline = fixture
+            .pipeline(rules(PolicyDecision::Ask))
+            .with_approval_state(
+                manager.clone(),
+                Arc::new(crate::session_grant::SessionGrantStore::new("r")),
+            );
+        let request =
+            pipeline.execute_async(|| Ok(WriteRequest::new("ask.txt", "CONTENT_SENTINEL")));
+        let control = async {
+            loop {
+                if manager.pending_count() == 1 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(pipeline.request_counts(), (1, 0));
+            let approval = manager.list(None).pop().unwrap();
+            match action {
+                "allow" => {
+                    manager
+                        .resolve(
+                            &approval.request_id,
+                            harness_control_protocol::ApprovalDecision::AllowOnce,
+                        )
+                        .unwrap();
+                }
+                "deny" => {
+                    manager
+                        .resolve(
+                            &approval.request_id,
+                            harness_control_protocol::ApprovalDecision::Deny,
+                        )
+                        .unwrap();
+                }
+                "cancel" => manager.cancel(&approval.request_id),
+                _ => {}
+            }
+        };
+        let (report, _) = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            tokio::join!(request, control)
+        })
+        .await
+        .unwrap();
+        assert_eq!(pipeline.request_counts(), (0, 0));
+        assert_eq!(manager.pending_count(), 0);
+        let terminal = report.audit_events.last().unwrap();
+        assert_eq!(
+            terminal.approval_id,
+            Some(report.context.request_id.to_string())
+        );
+        assert!(terminal.duration_ms.is_some());
+        assert!(!serde_json::to_string(&report.audit_events)
+            .unwrap()
+            .contains("CONTENT_SENTINEL"));
+        assert_eq!(report.result.is_ok(), action == "allow");
+        if action == "expire" {
+            assert_eq!(
+                terminal.failure_category,
+                Some(AuditFailureCategory::ApprovalExpired)
+            );
+        }
+        if action == "cancel" {
+            assert_eq!(
+                terminal.failure_category,
+                Some(AuditFailureCategory::ApprovalCancelled)
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn m7_bash_timeout_and_output_limit_release_running_counter() {
+    for (command, expected) in [
+        ("sleep 1", crate::audit::AuditFailureCategory::BashTimeout),
+        (
+            "printf 123456789",
+            crate::audit::AuditFailureCategory::BashOutputLimit,
+        ),
+    ] {
+        let fixture = Fixture::new();
+        let executable =
+            crate::bash::resolve_bash(&harness_control_protocol::BashConfig::default());
+        let path = executable
+            .canonical_path()
+            .expect("validated Git Bash")
+            .to_path_buf();
+        let mut config = harness_control_protocol::ToolConfig::default();
+        config.bash.enabled = true;
+        let registry = Arc::new(ToolRegistry::from_config_with_bash(&config, &executable));
+        let mut policies = harness_control_protocol::PolicyConfig::default();
+        policies.tool_defaults.bash = PolicyDecision::Allow;
+        let pipeline = ExecutionPipeline::new(
+            fixture.guard.clone(),
+            registry.clone(),
+            PolicyEngine::compile(&policies, &registry),
+            SecurityContext {
+                workspace_id: fixture.workspace_id,
+                mode: SecurityMode::DeveloperTest,
+            },
+            64,
+            fixture.ready.clone(),
+        )
+        .with_bash_runtime(Arc::new(crate::bash::BashRuntime::with_test_limits(
+            Some(path),
+            fixture.root.clone(),
+            crate::bash::BashLimits::for_test(
+                if expected == crate::audit::AuditFailureCategory::BashTimeout {
+                    std::time::Duration::from_millis(250)
+                } else {
+                    std::time::Duration::from_secs(3)
+                },
+                4,
+            ),
+        )));
+        let report = pipeline
+            .execute_async(|| Ok(BashToolRequest::new(command.into())))
+            .await;
+        assert!(report.result.is_err());
+        assert_eq!(pipeline.request_counts(), (0, 0));
+        let terminal = report.audit_events.last().unwrap();
+        assert_eq!(terminal.failure_category, Some(expected));
+        assert!(terminal.duration_ms.is_some());
+    }
+}
+
+#[test]
+fn m7_allow_deny_disabled_workspace_and_failure_evidence_matrix() {
+    for row in [
+        "allow",
+        "deny",
+        "disabled",
+        "workspace",
+        "failure",
+        "validation",
+    ] {
+        let fixture = Fixture::new();
+        let registry = if row == "disabled" {
+            ToolRegistry::normal_mode().with_test_enabled(0, false)
+        } else {
+            ToolRegistry::normal_mode()
+        };
+        let pipeline = fixture.pipeline_with_registry(
+            rules(if row == "deny" {
+                PolicyDecision::Deny
+            } else {
+                PolicyDecision::Allow
+            }),
+            registry,
+        );
+        let report = if row == "validation" {
+            pipeline.execute::<ReadFileRequest>(|| Err(ExecutionError::InvalidArguments))
+        } else {
+            pipeline.execute(|| {
+                Ok(ReadFileRequest::new(if row == "workspace" {
+                    "../outside-secret.txt"
+                } else if row == "failure" {
+                    "."
+                } else {
+                    "sample.txt"
+                }))
+            })
+        };
+        assert_eq!(pipeline.request_counts(), (0, 0), "{row}");
+        let terminal = report.audit_events.last().unwrap();
+        assert!(terminal.duration_ms.is_some(), "{row}");
+        assert!(report
+            .audit_events
+            .iter()
+            .all(|event| event.request_id == report.context.request_id));
+        if row != "allow" {
+            assert!(report.result.is_err());
+            assert!(terminal.result_evidence.is_none());
+        }
+        if ["deny", "disabled", "workspace", "validation"].contains(&row) {
+            assert!(!report
+                .audit_events
+                .iter()
+                .any(|e| e.event_type == AuditEventType::ExecutionStarted));
+        }
+        assert_eq!(terminal.tool_enabled, Some(row != "disabled"));
+        let text = serde_json::to_string(&report.audit_events).unwrap();
+        assert!(!text.contains(fixture.root.to_str().unwrap()));
+        assert!(!text.contains("do not read"));
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn m7_bash_environment_and_output_sentinels_never_enter_evidence() {
+    let fixture = Fixture::new();
+    let key = format!("M7_EVIDENCE_TEST_{}", uuid::Uuid::new_v4().simple());
+    struct EnvGuard(String);
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var(&self.0);
+        }
+    }
+    std::env::set_var(&key, "BASH_ENV_SECRET_SENTINEL");
+    let _environment = EnvGuard(key.clone());
+    fs::write(
+        fixture.root.join("stdout.txt"),
+        "BASH_OUTPUT_CONTENT_SENTINEL",
+    )
+    .unwrap();
+    let executable = crate::bash::resolve_bash(&harness_control_protocol::BashConfig::default());
+    let mut tools = harness_control_protocol::ToolConfig::default();
+    tools.bash.enabled = true;
+    let registry = Arc::new(ToolRegistry::from_config_with_bash(&tools, &executable));
+    let mut policies = harness_control_protocol::PolicyConfig::default();
+    policies.tool_defaults.bash = PolicyDecision::Allow;
+    let manager = crate::approval::ApprovalManager::new("test-runtime");
+    let store = Arc::new(crate::activity::ActivityStore::new(registry.clone()));
+    let pipeline = ExecutionPipeline::new(
+        fixture.guard.clone(),
+        registry.clone(),
+        PolicyEngine::compile(&policies, &registry),
+        SecurityContext {
+            workspace_id: fixture.workspace_id,
+            mode: SecurityMode::DeveloperTest,
+        },
+        64,
+        fixture.ready.clone(),
+    )
+    .with_approval_state(
+        manager.clone(),
+        Arc::new(crate::session_grant::SessionGrantStore::new("test-runtime")),
+    )
+    .with_audit_sink(store.clone())
+    .with_bash_runtime(Arc::new(crate::bash::BashRuntime::new(
+        executable.canonical_path().map(|p| p.to_path_buf()),
+        fixture.root.clone(),
+    )));
+    let command = format!("printf \"${key}\"; cat stdout.txt");
+    let request = pipeline.execute_async(|| Ok(BashToolRequest::new(command)));
+    let control = async {
+        loop {
+            if manager.pending_count() == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let approval = manager.list(None).pop().unwrap();
+        manager
+            .resolve(
+                &approval.request_id,
+                harness_control_protocol::ApprovalDecision::AllowOnce,
+            )
+            .unwrap();
+    };
+    let (report, _) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(request, control)
+    })
+    .await
+    .unwrap();
+    let output = report.result.unwrap();
+    assert!(output.stdout.contains("BASH_ENV_SECRET_SENTINEL"));
+    assert!(output.stdout.contains("BASH_OUTPUT_CONTENT_SENTINEL"));
+    for encoded in [
+        serde_json::to_string(&report.audit_events).unwrap(),
+        serde_json::to_string(&store.snapshot(256)).unwrap(),
+    ] {
+        for sentinel in ["BASH_ENV_SECRET_SENTINEL", "BASH_OUTPUT_CONTENT_SENTINEL"] {
+            assert!(!encoded.contains(sentinel));
+        }
+    }
+    assert_eq!(pipeline.request_counts(), (0, 0));
+    assert_eq!(manager.pending_count(), 0);
 }

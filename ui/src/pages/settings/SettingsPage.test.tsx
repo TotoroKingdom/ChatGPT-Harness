@@ -12,7 +12,7 @@ vi.mock("@/app/providers/HarnessDataProvider", () => ({
 
 function config(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     configRevision: "7",
     workspace: { rootPath: "D:\\workspace" },
     tunnel: { tunnelId: "tunnel", autoDetect: true },

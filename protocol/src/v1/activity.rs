@@ -18,6 +18,7 @@ pub enum ActivityEventType {
     ApprovalDenied,
     ApprovalExpired,
     ApprovalCancelled,
+    SessionGrantMatched,
     ExecutionStarted,
     ExecutionCompleted,
     ExecutionFailed,
@@ -79,3 +80,146 @@ pub struct ActivitySubscribeResult {
     pub latest_sequence: DecimalU64,
 }
 pub type ActivityEventNotification = ActivityEvent;
+
+/// Closed, payload-free projections produced by typed Runtime adapters.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "tool", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SanitizedArgumentsEvidence {
+    ReadFile {
+        #[serde(rename = "logicalPath")]
+        #[ts(rename = "logicalPath")]
+        logical_path: String,
+    },
+    Glob {
+        pattern: String,
+    },
+    Write {
+        #[serde(rename = "logicalPath")]
+        #[ts(rename = "logicalPath")]
+        logical_path: String,
+    },
+    Edit {
+        #[serde(rename = "logicalPath")]
+        #[ts(rename = "logicalPath")]
+        logical_path: String,
+    },
+    Bash {
+        #[serde(rename = "commandPreview")]
+        #[ts(rename = "commandPreview")]
+        command_preview: String,
+    },
+}
+impl SanitizedArgumentsEvidence {
+    pub fn sanitized(self) -> Option<Self> {
+        let (text, path) = match &self {
+            Self::ReadFile { logical_path }
+            | Self::Write { logical_path }
+            | Self::Edit { logical_path } => (logical_path, true),
+            Self::Glob { pattern } => (pattern, false),
+            Self::Bash { command_preview } => (command_preview, false),
+        };
+        if text.is_empty() || text.chars().any(char::is_control) {
+            return None;
+        }
+        if path
+            && (text.starts_with('/')
+                || text.contains('\\')
+                || text.contains(':')
+                || text.split('/').any(|p| p == ".."))
+        {
+            return None;
+        }
+        let mut value = self;
+        let text = match &mut value {
+            Self::ReadFile { logical_path }
+            | Self::Write { logical_path }
+            | Self::Edit { logical_path } => logical_path,
+            Self::Glob { pattern } => pattern,
+            Self::Bash { command_preview } => command_preview,
+        };
+        let limit = if path { 1024 } else { 1027 };
+        let mut end = text.len().min(limit);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        Some(value)
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum WriteDisposition {
+    Created,
+    Overwritten,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "tool", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExecutionResultEvidence {
+    ReadFile {
+        #[serde(rename = "bytesRead")]
+        #[ts(rename = "bytesRead")]
+        #[ts(type = "number")]
+        bytes_read: u64,
+    },
+    Glob {
+        #[serde(rename = "matchCount")]
+        #[ts(rename = "matchCount")]
+        #[ts(type = "number")]
+        match_count: u64,
+    },
+    Write {
+        #[serde(rename = "bytesWritten")]
+        #[ts(rename = "bytesWritten")]
+        #[ts(type = "number")]
+        bytes_written: u64,
+        disposition: WriteDisposition,
+    },
+    Edit {
+        #[ts(type = "number")]
+        replacements: u64,
+        #[serde(rename = "bytesWritten")]
+        #[ts(rename = "bytesWritten")]
+        #[ts(type = "number")]
+        bytes_written: u64,
+    },
+    Bash {
+        #[serde(rename = "exitCode")]
+        #[ts(rename = "exitCode")]
+        exit_code: i32,
+    },
+}
+
+#[cfg(test)]
+mod evidence_tests {
+    use super::*;
+    #[test]
+    fn unsafe_evidence_is_redacted_and_utf8_bounds_are_enforced() {
+        for path in ["../secret", "/private/file", "C:/private/file", "a\nSECRET"] {
+            assert!(
+                SanitizedArgumentsEvidence::Write {
+                    logical_path: path.into()
+                }
+                .sanitized()
+                .is_none()
+            );
+        }
+        let value = SanitizedArgumentsEvidence::Glob {
+            pattern: "界".repeat(2000),
+        }
+        .sanitized()
+        .unwrap();
+        assert!(serde_json::to_string(&value).unwrap().len() < 1100);
+        assert!(
+            serde_json::from_str::<SanitizedArgumentsEvidence>(
+                r#"{"tool":"write","logicalPath":"ok","content":"SECRET"}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<ExecutionResultEvidence>(
+                r#"{"tool":"read_file","bytesRead":2,"content":"SECRET"}"#
+            )
+            .is_err()
+        );
+    }
+}

@@ -178,14 +178,11 @@ fn reads_are_side_effect_free_and_uninstrumented_requests_are_never_zero() {
     assert_eq!(serde_json::to_value(core.status()).unwrap(), before);
     assert_eq!(core.events.as_ref().unwrap().latest_sequence(), sequence);
     assert_eq!(core.effective_tools(), tools);
-    assert_eq!(
-        first.requests.observation,
-        RequestObservation::NotInstrumented
-    );
-    assert_eq!(first.requests.active_count, None);
+    assert_eq!(first.requests.observation, RequestObservation::Instrumented);
+    assert_eq!(first.requests.active_count, Some(0));
     fs::write(fixture.0.join("file.txt"), "test").unwrap();
     core.read_file(&ReadFileRequest::new("file.txt")).unwrap();
-    assert_eq!(core.diagnostics().requests.active_count, None);
+    assert_eq!(core.diagnostics().requests.active_count, Some(0));
 }
 
 #[test]
@@ -355,6 +352,7 @@ fn v1_file_shape_is_preserved_with_additive_bash_observations_and_no_tunnel_clai
             "capturedAt": snapshot.captured_at,
             "runtime": {
                 "runtimeId": core.runtime_id,
+                "configRevision": "7",
                 "startedAt": core.started_at,
                 "lifecycle": "ready",
                 "readiness": "ready",
@@ -370,18 +368,33 @@ fn v1_file_shape_is_preserved_with_additive_bash_observations_and_no_tunnel_clai
                 "declaredCount": 5,
                 "effectiveCount": 4,
                 "items": [
-                    {"name":"read_file", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow"},
-                    {"name":"glob", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow"},
-                    {"name":"write", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow"},
-                    {"name":"edit", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow"},
-                    {"name":"bash", "declaredCapability":"developer_shell", "availability":"unavailable_by_mode", "decision":"deny",
+                    {"name":"read_file", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow", "statusReason":"available"},
+                    {"name":"glob", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow", "statusReason":"available"},
+                    {"name":"write", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow", "statusReason":"available"},
+                    {"name":"edit", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow", "statusReason":"available"},
+                    {"name":"bash", "declaredCapability":"developer_shell", "availability":"unavailable_by_mode", "decision":"deny", "statusReason":"developer_mode_required",
                      "readiness":"unavailable", "reason":"DeveloperShell is available only in Developer/Test mode",
                      "readinessReason":"Git Bash auto-detection is disabled and no manual executable was configured."}
                 ]
             },
-            "requests": {"observation":"not_instrumented", "activeCount":null},
+            "requests": {"observation":"instrumented", "activeCount":0, "activeRequests":0, "pendingApprovals":0, "runningExecutions":0},
             "lastError": {"observation":"not_recorded", "code":null},
             "tunnel": {"configured":null, "processState":"not_observed", "connectionState":"not_established", "blockedReason":"m7_c_blocked"}
         })
+    );
+}
+
+#[test]
+fn m7_runtime_status_readiness_matches_the_actual_gate_and_diagnostics() {
+    let fixture = Fixture::new();
+    let mut core = RuntimeCore::new();
+    core.initialize(fixture.config()).unwrap();
+    core.acknowledge().unwrap();
+    assert_eq!(core.status().unwrap().readiness, RuntimeReadiness::Ready);
+    core.set_mcp_readiness_for_test(false);
+    assert_eq!(core.status().unwrap().readiness, RuntimeReadiness::NotReady);
+    assert_eq!(
+        core.diagnostics().runtime.readiness,
+        RuntimeReadiness::NotReady
     );
 }

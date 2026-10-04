@@ -181,7 +181,10 @@
       "bashConcurrencyLimit": "Bash 并发数超出限制",
       "bashSpawnFailed": "无法启动 Bash",
       "bashCancelled": "Bash 命令已取消",
-      "bashProcessFailed": "Bash 进程失败"
+      "bashProcessFailed": "Bash 进程失败",
+      "approvalDenied": "审批已拒绝",
+      "approvalExpired": "审批已过期",
+      "approvalCancelled": "审批已取消"
     },
     "bashClassification": {
       "classified": "已分类",
@@ -674,7 +677,9 @@
       "controlPlaneUnavailable": "Control Plane 不可用。",
       "tunnelProcessExited": "Tunnel 进程意外退出。",
       "harnessLifecycleFailed": "Harness 生命周期操作失败。",
-      "configRevisionOverflow": "配置 revision 已超出限制。"
+      "configRevisionOverflow": "配置 revision 已超出限制。",
+      "configSchemaUnsupported": "不支持此配置结构版本，原文件未被修改。",
+      "configMigrationFailed": "配置迁移失败，请修复原配置后重试。"
     }
   },
   "policy": {
@@ -722,6 +727,78 @@
       "ruleInvalid": "用户策略无效。",
       "duplicateRuleId": "用户策略 ID“{{id}}”重复。",
       "saveConfigurationFirst": "请先保存配置，再编辑策略。"
+    }
+  },
+  "m7": {
+    "revision": {
+      "title": "配置修订号",
+      "saved": "已保存修订号",
+      "active": "运行中修订号",
+      "stopped": "Runtime 未运行"
+    },
+    "recovery": {
+      "unchanged": "原配置未被覆盖。",
+      "repair": "检查并修复原配置后重试；仅在必要时显式重置本地配置。",
+      "path": "配置文件路径",
+      "retry": "重试加载／迁移",
+      "copy": "复制配置路径"
+    },
+    "reasons": {
+      "available": "可用",
+      "approval_required": "需要审批",
+      "tool_disabled": "工具已禁用",
+      "developer_mode_required": "需要开发者／测试模式",
+      "runtime_not_ready": "Runtime 未就绪",
+      "capability_unavailable": "能力不可用",
+      "bash_executable_unavailable": "Git Bash 不可用",
+      "policy_denied": "策略拒绝",
+      "invalid_policy_snapshot": "策略快照无效",
+      "invalid_policy_context": "策略上下文无效",
+      "unsupported_capability": "不支持的能力",
+      "metadata_invalid": "工具元数据无效"
+    },
+    "remediation": {
+      "available": "调用工具；执行失败时检查活动记录。",
+      "approval_required": "调用工具，并在审批中心处理请求。",
+      "tool_disabled": "启用工具、保存并重启 Harness。",
+      "developer_mode_required": "切换至开发者／测试模式、保存并重启 Harness。",
+      "bash_executable_unavailable": "配置或自动检测有效的 Git Bash 可执行文件，然后重启 Harness。",
+      "policy_denied": "检查匹配的用户策略规则、保存修改并重启 Harness。",
+      "invalid_policy_snapshot": "修复无效策略配置并重启；配置有效前继续拒绝执行。",
+      "invalid_policy_context": "重启 Runtime；问题持续时检查诊断信息。",
+      "runtime_not_ready": "启动或重启 Harness；仍未就绪时检查诊断信息。",
+      "capability_unavailable": "重启 Harness，并检查诊断中的不可用能力。",
+      "unsupported_capability": "使用受支持的工具并检查诊断信息。",
+      "metadata_invalid": "重启 Harness，并检查诊断中的无效工具元数据。",
+      "execution_failure": "重试前检查活动记录中的失败分类与证据。"
+    },
+    "evidence": {
+      "detail": "诊断详情",
+      "request": "请求 ID",
+      "event": "事件 ID",
+      "arguments": "脱敏参数",
+      "enabled": "工具启用状态",
+      "capability": "能力",
+      "policyReason": "策略原因",
+      "matched": "匹配规则 ID",
+      "approval": "审批 ID",
+      "approvalDecision": "审批决定",
+      "result": "结果证据",
+      "duration": "请求时长（毫秒）",
+      "bash": "Bash 证据",
+      "failure": "失败分类",
+      "notApplicable": "不适用",
+      "yes": "是",
+      "no": "否"
+    },
+    "diagnostics": {
+      "active": "活动请求",
+      "pending": "待处理审批",
+      "running": "正在执行",
+      "lastError": "最近安全错误码"
+    },
+    "states": {
+      "denied": "已拒绝"
     }
   }
 }

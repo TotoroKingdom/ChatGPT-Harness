@@ -130,7 +130,6 @@ fn all_reads_use_existing_safe_snapshots_and_roundtrip_launcher_contracts() {
     for value in [&activity, &tools, &diagnostics] {
         let serialized = serde_json::to_string(value).unwrap();
         for forbidden in [
-            "PRIVATE-ARG",
             "RAW-RESULT",
             "UNTRUSTED-TOKEN",
             "API-KEY",

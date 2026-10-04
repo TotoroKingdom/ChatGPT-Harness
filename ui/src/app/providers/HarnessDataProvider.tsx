@@ -49,6 +49,7 @@ type ContextValue = ResourceState & {
   harness: HarnessStatus;
   overall: OverallStatus;
   restartRequired: boolean;
+  activeRevision: string | null;
   lastDiagnostics: DiagnosticRun | null;
   refreshConfig: () => Promise<void>;
   resetConfig: () => Promise<SaveResult>;
@@ -200,24 +201,17 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const activityCursorRef = useRef<string | undefined>(undefined);
 
   const refreshConfig = useCallback(async () => {
-    try {
-      const [nextConfig, nextMetadata, keyConfigured, nextEligibility] = await Promise.all([
-        client.configGet(),
-        client.configMetadata(),
-        client.apiKeyStatus(),
-        client.harnessStartEligibility(),
-      ]);
-      setConfig(nextConfig);
-      setConfigLoaded(true);
-      setMetadata(nextMetadata);
-      setApiKeyConfigured(keyConfigured);
-      setEligibility(nextEligibility);
-      setConfigError(null);
-    } catch (error) {
-      const clientError = toClientError(error);
-      if (clientError.code === "CONFIG_INVALID") setConfigLoaded(true);
-      setConfigError(clientError);
-      setEligibility(null);
+    const [content, location, key, start] = await Promise.allSettled([
+      client.configGet(), client.configMetadata(), client.apiKeyStatus(), client.harnessStartEligibility(),
+    ]);
+    // Metadata is independent from content validation / migration.
+    if (location.status === "fulfilled") setMetadata(location.value);
+    if (key.status === "fulfilled") setApiKeyConfigured(key.value);
+    if (content.status === "fulfilled") {
+      setConfig(content.value); setConfigLoaded(true); setConfigError(null);
+      setEligibility(start.status === "fulfilled" ? start.value : null);
+    } else {
+      setConfig(null); setConfigLoaded(true); setConfigError(toClientError(content.reason)); setEligibility(null);
     }
   }, [client]);
 
@@ -496,6 +490,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       components,
       harness,
       overall: harness.lifecycle,
+      activeRevision,
       restartRequired: activeRevision !== null && config !== null && activeRevision !== config.configRevision,
       lastDiagnostics,
       refreshConfig,

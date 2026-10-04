@@ -16,7 +16,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
-const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+// Keep the client deadline above the Runtime's 30-second Bash limit so local
+// E2E can observe the typed timeout result and then query the live counters.
+const HTTP_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub(super) type E2eResult<T> = Result<T, E2eError>;
 
@@ -165,6 +167,8 @@ fn run_suite() -> E2eResult<()> {
     legacy_value.config_revision = harness_control_protocol::DecimalU64::new(41);
     let mut legacy_json = serde_json::to_value(&legacy_value)
         .map_err(|_| E2eError::new("serialize legacy config failed"))?;
+    // This case models a historical config, before the M7 schema bump.
+    legacy_json["schemaVersion"] = json!(1);
     legacy_json
         .as_object_mut()
         .ok_or_else(|| E2eError::new("legacy config is not an object"))?
@@ -517,13 +521,13 @@ pub(super) struct McpClient {
     next_request_id: u64,
 }
 
-struct PendingMcpCall {
+pub(super) struct PendingMcpCall {
     receiver: Receiver<E2eResult<Value>>,
     thread: JoinHandle<()>,
 }
 
 impl PendingMcpCall {
-    fn receive(self) -> E2eResult<Value> {
+    pub(super) fn receive(self) -> E2eResult<Value> {
         let result = self
             .receiver
             .recv_timeout(HTTP_TIMEOUT)
@@ -575,7 +579,7 @@ impl McpClient {
         )
     }
 
-    fn pending_tool(&mut self, name: &str, arguments: Value) -> PendingMcpCall {
+    pub(super) fn pending_tool(&mut self, name: &str, arguments: Value) -> PendingMcpCall {
         self.next_request_id += 1;
         let endpoint = self.endpoint;
         let session_id = self.session_id.clone();
@@ -1250,7 +1254,7 @@ fn run_e2e_10(
 
 fn run_e2e_11(binary: &Path, config: &AppConfig) -> E2eResult<()> {
     check!(
-        config.schema_version == 1,
+        config.schema_version == 2,
         "legacy config schemaVersion changed"
     );
     check!(config.tools.read_file.enabled);

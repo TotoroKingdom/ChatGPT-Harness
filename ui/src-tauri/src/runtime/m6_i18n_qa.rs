@@ -155,6 +155,7 @@ fn int_01(fixture: &Fixture) -> QaResult<()> {
     let mut config = fixture.config(None);
     config.tools.write.enabled = false;
     let mut value = serde_json::to_value(&config).map_err(|error| error.to_string())?;
+    value["schemaVersion"] = serde_json::json!(1);
     value["ui"].as_object_mut().unwrap().remove("language");
     fs::write(
         directory.join("config.json"),
@@ -162,7 +163,7 @@ fn int_01(fixture: &Fixture) -> QaResult<()> {
     )
     .map_err(|error| format!("write INT-01 fixture: {error}"))?;
     let loaded = load(&ConfigStore::new(directory))?;
-    check!(loaded.schema_version == 1);
+    check!(loaded.schema_version == 2);
     check!(loaded.ui.language.is_none());
     check!(loaded.tools.write.enabled == config.tools.write.enabled);
     check!(loaded.workspace == config.workspace);

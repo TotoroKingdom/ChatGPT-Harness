@@ -4,23 +4,7 @@ use harness_control_protocol::{ApprovalDecision, PolicyDecision, PolicyReason};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// The deliberately small set of externally useful execution events.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum AuditEventType {
-    RequestReceived,
-    WorkspaceValidated,
-    PolicyEvaluated,
-    ExecutionStarted,
-    ExecutionCompleted,
-    ExecutionFailed,
-    RequestDenied,
-    ApprovalRequired,
-    ApprovalResolved,
-    ApprovalExpired,
-    ApprovalCancelled,
-    SessionGrantMatched,
-}
+pub(crate) use harness_control_protocol::control_read::AuditEventType;
 
 /// A safe projection of the internal request lifecycle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +61,9 @@ pub(crate) enum AuditOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AuditFailureCategory {
+    ApprovalDenied,
+    ApprovalExpired,
+    ApprovalCancelled,
     ToolDisabled,
     TargetChanged,
     AtomicFailure,
@@ -98,11 +85,21 @@ pub(crate) enum AuditFailureCategory {
 /// Structured, serde-serializable audit evidence for one pipeline observation.
 ///
 /// `workspace_id` is a logical identifier only; it is never a filesystem path.
-/// There are intentionally no arguments, payload, raw error, or result fields;
-/// only a bounded failure category may be retained.
+/// Only typed, bounded argument facts and scalar results cross this boundary;
+/// raw payloads, physical paths, error messages and result bodies are excluded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AuditEvent {
+    pub(crate) tool_enabled: Option<bool>,
+    pub(crate) capability: Option<harness_control_protocol::control_read::ToolCapability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sanitized_arguments: Option<harness_control_protocol::SanitizedArgumentsEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) approval_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) result_evidence: Option<harness_control_protocol::ExecutionResultEvidence>,
     pub(crate) event_id: Uuid,
     pub(crate) request_id: Uuid,
     pub(crate) timestamp: String,
@@ -231,7 +228,43 @@ impl AuditEvent {
             workspace_validation
         };
         let evaluation = context.policy_evaluation.as_ref();
+        let terminal = matches!(
+            event,
+            PipelineEvent::WorkspaceValidated { passed: false }
+                | PipelineEvent::ExecutionCompleted
+                | PipelineEvent::ExecutionFailed
+                | PipelineEvent::ExecutionCancelled
+                | PipelineEvent::RequestDenied
+                | PipelineEvent::ApprovalExpired
+                | PipelineEvent::ApprovalCancelled
+        ) || (matches!(
+            event,
+            PipelineEvent::ApprovalResolved {
+                decision: ApprovalDecision::Deny
+            }
+        ));
         Some(Self {
+            tool_enabled: Some(context.tool_enabled),
+            capability: context.capability,
+            sanitized_arguments: context
+                .sanitized_arguments
+                .clone()
+                .and_then(|v| v.sanitized()),
+            approval_id: context
+                .approval_request_id
+                .as_ref()
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .map(|id| id.to_string()),
+            duration_ms: terminal.then(|| {
+                context
+                    .started_at
+                    .elapsed()
+                    .as_millis()
+                    .min(u64::MAX as u128) as u64
+            }),
+            result_evidence: matches!(event, PipelineEvent::ExecutionCompleted)
+                .then(|| context.result_evidence.clone())
+                .flatten(),
             event_id: Uuid::new_v4(),
             request_id: context.request_id,
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -244,12 +277,25 @@ impl AuditEvent {
             workspace_validation,
             policy_decision: evaluation.map(|item| item.decision.clone()),
             matched_rule_ids: evaluation
-                .map(|item| item.matched_rule_ids.clone())
+                .map(|item| {
+                    item.matched_rule_ids
+                        .iter()
+                        .take(64)
+                        .map(|id| sanitize_rule_id(id))
+                        .collect()
+                })
                 .unwrap_or_default(),
             policy_reason: evaluation.map(|item| policy_reason(item.reason)),
-            approval_decision,
+            approval_decision: approval_decision.or(context.approval_decision),
             outcome,
             failure_category: match event {
+                PipelineEvent::ApprovalExpired => Some(AuditFailureCategory::ApprovalExpired),
+                PipelineEvent::ApprovalCancelled => Some(AuditFailureCategory::ApprovalCancelled),
+                PipelineEvent::RequestDenied
+                    if context.approval_decision == Some(ApprovalDecision::Deny) =>
+                {
+                    Some(AuditFailureCategory::ApprovalDenied)
+                }
                 PipelineEvent::WorkspaceValidated { passed: false }
                 | PipelineEvent::ExecutionFailed => context.failure_category,
                 PipelineEvent::ExecutionCancelled => Some(if context.tool_name == "bash" {
@@ -436,5 +482,19 @@ mod bash_evidence_tests {
         let bash = event.bash.unwrap();
         assert!(bash.command_preview.unwrap().len() <= 1027);
         assert!(bash.approval_request_id.is_none());
+    }
+}
+
+pub(crate) fn sanitize_rule_id(id: &str) -> String {
+    if !id.is_empty()
+        && id.len() <= 64
+        && id.bytes().any(|b| b.is_ascii_lowercase())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    {
+        id.to_owned()
+    } else {
+        "<redacted>".into()
     }
 }

@@ -1,3 +1,5 @@
+import { ConfigRecovery } from "@/components/status/ConfigRecovery";
+import { ConfigRevisionStatus } from "@/components/status/ConfigRevisionStatus";
 import { useEffect, useState, type ReactNode } from "react";
 import type { AppConfig, SecurityMode, UiLanguage } from "@protocol/v1";
 import { useTranslation } from "react-i18next";
@@ -9,7 +11,7 @@ import { presentError, startEligibilityKey, type ErrorPresentation, type Transla
 
 const emptyConfig: AppConfig = {
   bash: { autoDetect: true },
-  schemaVersion: 1,
+  schemaVersion: 2,
   configRevision: "0",
   workspace: { rootPath: "" },
   tunnel: { tunnelId: "", autoDetect: true },
@@ -252,21 +254,8 @@ export function SettingsPage() {
         <p className="settings-help">{languageSaving ? t("settings.languageSaving") : t("settings.languageHelp")}</p>
       </SettingsSection>
 
-      {data.configError && (
-        <div className="notice notice-danger" role="alert">
-          <strong>{t("settings.configError.title")}</strong>
-          <span>{t(presentError(data.configError).summaryKey)}</span>
-          {presentError(data.configError).code && <code className="mono">{presentError(data.configError).code}</code>}
-          <button className="button button-quiet" onClick={() => void reset()} disabled={resetting || saving || languageSaving}>{t("settings.configError.reset")}</button>
-        </div>
-      )}
-      {data.restartRequired && (
-        <div className="notice notice-warning" role="status">
-          <strong>{t("settings.restart.title")}</strong>
-          <span>{t("settings.restart.description")}</span>
-          <button className="button button-warning" onClick={() => void restartHarness()}>{t("settings.restart.action")}</button>
-        </div>
-      )}
+      {data.configError && <ConfigRecovery onReset={() => void reset()} disabled={resetting || saving || languageSaving} />}
+      <ConfigRevisionStatus titleKey="settings.restart.title" descriptionKey="settings.restart.description" onRestart={() => void restartHarness()} />
 
       <div className="settings-layout">
         <SettingsSection eyebrow={t("settings.workspace.eyebrow")} title={t("settings.workspace.title")}>
@@ -410,6 +399,7 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
   };
 
   const resetConfiguration = async () => {
+    if (!window.confirm(t("settings.actions.resetConfirm"))) return;
     setResetting(true);
     const result = await data.resetConfig();
     setResetting(false);
@@ -443,7 +433,7 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
         </header>
         <Card className="wizard-card">
           {data.configError ? (
-            <div className="notice notice-danger" role="alert"><strong>{t("firstRun.configErrorTitle")}</strong><span>{t(presentError(data.configError).summaryKey)}</span><button className="button button-quiet" onClick={() => void resetConfiguration()} disabled={resetting}>{resetting ? t("firstRun.resetting") : t("firstRun.reset")}</button></div>
+            <ConfigRecovery onReset={() => void resetConfiguration()} disabled={resetting} />
           ) : (
             <>
               <section aria-labelledby="workspace-step-title">

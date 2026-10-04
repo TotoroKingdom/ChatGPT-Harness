@@ -28,6 +28,18 @@ pub(crate) enum ActivityCategory {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ActivityEntry {
+    pub(crate) tool_enabled: Option<bool>,
+    pub(crate) capability: Option<harness_control_protocol::control_read::ToolCapability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sanitized_arguments: Option<harness_control_protocol::SanitizedArgumentsEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) approval_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) approval_decision: Option<harness_control_protocol::ApprovalDecision>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) result_evidence: Option<harness_control_protocol::ExecutionResultEvidence>,
     pub(crate) event_id: Uuid,
     pub(crate) request_id: Uuid,
     /// Normalized UTC; None when the source timestamp is invalid.
@@ -80,6 +92,16 @@ impl ActivityEntry {
                     .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
             });
         Self {
+            tool_enabled: event.tool_enabled,
+            capability: event.capability,
+            sanitized_arguments: event
+                .sanitized_arguments
+                .clone()
+                .and_then(|v| v.sanitized()),
+            approval_id: event.approval_id.clone(),
+            approval_decision: event.approval_decision,
+            duration_ms: event.duration_ms,
+            result_evidence: event.result_evidence.clone(),
             event_id: event.event_id,
             request_id: event.request_id,
             timestamp,

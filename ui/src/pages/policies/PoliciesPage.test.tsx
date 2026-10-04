@@ -10,7 +10,7 @@ afterEach(() => cleanup());
 
 function config(): AppConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     configRevision: "7",
     workspace: { rootPath: "D:\\workspace" },
     tunnel: { tunnelId: "tunnel", autoDetect: true },
@@ -223,4 +223,15 @@ describe("M3 PoliciesPage", () => {
     expect(screen.getByLabelText("User rule tool matcher")).toHaveValue("bash");
     expect(screen.getByLabelText("User rule decision")).toHaveValue("ask");
   });
+});
+
+it("M7 invalid snapshot presents fail-closed remediation without offering compiled ALLOW as executable", async () => {
+  await i18n.changeLanguage("en");
+  const snapshot = effective(); snapshot.valid = false; snapshot.status = "invalid"; snapshot.statusReason = "invalid_policy_snapshot";
+  snapshot.perTool = [{ tool: "write", decision: "deny", matchedRuleIds: ["bad-rule"], reason: "invalid_policy_snapshot", availability: "unavailable_by_policy" }];
+  setup({ policies: { status: "success", data: { items: [], effective: snapshot } } });
+  expect(screen.getAllByText("Repair invalid Policy configuration and restart. Execution remains denied until valid.").length).toBeGreaterThan(0);
+  expect(screen.getByText("bad-rule")).toBeInTheDocument();
+  expect(screen.queryByText("Allow workspace capabilities")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /ignore/i })).not.toBeInTheDocument();
 });

@@ -39,7 +39,7 @@ describe("MockHarnessControlClient", () => {
 
 
 const testConfig = (): AppConfig => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   configRevision: "0",
   workspace: { rootPath: "D:\\workspace" },
   tunnel: { tunnelId: "tunnel", tunnelClientPath: "D:\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } },

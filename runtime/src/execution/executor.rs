@@ -90,6 +90,34 @@ pub(crate) trait ToolExecutor {
         max_read_bytes: u32,
     ) -> Result<Self::Output, ExecutionError>;
 
+    fn arguments_evidence(
+        &self,
+        guard: &WorkspaceGuard,
+    ) -> Option<harness_control_protocol::SanitizedArgumentsEvidence> {
+        use harness_control_protocol::SanitizedArgumentsEvidence as E;
+        let facts = self.approval_facts(guard).ok()?;
+        let field = |key| facts.sanitized_arguments.get(key).cloned();
+        match Self::TOOL_NAME {
+            "read_file" => E::ReadFile {
+                logical_path: field("path")?,
+            },
+            "glob" => E::Glob {
+                pattern: field("pattern")?,
+            },
+            "write" => E::Write {
+                logical_path: field("path")?,
+            },
+            "edit" => E::Edit {
+                logical_path: field("path")?,
+            },
+            "bash" => E::Bash {
+                command_preview: field("command")?,
+            },
+            _ => return None,
+        }
+        .sanitized()
+    }
+
     fn record_output(&self, _context: &mut super::RequestContext, _output: &Self::Output) {}
 
     /// File tools retain their existing synchronous implementation.  Bash
@@ -145,6 +173,13 @@ impl ToolExecutor for ReadFileRequest {
             bash_details: None,
             allow_for_session_eligible: None,
         })
+    }
+    fn record_output(&self, context: &mut super::RequestContext, output: &Self::Output) {
+        context.result_evidence = Some(
+            harness_control_protocol::ExecutionResultEvidence::ReadFile {
+                bytes_read: output.bytes_read,
+            },
+        );
     }
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::ReadFile(crate::tools::ReadFileError::Workspace(error))
@@ -204,6 +239,11 @@ impl ToolExecutor for GlobRequest {
             allow_for_session_eligible: None,
         })
     }
+    fn record_output(&self, context: &mut super::RequestContext, output: &Self::Output) {
+        context.result_evidence = Some(harness_control_protocol::ExecutionResultEvidence::Glob {
+            match_count: output.matches.len() as u64,
+        });
+    }
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::Glob(crate::tools::GlobError::Workspace(error))
     }
@@ -256,6 +296,16 @@ impl ToolExecutor for WriteRequest {
         })
     }
 
+    fn record_output(&self, context: &mut super::RequestContext, output: &Self::Output) {
+        context.result_evidence = Some(harness_control_protocol::ExecutionResultEvidence::Write {
+            bytes_written: output.bytes_written,
+            disposition: if output.created {
+                harness_control_protocol::WriteDisposition::Created
+            } else {
+                harness_control_protocol::WriteDisposition::Overwritten
+            },
+        });
+    }
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::Write(WriteError::Workspace(error))
     }
@@ -316,6 +366,12 @@ impl ToolExecutor for EditRequest {
         })
     }
 
+    fn record_output(&self, context: &mut super::RequestContext, output: &Self::Output) {
+        context.result_evidence = Some(harness_control_protocol::ExecutionResultEvidence::Edit {
+            replacements: output.replacements,
+            bytes_written: output.bytes_written,
+        });
+    }
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::Edit(EditError::Workspace(error))
     }
@@ -442,6 +498,9 @@ impl ToolExecutor for BashToolRequest {
 
     fn record_output(&self, context: &mut super::RequestContext, output: &Self::Output) {
         context.set_bash_result(output.exit_code, output.duration_ms);
+        context.result_evidence = Some(harness_control_protocol::ExecutionResultEvidence::Bash {
+            exit_code: output.exit_code,
+        });
     }
 
     fn execute_async<'a>(

@@ -724,34 +724,37 @@ Do not mark M7 or V3 ACCEPTED/FROZEN from TASK completion alone。
 
 ## Development Completion Checklist
 
-- [ ] T1 AppConfig v2 / Migration Pipeline PASS
-- [ ] T2 Hardened Evidence Contracts / Sanitization PASS
-- [ ] T3 Runtime Instrumentation / Counters / Typed Reasons PASS
-- [ ] T4 Activity / Diagnostics / Recovery / Remediation UI PASS
-- [ ] T5 Historical Migration + Security Regression Matrix PASS
-- [ ] T6 Cross-cutting Regression PASS
-- [ ] CURRENT_SCHEMA_VERSION = 2
-- [ ] pure V2 v1 migration preserves core config
-- [ ] transitional v1 migration preserves M2–M6 values
-- [ ] migration preserves configRevision
-- [ ] migration failure leaves original bytes unchanged
-- [ ] unsupported schema fails closed
-- [ ] SecretStore raw secret never materialized
-- [ ] hardened sanitized arguments evidence
-- [ ] generic approval ID correlation
-- [ ] request duration/result evidence
-- [ ] no write/edit content leak
-- [ ] activeRequests real
-- [ ] pendingApprovals real
-- [ ] runningExecutions real
-- [ ] typed ToolStatusReason
-- [ ] Disabled / Denied / Ask / Unavailable distinct UX
-- [ ] actionable remediation
-- [ ] migration recovery UX
-- [ ] desired/effective/revision truthfulness
-- [ ] en/zh-CN M7 resource parity
-- [ ] M0–M6 regression PASS
-- [ ] cargo fmt/check/test PASS
-- [ ] frontend test/typecheck/build PASS
-- [ ] git diff --check PASS
-- [ ] TASKS未声称 Integration/E2E/Manual Acceptance/V3 final PASS
+- [x] T1 AppConfig v2 / Migration Pipeline PASS
+- [x] T2 Hardened Evidence Contracts / Sanitization PASS
+- [x] T3 Runtime Instrumentation / Counters / Typed Reasons PASS
+- [x] T4 Activity / Diagnostics / Recovery / Remediation UI PASS
+- [x] T5 Historical Migration + Security Regression Matrix PASS
+- [x] T6 Cross-cutting Regression PASS
+- [x] CURRENT_SCHEMA_VERSION = 2
+- [x] pure V2 v1 migration preserves core config
+- [x] transitional v1 migration preserves M2–M6 values
+- [x] migration preserves configRevision
+- [x] migration failure leaves original bytes unchanged
+- [x] unsupported schema fails closed
+- [x] SecretStore raw secret never materialized
+- [x] hardened sanitized arguments evidence
+- [x] generic approval ID correlation
+- [x] request duration/result evidence
+- [x] no write/edit content leak
+- [x] activeRequests real
+- [x] pendingApprovals real
+- [x] runningExecutions real
+- [x] typed ToolStatusReason
+- [x] Disabled / Denied / Ask / Unavailable distinct UX
+- [x] actionable remediation
+- [x] migration recovery UX
+- [x] desired/effective/revision truthfulness
+- [x] en/zh-CN M7 resource parity
+- [x] M0–M6 regression PASS
+- [x] cargo fmt/check/test PASS
+- [x] frontend test/typecheck/build PASS
+- [x] git diff --check PASS
+- [x] TASKS未声称 Integration/E2E/Manual Acceptance/V3 final PASS
+
+
+Development conclusion: **M7 Development Complete**. See `DEVELOPMENT_REPORT.md` for commands, counts, scope boundaries and observations.
