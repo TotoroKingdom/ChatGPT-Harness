@@ -1,6 +1,6 @@
 # M8 — UI/UX Simplification & Visual Redesign
 
-> Status: DESIGN DISCOVERY / NO IMPLEMENTATION
+> Status: UX FROZEN / DESIGN SYSTEM REVIEW / NO IMPLEMENTATION
 
 ## Goal
 
@@ -40,8 +40,6 @@ M8 不重新设计以下已冻结语义：
 
 ## Design Process
 
-M8 使用设计门禁，而不是直接进入实现：
-
 ```text
 Phase A — UX Audit
         ↓
@@ -49,9 +47,9 @@ Phase B — Information Architecture
         ↓
 Phase C — Interaction Wireframes
         ↓
-      UX FROZEN
+      UX FROZEN                 ← COMPLETE
         ↓
-Phase D — Visual Design System
+Phase D — Visual Design System  ← CURRENT
         ↓
     DESIGN FROZEN
         ↓
@@ -64,19 +62,18 @@ Automated Validation
 Manual UX Acceptance
 ```
 
-在 `UX FROZEN` 前，不进行大规模 production UI 重写。
+`UX FROZEN` 后，视觉阶段不得重新发明页面信息架构或高频交互路径。
 
-在 `DESIGN FROZEN` 前，不允许各页面自行发明视觉规则或组件风格。
+在 `DESIGN FROZEN` 前，不允许开始 production UI rewrite。
 
 ## Design Documents
 
-当前设计输入：
-
 - `UX_AUDIT.md` — 当前 UI 的任务、问题、复杂度与简化方向
 - `INFORMATION_ARCHITECTURE.md` — 页面职责、导航与信息层级
-- `WIREFRAMES.md` — Part 1：App Shell、Tools、Policies
-- `WIREFRAMES_PART2.md` — Part 2：Overview、Approvals、Activity、Settings、First Run / Recovery、Cross-page states
-- `DESIGN_SYSTEM.md` — 尚未创建；UX 冻结后进入
+- `WIREFRAMES.md` — App Shell、Tools、Policies
+- `WIREFRAMES_PART2.md` — Overview、Approvals、Activity、Settings、First Run / Recovery、Cross-page states
+- `UX_FREEZE.md` — 人工确认后的 UX 冻结记录；后续 UX 权威门禁
+- `DESIGN_SYSTEM.md` — 当前视觉系统评审稿
 
 设计冻结后再生成：
 
@@ -87,47 +84,58 @@ Manual UX Acceptance
 - `LOCAL_BLACK_BOX_E2E.md`
 - `MANUAL_ACCEPTANCE_CHECKLIST.md`
 
+## Frozen UX Summary
+
+已经冻结：
+
+- 稳定 Sidebar + page-local header + contextual Inspector。
+- Tools 使用 compact rows；Enabled Switch 与 `Allow / Ask / Deny` 行内直接操作。
+- 独立 Tool / Policy 配置采用 auto-save + inline feedback。
+- configured / desired 与 Runtime effective state 必须准确区分；`Restart required` 不得伪装已生效。
+- Policies Tool Defaults 使用 segmented control；User Rule enable/disable 为直接操作。
+- Create/Edit Rule 作为完整对象使用 focused Sheet / Inspector edit + explicit Save。
+- internal Rule ID、argvPrefix JSON、generation/revision/raw evidence 默认后置。
+- Approvals 使用 decision-first queue。
+- Activity 使用 activity feed，而不是默认 audit table。
+- Settings 使用 `General / Workspace / Connection / Security / Advanced / Danger Zone` section/list 模型。
+- First Run 简化为 `Workspace → Connection → Readiness → Start Harness`。
+- Recovery 优先展示问题、数据安全和安全恢复动作。
+
+详细冻结声明见 `UX_FREEZE.md`。
+
+## Current Visual Direction
+
+`DESIGN_SYSTEM.md` 当前提出：
+
+- dark-first，不在 M8 新增 Theme capability
+- grayscale / monochrome 为主，semantic color 为辅
+- neutral high-contrast Primary action
+- system UI font + mono，不引入自定义字体文件
+- 4px spacing base，compact desktop density
+- restrained 6–10px radius
+- thin borders / divider / row hierarchy
+- no radial gradient / glowing orb / default gradient Card
+- little persistent shadow
+- Badge 只用于少量 compact semantic label
+- 统一 Button / Switch / Segmented / Row / Inspector / Sheet visual grammar
+- no decorative motion / glow
+
+这些视觉内容尚未冻结，需人工评审 `DESIGN_SYSTEM.md`。
+
 ## Current Design State
 
 ```text
-UX_AUDIT        DRAFT COMPLETE
-IA              DRAFT COMPLETE
-WIREFRAMES      FULL DRAFT COMPLETE — HUMAN REVIEW REQUIRED
-DESIGN_SYSTEM   NOT STARTED
-SPEC            NOT STARTED
-PLAN            NOT STARTED
-TASKS           NOT STARTED
-IMPLEMENTATION  NOT STARTED
+UX_AUDIT        FROZEN
+IA              FROZEN
+WIREFRAMES      FROZEN
+UX              FROZEN
+DESIGN_SYSTEM   DRAFT FOR HUMAN REVIEW
+DESIGN          NOT FROZEN
+SPEC            BLOCKED UNTIL DESIGN FROZEN
+PLAN            BLOCKED UNTIL DESIGN FROZEN
+TASKS           BLOCKED UNTIL DESIGN FROZEN
+IMPLEMENTATION  NOT AUTHORIZED
 ```
-
-### Wireframe Part 1
-
-已明确候选交互：
-
-- 移除大尺寸全局 Topbar，改为稳定 Sidebar + page-local header。
-- Tools 使用 compact rows；Enabled Switch 与 `Allow / Ask / Deny` 直接行内操作。
-- Tool Detail Inspector 主要承担状态解释、Bash 特有配置和 Advanced diagnostics。
-- 独立 Tool / Policy 配置采用 auto-save，并在对象附近显示 Restart Required / save failure。
-- Policies Tool Defaults 使用 segmented control，不再使用 Select + 全页 Save。
-- User Rule enable/disable 为直接操作；Create/Edit Rule 作为完整对象仍显式 Save。
-- Create Rule 使用 focused Sheet，并按用户任务组织输入，不直接暴露 internal Rule ID 或 argvPrefix JSON。
-- System Guardrails 与 Effective Policy 默认降级到 secondary / collapsed；安全异常必须自动提升 attention。
-
-### Wireframe Part 2
-
-已明确候选交互：
-
-- Overview 只回答 Harness 是否可用、当前最重要操作和核心组件状态，不再默认展示完整 Runtime metadata。
-- Approvals 改为 decision-first queue；审批证据后置到详情与 Advanced。
-- `Allow once / Allow for session / Deny` 直接完成决策，`Create rule` 降为 secondary workflow。
-- Activity 从 audit table 改为 activity feed，并明确区分 policy deny 与 execution failure。
-- Settings 改为 section/list 模型，不再使用多个大 Card + 一个全局 Save。
-- Settings 按字段语义分别使用 auto-save、explicit Apply、confirmation。
-- First Run 简化为 `Workspace → Connection → Ready → Start`。
-- Recovery 优先解释问题、数据安全和安全恢复动作，技术细节默认折叠。
-- Restart Required、Disabled、Unavailable、Denied 等状态在全产品使用统一语义。
-
-以上内容仍属于人工评审中的设计提案，不是实现授权。
 
 ## Core UX Rule
 
@@ -137,16 +145,14 @@ IMPLEMENTATION  NOT STARTED
 
 ## Next Gate
 
-Part 1 + Part 2 Wireframe 人工确认后，将：
+人工评审并确认 `DESIGN_SYSTEM.md` 后：
 
 ```text
-UX_AUDIT
-+ IA
-+ WIREFRAMES
-→ UX FROZEN
+DESIGN_SYSTEM
+→ DESIGN FROZEN
 ```
 
-随后进入 `DESIGN_SYSTEM.md`，冻结视觉语言与组件系统。
+只有 `DESIGN FROZEN` 后，才生成实现级 `SPEC.md` / `PLAN.md` / `TASKS.md`。
 
 ## Milestone Exit
 
