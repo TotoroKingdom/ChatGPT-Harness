@@ -457,17 +457,35 @@ Activity / Audit 至少保留：
 
 ---
 
-# M8 — UI Visual Refresh
+# M8 — UI/UX Simplification & Visual Redesign
 
 ## Goal
 
-对现有 UI 做视觉与交互表现升级。
+在保持 M0–M7 产品能力与安全语义不变的前提下，重新设计 Harness 的信息架构、交互模型和视觉系统，使高频任务更直观、点击更少、认知负担更低，并形成一致的 Developer Workspace UI。
+
+## Required Outcome
+
+- 先按用户任务重构信息层级，再进行视觉设计，不做现有页面的一比一换皮。
+- 默认界面只展示完成当前任务所必要的信息，低频配置、证据与诊断信息通过 Detail / Advanced 渐进披露。
+- Tools、Policies、Approvals、Activity、Settings 的高频操作使用一致且直接的交互模型。
+- configured / desired 与 Runtime effective state、Restart Required、安全状态差异继续准确表达。
+- 建立统一 Design System，并以 Codex-inspired Minimal Developer Desktop UI 为视觉方向。
 
 ## Boundary
 
-- M0–M7 已实现的产品能力、安全语义和 Runtime 行为保持不变。
-- M8 完成后，再进入 `M9 — Full V3 External Acceptance`。
-- 具体视觉风格、页面方案、Design System、`SPEC.md` / `PLAN.md` / `TASKS.md` 后续单独讨论后再确定。
+- M0–M7 已实现的产品能力、安全语义、Protocol 和 Runtime authoritative behavior 保持不变。
+- 不修改 Policy precedence、Approval semantics、WorkspaceGuard、Bash enforcement、Config migration 语义。
+- M8 先完成 UX Audit、Information Architecture、Interaction Wireframes 与 Design System 冻结，再生成实现级 `SPEC.md` / `PLAN.md` / `TASKS.md`。
+- M8 完成并人工验收后，再进入 `M9 — Full V3 External Acceptance`。
+
+## Exit Criteria
+
+1. 核心页面的信息架构与交互模型经过人工确认并冻结。
+2. 统一 Design System 冻结，页面不再各自发明控件与视觉规则。
+3. 高频用户任务明显减少不必要步骤，关键状态无需理解内部 Runtime 概念即可判断。
+4. M7 已有安全状态、effective state、evidence 与 remediation 不因简化 UI 而丢失。
+5. 自动化回归验证 M0–M7 行为未被 UI 重构破坏。
+6. M8 Manual UX Acceptance 通过。
 
 ---
 
@@ -569,7 +587,7 @@ M6 i18n
     ↓
 M7 Migration / Evidence / Hardening
     ↓
-M8 UI Visual Refresh
+M8 UI/UX Simplification & Visual Redesign
     ↓
 M9 Full External Acceptance
     ↓
