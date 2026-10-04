@@ -68,7 +68,7 @@ Manual UX Acceptance
 
 在 `DESIGN FROZEN` 前，不允许各页面自行发明视觉规则或组件风格。
 
-## Planned Design Documents
+## Design Documents
 
 当前阶段只建立设计输入，不提前生成开发任务：
 
@@ -85,6 +85,32 @@ Manual UX Acceptance
 - `INTEGRATION_TEST_PLAN.md`
 - `LOCAL_BLACK_BOX_E2E.md`
 - `MANUAL_ACCEPTANCE_CHECKLIST.md`
+
+## Current Design State
+
+```text
+UX_AUDIT        DRAFT COMPLETE
+IA              DRAFT COMPLETE
+WIREFRAMES      PART 1 DRAFT — APP SHELL / TOOLS / POLICIES
+DESIGN_SYSTEM   NOT STARTED
+SPEC            NOT STARTED
+PLAN            NOT STARTED
+TASKS           NOT STARTED
+IMPLEMENTATION  NOT STARTED
+```
+
+`WIREFRAMES.md` Part 1 已经明确以下候选交互：
+
+- 移除大尺寸全局 Topbar，改为稳定 Sidebar + page-local header。
+- Tools 使用 compact rows；Enabled Switch 与 `Allow / Ask / Deny` 直接行内操作。
+- Tool Detail Inspector 主要承担状态解释、Bash 特有配置和 Advanced diagnostics。
+- 独立 Tool / Policy 配置采用 auto-save，并在对象附近显示 Restart Required / save failure。
+- Policies Tool Defaults 使用 segmented control，不再使用 Select + 全页 Save。
+- User Rule enable/disable 为直接操作；Create/Edit Rule 作为完整对象仍显式 Save。
+- Create Rule 使用 focused Sheet，并按用户任务组织输入，不直接暴露 internal Rule ID 或 argvPrefix JSON。
+- System Guardrails 与 Effective Policy 默认降级到 secondary / collapsed；安全异常必须自动提升 attention。
+
+这些内容仍属于人工评审中的设计提案，不是实现授权。
 
 ## Core UX Rule
 
