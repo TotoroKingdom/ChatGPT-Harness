@@ -70,12 +70,13 @@ Manual UX Acceptance
 
 ## Design Documents
 
-当前阶段只建立设计输入，不提前生成开发任务：
+当前设计输入：
 
 - `UX_AUDIT.md` — 当前 UI 的任务、问题、复杂度与简化方向
 - `INFORMATION_ARCHITECTURE.md` — 页面职责、导航与信息层级
-- `WIREFRAMES.md` — 核心页面低保真交互方案
-- `DESIGN_SYSTEM.md` — Typography、spacing、surface、controls、states、patterns
+- `WIREFRAMES.md` — Part 1：App Shell、Tools、Policies
+- `WIREFRAMES_PART2.md` — Part 2：Overview、Approvals、Activity、Settings、First Run / Recovery、Cross-page states
+- `DESIGN_SYSTEM.md` — 尚未创建；UX 冻结后进入
 
 设计冻结后再生成：
 
@@ -91,7 +92,7 @@ Manual UX Acceptance
 ```text
 UX_AUDIT        DRAFT COMPLETE
 IA              DRAFT COMPLETE
-WIREFRAMES      PART 1 DRAFT — APP SHELL / TOOLS / POLICIES
+WIREFRAMES      FULL DRAFT COMPLETE — HUMAN REVIEW REQUIRED
 DESIGN_SYSTEM   NOT STARTED
 SPEC            NOT STARTED
 PLAN            NOT STARTED
@@ -99,7 +100,9 @@ TASKS           NOT STARTED
 IMPLEMENTATION  NOT STARTED
 ```
 
-`WIREFRAMES.md` Part 1 已经明确以下候选交互：
+### Wireframe Part 1
+
+已明确候选交互：
 
 - 移除大尺寸全局 Topbar，改为稳定 Sidebar + page-local header。
 - Tools 使用 compact rows；Enabled Switch 与 `Allow / Ask / Deny` 直接行内操作。
@@ -110,13 +113,40 @@ IMPLEMENTATION  NOT STARTED
 - Create Rule 使用 focused Sheet，并按用户任务组织输入，不直接暴露 internal Rule ID 或 argvPrefix JSON。
 - System Guardrails 与 Effective Policy 默认降级到 secondary / collapsed；安全异常必须自动提升 attention。
 
-这些内容仍属于人工评审中的设计提案，不是实现授权。
+### Wireframe Part 2
+
+已明确候选交互：
+
+- Overview 只回答 Harness 是否可用、当前最重要操作和核心组件状态，不再默认展示完整 Runtime metadata。
+- Approvals 改为 decision-first queue；审批证据后置到详情与 Advanced。
+- `Allow once / Allow for session / Deny` 直接完成决策，`Create rule` 降为 secondary workflow。
+- Activity 从 audit table 改为 activity feed，并明确区分 policy deny 与 execution failure。
+- Settings 改为 section/list 模型，不再使用多个大 Card + 一个全局 Save。
+- Settings 按字段语义分别使用 auto-save、explicit Apply、confirmation。
+- First Run 简化为 `Workspace → Connection → Ready → Start`。
+- Recovery 优先解释问题、数据安全和安全恢复动作，技术细节默认折叠。
+- Restart Required、Disabled、Unavailable、Denied 等状态在全产品使用统一语义。
+
+以上内容仍属于人工评审中的设计提案，不是实现授权。
 
 ## Core UX Rule
 
 > 默认界面只展示用户完成当前任务所需要的信息；低频配置、诊断信息和内部实现细节通过 Detail / Advanced 渐进披露。
 
 现有 JSX / CSS 只作为“已有功能与必须保留状态”的证据，不作为 M8 新页面结构的设计模板。
+
+## Next Gate
+
+Part 1 + Part 2 Wireframe 人工确认后，将：
+
+```text
+UX_AUDIT
++ IA
++ WIREFRAMES
+→ UX FROZEN
+```
+
+随后进入 `DESIGN_SYSTEM.md`，冻结视觉语言与组件系统。
 
 ## Milestone Exit
 
