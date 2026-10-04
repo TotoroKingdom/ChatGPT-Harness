@@ -457,7 +457,21 @@ Activity / Audit 至少保留：
 
 ---
 
-# M8 — Full V3 External Acceptance
+# M8 — UI Visual Refresh
+
+## Goal
+
+对现有 UI 做视觉与交互表现升级。
+
+## Boundary
+
+- M0–M7 已实现的产品能力、安全语义和 Runtime 行为保持不变。
+- M8 完成后，再进入 `M9 — Full V3 External Acceptance`。
+- 具体视觉风格、页面方案、Design System、`SPEC.md` / `PLAN.md` / `TASKS.md` 后续单独讨论后再确定。
+
+---
+
+# M9 — Full V3 External Acceptance
 
 ## Goal
 
@@ -555,7 +569,9 @@ M6 i18n
     ↓
 M7 Migration / Evidence / Hardening
     ↓
-M8 Full External Acceptance
+M8 UI Visual Refresh
+    ↓
+M9 Full External Acceptance
     ↓
 V3 ACCEPTED / FROZEN
 ```
