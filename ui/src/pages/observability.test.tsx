@@ -8,14 +8,17 @@ import { ToolsPage } from "./tools/ToolsPage";
 import { i18n } from "@/i18n";
 import { toolAvailabilityKey } from "@/i18n/presentation";
 import type { ToolAvailability } from "@/services/harness/control-read";
+import type { AppConfig } from "@protocol/v1";
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 vi.mock("@/app/providers/HarnessDataProvider", () => ({ useHarnessData: () => context }));
 let context = makeContext();
 function makeContext() {
+  const config: AppConfig = { schemaVersion: 2, configRevision: "saved-1", workspace: { rootPath: "D:\\example" }, tunnel: { tunnelId: "example", autoDetect: true }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "ask", glob: "ask", write: "ask", edit: "ask", bash: "ask" }, userRules: [] } };
   return { client: new TauriHarnessControlClient(), components: { runtime: "ready", tunnel: "stopped", mcp: "ready" },
     runtime: { status: "success", data: { runtimeId: "runtime-1", activeWorkspace: "D:\private\SECRET_PATH" } },
+    config, tools: { status: "empty", data: { items: [] } }, mutateConfig: vi.fn(),
     overall: "degraded", restartRequired: false };
 }
 const sensitive = {
@@ -65,10 +68,14 @@ describe("M8-D Control Plane response rendering", () => {
     await screen.findByText("Execution completed");
     const calls = tauri.invoke.mock.calls.length;
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
-    expect(screen.getByText("read_file")).toBeInTheDocument();
-    expect(screen.getByText("允许")).toBeInTheDocument();
+    expect(screen.getAllByText("read_file").length).toBeGreaterThan(0);
+    expect(screen.getByText("执行已完成")).toBeInTheDocument();
+    expect(screen.getAllByText("成功").length).toBeGreaterThan(0);
     expect(screen.queryByText("Execution completed")).not.toBeInTheDocument();
     expect(screen.queryByText("Succeeded")).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByTestId("activity-row-event:event-safe")).getByRole("button"));
+    const detail = screen.getByRole("dialog", { name: "活动详情" });
+    expect(within(detail).getByText("允许")).toBeInTheDocument();
     expect(tauri.invoke.mock.calls).toHaveLength(calls);
     expect(JSON.stringify(entries)).toBe(original);
   });
@@ -86,13 +93,14 @@ describe("M8-D Control Plane response rendering", () => {
   });
 
   it("renders every availability verbatim, keeps ASK, and never invents reason", async () => {
-    const tools = ["available", "unavailable_by_policy", "unavailable_by_runtime", "disabled"].map((availability, index) => ({ ...tool, name: "registry_tool_" + index, availability }));
+    const names = ["read_file", "glob", "write", "edit"];
+    const tools = ["available", "unavailable_by_policy", "unavailable_by_runtime", "disabled"].map((availability, index) => ({ ...tool, name: names[index], availability }));
     tauri.invoke.mockResolvedValue(tools);
     const { container } = render(<ToolsPage />);
-    expect(await screen.findByText("registry_tool_0")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Available")).toBeInTheDocument());
     tools.forEach((item) => expect(screen.getByText(i18n.t(toolAvailabilityKey(item.availability as ToolAvailability)))).toBeInTheDocument());
-    expect(screen.getAllByText("ASK")).toHaveLength(4);
-    expect(screen.getAllByText("Not provided by Control Plane")).toHaveLength(4);
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(5);
+    expect(screen.getByText("Runtime has not reported this tool.")).toBeInTheDocument();
     expect(tauri.invoke.mock.calls).toEqual([["runtime_get_effective_tools", undefined]]);
     noSensitiveDOM(container);
   });
@@ -102,13 +110,21 @@ describe("M8-D Control Plane response rendering", () => {
     const original = JSON.stringify(entries);
     tauri.invoke.mockResolvedValue(entries);
     const { container } = render(<ActivityPage />);
-    await screen.findByRole("table");
-    const rows = screen.getAllByRole("row").slice(1);
-    expect(within(rows[0]).getAllByText("Not recorded")).toHaveLength(2);
+    const rows = await screen.findAllByTestId(/^activity-row-snapshot:/);
+    // Feed order is newest received first; equal/older Runtime timestamps do
+    // not reorder the bounded snapshot, and missing IDs remain local keys.
+    expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
+      "activity-row-snapshot:1:3",
+      "activity-row-snapshot:1:2",
+      "activity-row-snapshot:1:1",
+      "activity-row-snapshot:1:0",
+    ]);
+    expect(within(rows[0]).getAllByText("Not recorded").length).toBeGreaterThan(0);
     expect(within(rows[1]).getByText("third")).toBeInTheDocument();
     expect(within(rows[2]).getByText("second")).toBeInTheDocument();
     expect(within(rows[3]).getByText("first")).toBeInTheDocument();
-    expect(screen.getAllByText("Not evaluated")).toHaveLength(4);
+    rows.forEach((row) => expect(within(row).getByText("Not recorded")).toBeInTheDocument());
+    expect(screen.queryAllByText("Not evaluated")).toHaveLength(0);
     expect(screen.queryByText("ALLOW")).not.toBeInTheDocument();
     expect(JSON.stringify(entries)).toBe(original);
     expect(tauri.invoke.mock.calls).toEqual([["runtime_get_activity_snapshot", { limit: 100 }]]);
@@ -122,18 +138,28 @@ describe("M8-D Control Plane response rendering", () => {
       { ...entry("read_file"), eventType: "approval_required", decisionSummary: "ask", outcomeSummary: "approval_required" },
     ]);
     render(<ActivityPage />);
-    expect(await screen.findByText("ALLOW")).toBeInTheDocument();
-    expect(screen.getByText("DENY")).toBeInTheDocument();
-    expect(screen.getByText("ASK")).toBeInTheDocument();
-    expect(screen.getByText("Succeeded")).toBeInTheDocument();
-    expect(screen.getByText("Denied")).toBeInTheDocument();
-    expect(screen.getAllByText("Approval required")).toHaveLength(2);
+    expect((await screen.findAllByText("Success")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Policy denied")).toBeInTheDocument();
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Approval required")).toBeInTheDocument();
+    const decisionRows = [
+      ["activity-row-snapshot:1:0", "ALLOW"],
+      ["activity-row-snapshot:1:1", "DENY"],
+      ["activity-row-snapshot:1:2", "ASK"],
+    ] as const;
+    for (const [testId, decision] of decisionRows) {
+      fireEvent.click(within(screen.getByTestId(testId)).getByRole("button"));
+      const detail = screen.getByRole("dialog", { name: "Activity details" });
+      expect(within(detail).getAllByText(decision).length).toBeGreaterThan(0);
+      fireEvent.click(within(detail).getByRole("button", { name: "Close" }));
+    }
   });
 
   it.each([[ActivityPage, "No retained activity"], [ToolsPage, "No tools reported"]] as const)("distinguishes empty arrays from unavailable", async (Page, message) => {
     tauri.invoke.mockResolvedValue([]);
     render(<Page />);
-    expect(await screen.findByText(message)).toBeInTheDocument();
+    if (Page === ToolsPage) expect(await screen.findAllByText("Runtime has not reported this tool.")).toHaveLength(5);
+    else expect(await screen.findByText("No retained activity in this snapshot")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText("ready")).not.toBeInTheDocument();
   });
@@ -151,15 +177,16 @@ describe("M8-D Control Plane response rendering", () => {
     });
   }
 
-  it("clears old data on refresh and recovers from an unavailable Runtime", async () => {
+  it("keeps configured rows, clears old running facts on refresh and recovers from an unavailable Runtime", async () => {
     tauri.invoke.mockResolvedValueOnce([tool]).mockRejectedValueOnce({ code: "RUNTIME_UNAVAILABLE" }).mockResolvedValueOnce([]);
     render(<ToolsPage />);
-    await screen.findByText("read_file");
+    await screen.findByText("Unavailable by Runtime policy");
     fireEvent.click(screen.getByRole("button", { name: "Refresh tools" }));
-    expect(screen.queryByText("read_file")).not.toBeInTheDocument();
+    expect(screen.getByText("read_file")).toBeInTheDocument();
+    expect(screen.queryByText("Unavailable by Runtime policy")).not.toBeInTheDocument();
     await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "Refresh tools" }));
-    expect(await screen.findByText("No tools reported")).toBeInTheDocument();
+    expect(await screen.findAllByText("Runtime has not reported this tool.")).toHaveLength(5);
   });
 
   it("ignores late responses from the previous Runtime identity", async () => {
@@ -197,20 +224,21 @@ it("M7 expands authoritative safe Activity detail and preserves raw identifiers"
   await i18n.changeLanguage("en");
   tauri.invoke.mockResolvedValue([{ ...entry("write"), eventType: "execution_completed", decisionSummary: "ask", outcomeSummary: "success", requestId: "request-Raw123", toolEnabled: true, capability: "workspace_write", matchedRuleIds: ["rule-Raw123"], policyReason: "matched_user_rules", approvalId: "approval-Raw123", approvalDecision: "allow_once", durationMs: 47, sanitizedArguments: { tool: "write", logicalPath: "safe.txt", content: "WRITE_CONTENT_SENTINEL" }, resultEvidence: { tool: "write", bytesWritten: 7, disposition: "created", content: "RESULT_SENTINEL" } }]);
   const { container } = render(<ActivityPage />);
-  fireEvent.click(await screen.findByRole("button", { name: "Diagnostic detail" }));
-  const detail = screen.getByRole("region", { name: "Diagnostic detail" });
-  for (const id of ["request-Raw123", "rule-Raw123", "approval-Raw123"]) expect(within(detail).getByText(id)).toBeInTheDocument();
+  fireEvent.click(within(await screen.findByTestId("activity-row-event:event-safe")).getByRole("button"));
+  const detail = await screen.findByRole("dialog", { name: "Activity details" });
+  expect(within(detail).getByText("request-Raw123")).toBeInTheDocument();
   expect(within(detail).getByText("47")).toBeInTheDocument();
-  expect(within(detail).getByText(/safe.txt/)).toBeInTheDocument();
-  expect(within(detail).getByText(/bytesWritten/)).toBeInTheDocument();
+  expect(within(detail).getAllByText(/safe.txt/).length).toBeGreaterThan(0);
+  expect(within(detail).getAllByText(/bytesWritten/).length).toBeGreaterThan(0);
+  fireEvent.click(within(detail).getByText("Advanced evidence"));
+  for (const id of ["rule-Raw123", "approval-Raw123"]) expect(within(detail).getByText(new RegExp(id))).toBeInTheDocument();
   expect(container.innerHTML).not.toContain("WRITE_CONTENT_SENTINEL"); expect(container.innerHTML).not.toContain("RESULT_SENTINEL");
 });
 it("M7 missing evidence is visibly unrecorded without invented arguments or results", async () => {
   await i18n.changeLanguage("en"); tauri.invoke.mockResolvedValue([entry("read_file")]);
-  render(<ActivityPage />); fireEvent.click(await screen.findByRole("button", { name: "Diagnostic detail" }));
-  const detail = screen.getByRole("region", { name: "Diagnostic detail" });
-  expect(within(detail).getAllByText("Not recorded").length).toBeGreaterThan(5);
-  expect(within(detail).getByText("Not applicable")).toBeInTheDocument();
+  render(<ActivityPage />); fireEvent.click(within(await screen.findByTestId("activity-row-event:event-safe")).getByRole("button"));
+  const detail = await screen.findByRole("dialog", { name: "Activity details" });
+  expect(within(detail).getAllByText("Not recorded")).toHaveLength(2);
   expect(within(detail).queryByText(/bytesRead/)).not.toBeInTheDocument();
 });
 it("M7 Overview shows real counters and safe error code", async () => {

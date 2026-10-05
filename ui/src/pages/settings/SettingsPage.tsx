@@ -1,47 +1,36 @@
 import { ConfigRecovery } from "@/components/status/ConfigRecovery";
 import { ConfigRevisionStatus } from "@/components/status/ConfigRevisionStatus";
 import { useEffect, useState, type ReactNode } from "react";
-import type { AppConfig, SecurityMode, UiLanguage } from "@protocol/v1";
+import type { SecurityMode, TunnelConfig, UiLanguage } from "@protocol/v1";
 import { useTranslation } from "react-i18next";
-import { Card, SectionHeading, StatusBadge } from "@/components/common/primitives";
+import { Button, Dialog, Disclosure, InlineFeedback, Row, Section, Segmented, Select, Sheet, StatusBadge, TextField } from "@/components/common/primitives";
 import { useHarnessData, type SaveResult } from "@/app/providers/HarnessDataProvider";
 import { i18n } from "@/i18n";
 import { resolveLanguage, systemLocales } from "@/i18n/resolve-language";
-import { presentError, startEligibilityKey, type ErrorPresentation, type TranslationKey } from "@/i18n/presentation";
+import { presentError, securityModeKey, type ErrorPresentation, type TranslationKey } from "@/i18n/presentation";
+import { useDraftGuard, useDraftNavigation } from "@/app/router/DraftNavigation";
+import type { NavigationOptions } from "@/app/router/routes";
+import { assertUnchanged } from "@/app/providers/config-mutations";
+import { validateControlPlaneProxy } from "./configuration";
 
-const emptyConfig: AppConfig = {
-  bash: { autoDetect: true },
-  schemaVersion: 2,
-  configRevision: "0",
-  workspace: { rootPath: "" },
-  tunnel: { tunnelId: "", autoDetect: true },
-  security: { mode: "normal", developerTestMode: false },
-  ui: {},
-  tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
-  policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
+export { validateControlPlaneProxy } from "./configuration";
+
+type ProxyValidationKey = ReturnType<typeof validateControlPlaneProxy>;
+
+type TunnelDraft = {
+  tunnelId: string;
+  controlPlaneHttpProxy: string;
+  tunnelClientPath: string;
+  autoDetect: boolean;
 };
 
-type ProxyValidationKey =
-  | "validation.settings.proxyUrl"
-  | "validation.settings.proxyProtocol"
-  | "validation.settings.proxyHost"
-  | "validation.settings.proxyCredentials"
-  | "validation.settings.proxyPath";
-
-export function validateControlPlaneProxy(value: string): ProxyValidationKey | "" {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return "validation.settings.proxyUrl";
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "validation.settings.proxyProtocol";
-  if (!parsed.hostname) return "validation.settings.proxyHost";
-  if (parsed.username || parsed.password) return "validation.settings.proxyCredentials";
-  if (parsed.pathname !== "/" || parsed.search || parsed.hash) return "validation.settings.proxyPath";
-  return "";
+function tunnelDraft(tunnel: TunnelConfig): TunnelDraft {
+  return {
+    tunnelId: tunnel.tunnelId,
+    controlPlaneHttpProxy: tunnel.controlPlaneHttpProxy ?? "",
+    tunnelClientPath: tunnel.tunnelClientPath ?? "",
+    autoDetect: tunnel.autoDetect,
+  };
 }
 
 type Feedback =
@@ -75,391 +64,498 @@ function currentLocale(): UiLanguage {
   return i18n.resolvedLanguage === "zh-CN" ? "zh-CN" : "en";
 }
 
-function settingUi(config: AppConfig, persisted: AppConfig | null): AppConfig["ui"] {
-  // A language-only mutation may have happened while the Settings draft was
-  // dirty. Prefer the latest persisted UI object so a later full save cannot
-  // write the stale language back over it.
-  return persisted ? { ...persisted.ui } : { ...config.ui };
-}
-
-export function SettingsPage() {
+export function SettingsPage({ initialSection }: { initialSection?: NavigationOptions["settingsSection"] } = {}) {
   const { t } = useTranslation();
   const data = useHarnessData();
-  const [form, setForm] = useState<AppConfig>(data.config ?? emptyConfig);
-  const [apiKey, setApiKey] = useState("");
-  const [replacingApiKey, setReplacingApiKey] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [proxyError, setProxyError] = useState<ProxyValidationKey | "">("");
-  const [resetting, setResetting] = useState(false);
-  const [languageSaving, setLanguageSaving] = useState(false);
+  const { requestLeave, finishDraft } = useDraftNavigation();
   const [languageSelection, setLanguageSelection] = useState<UiLanguage | "">(() => data.config?.ui.language ?? "");
-
-  useEffect(() => {
-    if (!dirty) setForm(data.config ?? emptyConfig);
-  }, [data.config, dirty]);
+  const [languageSaving, setLanguageSaving] = useState(false);
+  const [languageFeedback, setLanguageFeedback] = useState<Feedback | null>(null);
+  const [workspaceSaving, setWorkspaceSaving] = useState(false);
+  const [workspaceFeedback, setWorkspaceFeedback] = useState<Feedback | null>(null);
+  const [connectionOpen, setConnectionOpen] = useState(false);
+  const [connectionObserved, setConnectionObserved] = useState<TunnelConfig | null>(null);
+  const [connectionSaving, setConnectionSaving] = useState(false);
+  const [connectionDirty, setConnectionDirty] = useState(false);
+  const [connectionFeedback, setConnectionFeedback] = useState<Feedback | null>(null);
+  const [removeConfirmation, setRemoveConfirmation] = useState(false);
+  const [removingApiKey, setRemovingApiKey] = useState(false);
+  const [securitySaving, setSecuritySaving] = useState(false);
+  const [securityFeedback, setSecurityFeedback] = useState<Feedback | null>(null);
+  const [developerConfirmation, setDeveloperConfirmation] = useState(false);
+  const [resetConfirmation, setResetConfirmation] = useState(false);
+  const [resetFeedback, setResetFeedback] = useState<Feedback | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [diagnostic, setDiagnostic] = useState<Awaited<ReturnType<typeof data.runDiagnostics>> | null>(null);
+  const [diagnosticRunning, setDiagnosticRunning] = useState(false);
 
   useEffect(() => {
     if (!languageSaving) setLanguageSelection(data.config?.ui.language ?? "");
-  }, [data.config, languageSaving]);
+  }, [data.config?.ui.language, languageSaving]);
 
-  const update = (patch: Partial<AppConfig>) => {
-    setForm((current) => ({ ...current, ...patch }));
-    setDirty(true);
-    setFeedback(null);
-  };
+  useEffect(() => {
+    if (!initialSection) return;
+    const node = document.getElementById(`settings-section-${initialSection}`);
+    node?.scrollIntoView({ block: "start", behavior: "auto" });
+    node?.focus();
+  }, [initialSection]);
 
-  const chooseFolder = async () => {
-    const path = await data.chooseWorkspace();
-    if (path) update({ workspace: { rootPath: path } });
-  };
-
-  const chooseClient = async () => {
-    const path = await data.chooseTunnelClient();
-    if (path) update({ tunnel: { ...form.tunnel, tunnelClientPath: path, autoDetect: false } });
-  };
-
-  const detect = async () => {
-    const path = await data.detectTunnelClient();
-    if (path) update({ tunnel: { ...form.tunnel, tunnelClientPath: path, autoDetect: true } });
-    else setFeedback({ kind: "success", key: "settings.tunnel.bundledNotice" });
-  };
-
-  const setMode = (mode: SecurityMode) => {
-    update({ security: { mode, developerTestMode: mode === "developer_test" } });
-  };
+  const currentConfig = data.config;
+  const savedMode = currentConfig?.security.mode;
+  const components = data.components;
+  const runtime = data.runtime;
+  const running = components.runtime === "ready" || components.runtime === "degraded";
+  const observedRuntime = runtime.status === "success" || runtime.status === "empty" ? runtime.data : null;
+  const controlPlaneConnected = data.harness?.tunnelReadiness?.controlPlaneConnected;
+  const tunnelObservedReady = components.tunnel === "ready";
+  const connectionStatus = controlPlaneConnected === true && tunnelObservedReady
+    ? t("status.ready")
+    : controlPlaneConnected === false
+      ? t("status.error")
+      : t("m8.unknown");
+  const apiKeyStatus = data.apiKeyObserved
+    ? data.apiKeyConfigured ? "configured" : "missing"
+    : "unknown";
 
   const changeLanguage = async (value: UiLanguage | "") => {
-    if (languageSaving || saving || resetting) return;
+    if (languageSaving || resetting) return;
     const previousPreference = data.config?.ui.language ?? null;
     const previousLocale = currentLocale();
     const nextPreference = value || null;
     const nextLocale = nextPreference ?? resolveLanguage(undefined, systemLocales());
     setLanguageSelection(value);
     setLanguageSaving(true);
-    setFeedback(null);
+    setLanguageFeedback(null);
     await i18n.changeLanguage(nextLocale);
-
-    let result: SaveResult;
     try {
-      result = await data.setUiLanguage(nextPreference);
+      const result = await data.setUiLanguage(nextPreference);
+      if (!result.ok) {
+        await i18n.changeLanguage(previousLocale);
+        setLanguageSelection(previousPreference ?? "");
+        setLanguageFeedback(saveError(result));
+      } else {
+        setLanguageFeedback({ kind: "success", key: "settings.languageSaved" });
+      }
     } catch (error) {
-      const failed = errorFeedback(error);
       await i18n.changeLanguage(previousLocale);
       setLanguageSelection(previousPreference ?? "");
-      setFeedback(failed);
+      setLanguageFeedback(errorFeedback(error));
+    } finally {
       setLanguageSaving(false);
-      return;
     }
-    if (!result.ok) {
-      await i18n.changeLanguage(previousLocale);
-      setLanguageSelection(previousPreference ?? "");
-      setFeedback(saveError(result));
-    } else {
-      setFeedback({ kind: "success", key: "settings.languageSaved" });
-    }
-    setLanguageSaving(false);
   };
 
-  const save = async () => {
-    if (languageSaving || saving || resetting) return;
-    setFeedback(null);
-    if (!form.workspace.rootPath.trim()) {
-      setFeedback({ kind: "error", summaryKey: "validation.settings.workspace" });
-      return;
+  const chooseFolder = async () => {
+    if (workspaceSaving || resetting || !data.config) return;
+    const path = await data.chooseWorkspace();
+    if (!path) return;
+    setWorkspaceSaving(true);
+    setWorkspaceFeedback(null);
+    try {
+      const result = await data.mutateConfig((latest) => ({ ...latest, workspace: { rootPath: path } }));
+      setWorkspaceFeedback(result.ok
+        ? { kind: "success", key: result.refreshUnconfirmed ? "m8.refreshUnconfirmed" : "m8.saved" }
+        : saveError(result));
+    } catch (error) {
+      setWorkspaceFeedback(errorFeedback(error));
+    } finally {
+      setWorkspaceSaving(false);
     }
-    const nextProxy = form.tunnel.controlPlaneHttpProxy?.trim() ?? "";
-    const nextProxyError = validateControlPlaneProxy(nextProxy);
-    setProxyError(nextProxyError);
-    if (nextProxyError) return;
-    setSaving(true);
-    const result = await data.saveConfig(
-      {
-        ...form,
-        ui: settingUi(form, data.config),
-        tunnel: {
-          ...form.tunnel,
-          tunnelId: form.tunnel.tunnelId.trim(),
-          controlPlaneHttpProxy: nextProxy || undefined,
-        },
-      },
-      apiKey.trim() || undefined,
-    );
-    setSaving(false);
-    setApiKey("");
-    if (!result.ok) {
-      setFeedback(saveError(result));
-      return;
-    }
-
-    setReplacingApiKey(false);
-    setDirty(false);
-    setFeedback({ kind: "success", key: "settings.actions.savedNotice" });
-    await data.refreshConfig();
   };
+
+  const openConnection = () => {
+    if (!data.config || connectionSaving || resetting) return;
+    setConnectionObserved({ ...data.config.tunnel });
+    setConnectionFeedback(null);
+    setConnectionDirty(false);
+    setConnectionOpen(true);
+  };
+
+  const applyConnection = async (draft: TunnelDraft, apiKey: string, observed: TunnelConfig): Promise<SaveResult> => {
+    const nextProxy = draft.controlPlaneHttpProxy.trim();
+    const proxyError = validateControlPlaneProxy(nextProxy);
+    if (proxyError) {
+      const result: SaveResult = { ok: false, error: undefined };
+      setConnectionFeedback({ kind: "error", summaryKey: proxyError });
+      return result;
+    }
+    setConnectionSaving(true);
+    setConnectionFeedback(null);
+    try {
+      const result = await data.mutateConfig((latest) => {
+        assertUnchanged(observed, latest.tunnel);
+        const tunnel: TunnelConfig = {
+          ...latest.tunnel,
+          tunnelId: draft.tunnelId.trim(),
+          autoDetect: draft.autoDetect,
+        };
+        if (nextProxy) tunnel.controlPlaneHttpProxy = nextProxy;
+        else delete tunnel.controlPlaneHttpProxy;
+        if (draft.tunnelClientPath.trim()) tunnel.tunnelClientPath = draft.tunnelClientPath.trim();
+        else delete tunnel.tunnelClientPath;
+        return { ...latest, tunnel };
+      }, apiKey.trim() || undefined);
+      if (!result.ok) {
+        setConnectionFeedback(saveError(result));
+      } else {
+        setConnectionFeedback({ kind: "success", key: result.refreshUnconfirmed ? "m8.refreshUnconfirmed" : "m8.saved" });
+      }
+      return result;
+    } catch (error) {
+      const result: SaveResult = { ok: false };
+      setConnectionFeedback(errorFeedback(error));
+      return result;
+    } finally {
+      setConnectionSaving(false);
+    }
+  };
+
+  const finishConnection = () => {
+    finishDraft();
+    setConnectionOpen(false);
+    setConnectionObserved(null);
+    setConnectionDirty(false);
+  };
+
+  const removeApiKey = () => {
+    // A credential removal is independent from the Connection draft. Closing
+    // the editor first ensures Cancel can never restore the removed secret.
+    if (connectionSaving || resetting) return;
+    setConnectionOpen(false);
+    setConnectionObserved(null);
+    setConnectionDirty(false);
+    setConnectionFeedback(null);
+    setRemoveConfirmation(true);
+  };
+
+  const confirmRemoveApiKey = async () => {
+    if (removingApiKey) return;
+    setRemovingApiKey(true);
+    try {
+      await data.deleteApiKey();
+      setRemoveConfirmation(false);
+      setConnectionFeedback({ kind: "success", key: "settings.tunnel.removed" });
+    } catch (error) {
+      setConnectionFeedback(errorFeedback(error));
+    } finally {
+      setRemovingApiKey(false);
+    }
+  };
+
+  const commitSecurity = async (mode: SecurityMode) => {
+    setSecuritySaving(true);
+    setSecurityFeedback(null);
+    try {
+      const result = await data.mutateConfig((latest) => ({
+        ...latest,
+        security: { ...latest.security, mode, developerTestMode: mode === "developer_test" },
+      }));
+      if (result.ok) {
+        setSecurityFeedback({ kind: "success", key: result.refreshUnconfirmed ? "m8.refreshUnconfirmed" : "m8.saved" });
+        setDeveloperConfirmation(false);
+      } else {
+        setSecurityFeedback(saveError(result));
+      }
+    } catch (error) {
+      setSecurityFeedback(errorFeedback(error));
+    } finally {
+      setSecuritySaving(false);
+    }
+  };
+
+  const chooseSecurityMode = (mode: SecurityMode) => {
+    if (securitySaving || resetting || !savedMode || mode === savedMode) return;
+    requestLeave(() => {
+      if (mode === "developer_test") setDeveloperConfirmation(true);
+      else void commitSecurity(mode);
+    });
+  };
+
+  const runDiagnostics = async () => {
+    if (diagnosticRunning) return;
+    setDiagnosticRunning(true);
+    try { setDiagnostic(await data.runDiagnostics()); }
+    catch (error) { setSecurityFeedback(errorFeedback(error)); }
+    finally { setDiagnosticRunning(false); }
+  };
+
+  const requestReset = () => requestLeave(() => {
+    setResetFeedback(null);
+    setResetConfirmation(true);
+  });
 
   const reset = async () => {
-    if (languageSaving || saving || resetting) return;
-    if (!window.confirm(t("settings.actions.resetConfirm"))) return;
+    if (resetting || connectionSaving) return;
+    setResetFeedback(null);
+    setConnectionOpen(false);
+    setConnectionObserved(null);
+    setConnectionDirty(false);
     setResetting(true);
-    const result = await data.resetConfig();
-    setResetting(false);
-    if (!result.ok) {
-      setFeedback(saveError(result));
-      return;
+    try {
+      const result = await data.resetConfig();
+      if (result.ok) {
+        setResetConfirmation(false);
+        setWorkspaceFeedback({ kind: "success", key: "settings.actions.resetSuccess" });
+      } else {
+        const failed = saveError(result);
+        setResetFeedback(failed);
+        setWorkspaceFeedback(failed);
+      }
+    } catch (error) {
+      const failed = errorFeedback(error);
+      setResetFeedback(failed);
+      setWorkspaceFeedback(failed);
+    } finally {
+      setResetting(false);
     }
-    setForm(emptyConfig);
-    setApiKey("");
-    setReplacingApiKey(false);
-    setDirty(false);
-    setFeedback({ kind: "success", key: "settings.actions.resetSuccess" });
   };
 
   const restartHarness = async () => {
-    setFeedback(null);
     const result = await data.restartHarness();
-    if (!result.ok) {
-      setFeedback(saveError(result));
-      return;
-    }
-    setFeedback({ kind: "success", key: "settings.restart.success" });
+    setWorkspaceFeedback(result.ok ? { kind: "success", key: "settings.restart.success" } : saveError(result));
   };
+
+  const section = (name: NavigationOptions["settingsSection"], content: ReactNode) => (
+    <div id={`settings-section-${name}`} tabIndex={-1}>{content}</div>
+  );
 
   return (
     <div className="settings-page page-stack">
-      <Card className="settings-banner">
-        <div className="settings-lock" aria-hidden="true">⌁</div>
-        <div>
-          <StatusBadge tone="success">{t("settings.banner.badge")}</StatusBadge>
-          <h2>{t("settings.banner.title")}</h2>
-          <p>{t("settings.banner.description")}</p>
-        </div>
-      </Card>
+      <p>{t("settings.banner.description")}</p>
 
-      <SettingsSection eyebrow={t("settings.language")} title={t("settings.language")}>
-        <label className="form-field">
-          <span>{t("settings.language")}</span>
-          <select
-            value={languageSelection}
-            onChange={(event) => void changeLanguage(event.target.value as UiLanguage | "")}
-            disabled={languageSaving || saving || resetting}
-            aria-busy={languageSaving}
-          >
-            <option value="">{t("settings.followSystem")}</option>
-            <option value="en">{t("settings.languages.en")}</option>
-            <option value="zh-CN">{t("settings.languages.zhCN")}</option>
-          </select>
-        </label>
-        <p className="settings-help">{languageSaving ? t("settings.languageSaving") : t("settings.languageHelp")}</p>
-      </SettingsSection>
+      {data.configError && <ConfigRecovery onReset={requestReset} disabled={resetting || connectionSaving} />}
 
-      {data.configError && <ConfigRecovery onReset={() => void reset()} disabled={resetting || saving || languageSaving} />}
-      <ConfigRevisionStatus titleKey="settings.restart.title" descriptionKey="settings.restart.description" onRestart={() => void restartHarness()} />
+      {section("general", <Section title={t("m8Settings.general")}>
+        <Row title={t("settings.language")} summary={t("settings.languageHelp")} controls={<Select label={t("settings.language")} value={languageSelection} onChange={(event) => void changeLanguage(event.target.value as UiLanguage | "")} disabled={languageSaving || resetting}>
+          <option value="">{t("settings.followSystem")}</option><option value="en">{t("settings.languages.en")}</option><option value="zh-CN">{t("settings.languages.zhCN")}</option>
+        </Select>} />
+        {languageSaving && <InlineFeedback>{t("settings.languageSaving")}</InlineFeedback>}
+        {languageFeedback && <FeedbackNotice feedback={languageFeedback} />}
+      </Section>)}
 
-      <div className="settings-layout">
-        <SettingsSection eyebrow={t("settings.workspace.eyebrow")} title={t("settings.workspace.title")}>
-          <div className="form-row">
-            <label className="form-field grow">
-              <span>{t("settings.workspace.root")}</span>
-              <input
-                className="path-input"
-                value={form.workspace.rootPath} readOnly
-                placeholder={t("settings.workspace.placeholder")}
-                title={form.workspace.rootPath || undefined}
-              />
-            </label>
-            <button className="button button-secondary align-end" onClick={() => void chooseFolder()}>{t("settings.workspace.choose")}</button>
-          </div>
-          <p className="settings-help">{t("settings.workspace.help")}</p>
-        </SettingsSection>
+      {section("workspace", <Section title={t("m8Settings.workspace")}>
+        <Row title={t("settings.workspace.root")} summary={<code className="mono">{currentConfig?.workspace.rootPath || t("m8.unknown")}</code>} controls={<Button variant="secondary" onClick={() => void chooseFolder()} disabled={workspaceSaving || resetting || !data.config}>{workspaceSaving ? t("settings.languageSaving") : t("settings.workspace.choose")}</Button>} />
+        <Row title={t("m8.running")} summary={<code className="mono">{observedRuntime?.activeWorkspace || t("m8.unknown")}</code>} />
+        <InlineFeedback>{t("settings.workspace.help")}</InlineFeedback>
+        {running && data.restartRequired && <ConfigRevisionStatus titleKey="settings.restart.title" descriptionKey="settings.restart.description" onRestart={() => void restartHarness()} />}
+        {workspaceFeedback && <FeedbackNotice feedback={workspaceFeedback} />}
+      </Section>)}
 
-        <SettingsSection eyebrow={t("settings.tunnel.eyebrow")} title={t("settings.tunnel.title")}>
-          <label className="form-field">
-            <span>{t("settings.tunnel.id")}</span>
-            <input aria-label={t("settings.tunnel.id")} value={form.tunnel.tunnelId} onChange={(event) => update({ tunnel: { ...form.tunnel, tunnelId: event.target.value } })} placeholder={t("settings.tunnel.idPlaceholder")} />
-          </label>
-          <label className="form-field">
-            <span>{t("settings.tunnel.proxy")}</span>
-            <input
-              aria-label={t("settings.tunnel.proxy")}
-              value={form.tunnel.controlPlaneHttpProxy ?? ""}
-              onChange={(event) => {
-                setProxyError("");
-                update({ tunnel: { ...form.tunnel, controlPlaneHttpProxy: event.target.value || undefined } });
-              }}
-              placeholder={t("settings.tunnel.proxyPlaceholder")}
-              aria-invalid={Boolean(proxyError)}
-              aria-describedby={proxyError ? "control-plane-proxy-error" : undefined}
-            />
-            {proxyError && <span id="control-plane-proxy-error" className="settings-help danger-text" role="alert">{t(proxyError)}</span>}
-          </label>
-          <p className="settings-help">{t("settings.tunnel.proxyHelp")}</p>
-          <div className="form-row">
-            <label className="form-field grow">
-              <span>{t("settings.tunnel.client")}</span>
-              <input className="path-input" value={form.tunnel.tunnelClientPath ?? ""} readOnly placeholder={t("settings.tunnel.clientPlaceholder")} title={form.tunnel.tunnelClientPath || undefined} />
-            </label>
-            <button className="button button-secondary align-end" onClick={() => void detect()}>{t("settings.tunnel.useBundled")}</button>
-            <button className="button button-secondary align-end" onClick={() => void chooseClient()}>{t("settings.tunnel.chooseOverride")}</button>
-          </div>
-          <label className="form-field">
-            <span>{t("settings.tunnel.apiKey")}</span>
-            {data.apiKeyConfigured && !replacingApiKey ? (
-              <div className="secret-state">
-                <StatusBadge tone="success">{t("settings.tunnel.configured")}</StatusBadge>
-                <button className="button button-quiet" onClick={() => { setReplacingApiKey(true); setApiKey(""); }}>{t("settings.tunnel.replace")}</button>
-                <button className="button button-quiet danger-text" onClick={() => { setReplacingApiKey(false); setApiKey(""); void data.deleteApiKey(); }}>{t("settings.tunnel.remove")}</button>
-              </div>
-            ) : (
-              <input type="password" aria-label={t("settings.tunnel.apiKey")} value={apiKey} onChange={(event) => { setApiKey(event.target.value); setDirty(true); setFeedback(null); }} placeholder={t("settings.tunnel.apiKeyPlaceholder")} autoComplete="off" />
-            )}
-          </label>
-        </SettingsSection>
+      {section("connection", <Section title={t("m8Settings.connection")}>
+        <Row title={t("settings.tunnel.id")} summary={<code className="mono">{currentConfig?.tunnel.tunnelId || t("m8.unknown")}</code>} controls={<Button variant="secondary" onClick={openConnection} disabled={!data.config || connectionSaving || resetting}>{t("m8Settings.configure")}</Button>} />
+        <Row title={t("settings.tunnel.apiKey")} summary={apiKeyStatus === "configured" ? <StatusBadge tone="success">{t("settings.tunnel.configured")}</StatusBadge> : <span className="muted">{apiKeyStatus === "missing" ? t("m8Settings.notConfigured") : t("m8.unknown")}</span>} />
+        <Row title={t("settings.tunnel.title")} summary={connectionStatus} />
+        {connectionFeedback && <FeedbackNotice feedback={connectionFeedback} />}
+      </Section>)}
 
-        <SettingsSection eyebrow={t("settings.security.eyebrow")} title={t("settings.security.title")}>
-          <div className="mode-options">
-            <button className={`mode-option ${form.security.mode === "normal" ? "selected" : ""}`} onClick={() => setMode("normal")} aria-pressed={form.security.mode === "normal"}>
-              <strong>{t("settings.security.normal")}</strong>
-              <span>{t("settings.security.normalDescription")}</span>
-            </button>
-            <button className={`mode-option developer ${form.security.mode === "developer_test" ? "selected" : ""}`} onClick={() => setMode("developer_test")} aria-pressed={form.security.mode === "developer_test"}>
-              <strong>{t("settings.security.developerTest")}</strong>
-              <span>{t("settings.security.developerDescription")}</span>
-            </button>
-          </div>
-        </SettingsSection>
+      {section("security", <Section title={t("m8Settings.security")}>
+        <Row title={t("settings.security.title")} summary={<span>{savedMode ? `${t("m8.configured")}: ${t(securityModeKey(savedMode))}` : t("m8.unknown")}</span>} controls={savedMode ? <SegmentedSecurity value={savedMode} onChange={chooseSecurityMode} disabled={securitySaving || resetting} /> : <span className="muted">{t("m8.unknown")}</span>} />
+        <InlineFeedback>{observedRuntime ? `${t("m8.running")}: ${t(securityModeKey(observedRuntime.securityMode))}` : `${t("m8.running")}: ${t("m8.unknown")}`}</InlineFeedback>
+        {securityFeedback && <FeedbackNotice feedback={securityFeedback} />}
+      </Section>)}
 
-        <SettingsSection eyebrow={t("settings.localData.eyebrow")} title={t("settings.localData.title")}>
-          <div className="local-facts">
-            <div><span>{t("settings.localData.configDirectory")}</span><code className="path-value" title={data.configMetadata?.configDirectory}>{data.configMetadata?.configDirectory ?? t("settings.localData.osApplicationData")}</code></div>
-            <div><span>{t("settings.localData.configFile")}</span><code className="path-value" title={data.configMetadata?.configFile}>{data.configMetadata?.configFile ?? t("settings.localData.configJson")}</code></div>
-            <div><span>{t("settings.localData.secretProvider")}</span><code>{data.config?.tunnel.apiKeyRef?.provider ?? t("settings.localData.credentialStore")}</code></div>
-          </div>
-        </SettingsSection>
-      </div>
+      {section("advanced", <Section title={t("m8Settings.advanced")}>
+        <Disclosure title={t("settings.localData.title")} open={initialSection === "advanced"}>
+          <dl className="detail-list">
+            <div><dt>{t("settings.localData.configDirectory")}</dt><dd><code>{data.configMetadata?.configDirectory ?? t("settings.localData.osApplicationData")}</code></dd></div>
+            <div><dt>{t("settings.localData.configFile")}</dt><dd><code>{data.configMetadata?.configFile ?? t("settings.localData.configJson")}</code></dd></div>
+            <div><dt>{t("settings.localData.secretProvider")}</dt><dd><code>{currentConfig?.tunnel.apiKeyRef?.provider ?? t("m8.unknown")}</code></dd></div>
+            <div><dt>{t("m7.revision.title")}</dt><dd><code>{currentConfig?.configRevision ?? t("m8.unknown")}</code></dd></div>
+          </dl>
+        </Disclosure>
+        <Disclosure title={t("overview.diagnosticsHelp")}>
+          <Button variant="secondary" onClick={() => void runDiagnostics()} disabled={diagnosticRunning}>{diagnosticRunning ? t("common.loading") : t("common.refresh")}</Button>
+          {diagnostic && <div className="detail-list">{diagnostic.checks.map((check) => <div key={check.id}><span>{check.id}</span><span>{check.status}: {check.summary}{check.remediation ? ` — ${check.remediation}` : ""}</span></div>)}</div>}
+        </Disclosure>
+      </Section>)}
 
-      <FeedbackNotice feedback={feedback} />
-      <div className="settings-actions">
-        <span className={dirty ? "warning-text" : "muted"}>{dirty ? t("settings.actions.unsaved") : t("settings.actions.saved")}</span>
-        <button className="button button-secondary" disabled={!dirty || saving || resetting || languageSaving} onClick={() => { setForm(data.config ?? emptyConfig); setApiKey(""); setReplacingApiKey(false); setDirty(false); }}>{t("settings.actions.discard")}</button>
-        <button className="button button-primary" disabled={!dirty || saving || resetting || languageSaving} onClick={() => void save()}>{saving ? t("settings.actions.saving") : t("settings.actions.save")}</button>
-        <button className="button button-quiet danger-text" onClick={() => void reset()} disabled={resetting || saving || languageSaving}>{resetting ? t("settings.actions.resetting") : t("settings.actions.reset")}</button>
-      </div>
+      {section("danger", <Section title={t("m8Settings.dangerZone")}>
+        <InlineFeedback>{t("m8FirstRun.resetLoss")}</InlineFeedback>
+        <Button variant="danger" onClick={requestReset} disabled={resetting || connectionSaving}>{resetting ? t("settings.actions.resetting") : t("settings.actions.reset")}</Button>
+      </Section>)}
+
+      {connectionOpen && connectionObserved && <ConnectionEditor
+        observed={connectionObserved}
+        apiKeyConfigured={data.apiKeyConfigured}
+        apiKeyObserved={data.apiKeyObserved}
+        latest={data.config?.tunnel ?? null}
+        saving={connectionSaving}
+        feedback={connectionFeedback}
+        onDirtyChange={setConnectionDirty}
+        onApply={applyConnection}
+        onSaved={finishConnection}
+        onCancel={finishConnection}
+        onChooseClient={() => data.chooseTunnelClient()}
+        onDetectClient={() => data.detectTunnelClient()}
+        onRemove={removeApiKey}
+        onReload={() => data.config?.tunnel ?? null}
+      />}
+
+      {developerConfirmation && <Dialog title={t("settings.security.developerTest")} onClose={() => { if (!securitySaving) setDeveloperConfirmation(false); }}>
+        <p>{t("settings.security.developerDescription")}</p>
+        <p className="muted">{t("settings.security.normalDescription")}</p>
+        {securityFeedback && <FeedbackNotice feedback={securityFeedback} />}
+        <div className="settings-actions"><Button variant="secondary" onClick={() => setDeveloperConfirmation(false)} disabled={securitySaving}>{t("common.cancel")}</Button><Button variant="primary" onClick={() => void commitSecurity("developer_test")} disabled={securitySaving}>{t("settings.security.developerTest")}</Button></div>
+      </Dialog>}
+
+      {resetConfirmation && <Dialog title={t("settings.actions.reset")} onClose={() => { if (!resetting) setResetConfirmation(false); }}>
+        <p>{t("m8FirstRun.resetLoss")}</p>
+        {resetFeedback && <FeedbackNotice feedback={resetFeedback} />}
+        <div className="settings-actions"><Button variant="secondary" onClick={() => setResetConfirmation(false)} disabled={resetting}>{t("common.cancel")}</Button><Button variant="danger" onClick={() => void reset()} disabled={resetting || connectionSaving}>{resetting ? t("settings.actions.resetting") : t("settings.actions.reset")}</Button></div>
+      </Dialog>}
+
+      {removeConfirmation && <Dialog title={t("settings.tunnel.remove")} onClose={() => { if (!removingApiKey) setRemoveConfirmation(false); }}>
+        <p>{t("settings.tunnel.removeConfirm")}</p>
+        <p className="muted">{t("settings.tunnel.configured")}</p>
+        {connectionFeedback && <FeedbackNotice feedback={connectionFeedback} />}
+        <div className="settings-actions"><Button variant="secondary" onClick={() => setRemoveConfirmation(false)} disabled={removingApiKey}>{t("common.cancel")}</Button><Button variant="danger" onClick={() => void confirmRemoveApiKey()} disabled={removingApiKey}>{removingApiKey ? t("common.saving") : t("settings.tunnel.remove")}</Button></div>
+      </Dialog>}
     </div>
   );
 }
 
-export function FirstRunWizard({ onDone }: { onDone: () => void }) {
+function SegmentedSecurity({ value, onChange, disabled }: { value: SecurityMode; onChange: (value: SecurityMode) => void; disabled?: boolean }) {
   const { t } = useTranslation();
-  const data = useHarnessData();
-  const [form, setForm] = useState<AppConfig>(data.config ?? emptyConfig);
+  return <Segmented
+    value={value}
+    label={t("settings.security.title")}
+    disabled={disabled}
+    options={[
+      { value: "normal" as const, label: t("settings.security.normal") },
+      { value: "developer_test" as const, label: t("settings.security.developerTest") },
+    ]}
+    onChange={onChange}
+  />;
+}
+
+function ConnectionEditor({
+  observed,
+  latest,
+  apiKeyConfigured,
+  apiKeyObserved,
+  saving,
+  feedback,
+  onDirtyChange,
+  onApply,
+  onSaved,
+  onCancel,
+  onChooseClient,
+  onDetectClient,
+  onRemove,
+  onReload,
+}: {
+  observed: TunnelConfig;
+  latest: TunnelConfig | null;
+  apiKeyConfigured: boolean;
+  apiKeyObserved: boolean;
+  saving: boolean;
+  feedback: Feedback | null;
+  onDirtyChange: (dirty: boolean) => void;
+  onApply: (draft: TunnelDraft, apiKey: string, observed: TunnelConfig) => Promise<SaveResult>;
+  onSaved: () => void;
+  onCancel: () => void;
+  onChooseClient: () => Promise<string | null>;
+  onDetectClient: () => Promise<string | null>;
+  onRemove: () => void;
+  onReload: () => TunnelConfig | null;
+}) {
+  const { t } = useTranslation();
+  const [baseline, setBaseline] = useState<TunnelConfig>(() => observed);
+  const [draft, setDraft] = useState<TunnelDraft>(() => tunnelDraft(observed));
   const [apiKey, setApiKey] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [resetting, setResetting] = useState(false);
+  const [replacing, setReplacing] = useState(apiKeyObserved && !apiKeyConfigured);
+  const [replacementRequired, setReplacementRequired] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState(false);
+  const [proxyError, setProxyError] = useState<ProxyValidationKey>("");
+  const conflict = latest !== null && JSON.stringify(latest) !== JSON.stringify(baseline);
+  const unconfirmed = latest === null;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(tunnelDraft(baseline)) || Boolean(apiKey);
+  const requestLeave = useDraftGuard({
+    dirty,
+    saving,
+    onDiscard: () => { setDraft(tunnelDraft(baseline)); setApiKey(""); setReplacementRequired(false); setApiKeyError(false); },
+  });
 
-  useEffect(() => {
-    if (data.config) setForm(data.config);
-  }, [data.config]);
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
 
-  const chooseFolder = async () => {
-    const path = await data.chooseWorkspace();
-    if (path) {
-      setForm((current) => ({ ...current, workspace: { rootPath: path } }));
-      setFeedback(null);
-    }
+  const close = () => requestLeave(onCancel);
+  const setField = <K extends keyof TunnelDraft>(key: K, value: TunnelDraft[K]) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    if (key === "controlPlaneHttpProxy") setProxyError("");
   };
-
-  const saveWorkspace = async () => {
-    if (data.configError) {
-      setFeedback({ kind: "error", summaryKey: "firstRun.invalidConfigReset" });
+  const apply = async () => {
+    const error = validateControlPlaneProxy(draft.controlPlaneHttpProxy.trim());
+    setProxyError(error);
+    if (error) return;
+    if (replacementRequired && !apiKey.trim()) {
+      setApiKeyError(true);
       return;
     }
-    if (!form.workspace.rootPath.trim()) {
-      setFeedback({ kind: "error", summaryKey: "firstRun.workspaceRequired" });
-      return;
-    }
-    setSaving(true);
-    const result = await data.saveConfig(
-      {
-        ...form,
-        ui: settingUi(form, data.config),
-        tunnel: { ...form.tunnel, tunnelId: form.tunnel.tunnelId.trim() },
-      },
-      apiKey.trim() || undefined,
-    );
-    setSaving(false);
+    if (conflict || unconfirmed) return;
+    const result = await onApply(draft, apiKey, baseline);
+    // API key input is controlled and ephemeral even when the cross-store save
+    // reports a partial failure. A retry must ask for the secret again.
     setApiKey("");
-    if (!result.ok) {
-      setFeedback(saveError(result));
-      return;
+    if (result.ok) {
+      setReplacementRequired(false);
+      setApiKeyError(false);
+      onSaved();
+    } else if (apiKey.trim()) {
+      setReplacementRequired(true);
+      setApiKeyError(true);
     }
-    setFeedback({ kind: "success", key: "firstRun.saveSuccess" });
+  };
+  const reload = () => {
+    const next = onReload();
+    if (!next) return;
+    setBaseline(next);
+    setDraft(tunnelDraft(next));
+    setApiKey("");
+    setProxyError("");
+    setReplacementRequired(false);
+    setApiKeyError(false);
+    setReplacing(apiKeyObserved && !apiKeyConfigured);
+  };
+  const remove = () => requestLeave(() => { setApiKey(""); onRemove(); });
+  const chooseClient = async () => {
+    const path = await onChooseClient();
+    if (path) setDraft((current) => ({ ...current, tunnelClientPath: path, autoDetect: false }));
+  };
+  const detectClient = async () => {
+    const path = await onDetectClient();
+    if (path) setDraft((current) => ({ ...current, tunnelClientPath: path, autoDetect: true }));
   };
 
-  const resetConfiguration = async () => {
-    if (!window.confirm(t("settings.actions.resetConfirm"))) return;
-    setResetting(true);
-    const result = await data.resetConfig();
-    setResetting(false);
-    if (!result.ok) {
-      setFeedback(saveError(result));
-      return;
-    }
-    setForm(emptyConfig);
-    setFeedback({ kind: "success", key: "firstRun.resetSuccess" });
-  };
-
-  const startHarness = async () => {
-    const result = await data.startHarness();
-    if (!result.ok) {
-      setFeedback(saveError(result));
-      return;
-    }
-    onDone();
-  };
-
-  const connectionConfigured = Boolean(
-    form.tunnel.tunnelId.trim() && (data.apiKeyConfigured || apiKey.trim()),
-  );
-
-  return (
-    <div className="onboarding-shell">
-      <div className="wizard-content">
-        <header className="wizard-header">
-          <div className="brand-mark" aria-hidden="true">H</div>
-          <div><div className="eyebrow">{t("firstRun.eyebrow")}</div><h1>ChatGPT Harness</h1><h2>{t("firstRun.title")}</h2></div>
-        </header>
-        <Card className="wizard-card">
-          {data.configError ? (
-            <ConfigRecovery onReset={() => void resetConfiguration()} disabled={resetting} />
-          ) : (
-            <>
-              <section aria-labelledby="workspace-step-title">
-                <SectionHeading title={t("firstRun.workspaceTitle")} description={t("firstRun.workspaceDescription")} />
-                <label className="form-field"><span>{t("firstRun.workspaceRoot")}</span><div className="input-action-row"><input className="path-input" value={form.workspace.rootPath} readOnly placeholder={t("settings.workspace.placeholder")} title={form.workspace.rootPath || undefined} /><button className="button button-secondary" onClick={() => void chooseFolder()}>{t("firstRun.chooseFolder")}</button></div></label>
-              </section>
-              <section aria-labelledby="runtime-status-title">
-                <SectionHeading title={t("firstRun.runtimeTitle")} description={t("firstRun.runtimeDescription")} />
-                <p className="settings-help">{data.eligibility ? t(startEligibilityKey(data.eligibility.status)) : t("firstRun.checking")}</p>
-              </section>
-              <section aria-labelledby="external-connection-title">
-                <SectionHeading title={t("firstRun.tunnelTitle")} description={connectionConfigured ? t("firstRun.configured") : t("firstRun.requirements")} />
-                <label className="form-field"><span>{t("firstRun.tunnelId")}</span><input aria-label={t("firstRun.tunnelId")} value={form.tunnel.tunnelId} onChange={(event) => setForm((current) => ({ ...current, tunnel: { ...current.tunnel, tunnelId: event.target.value } }))} placeholder={t("firstRun.tunnelIdPlaceholder")} /></label>
-                <label className="form-field"><span>{t("firstRun.apiKey")}</span><input type="password" aria-label={t("firstRun.apiKey")} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={t("firstRun.apiKeyPlaceholder")} autoComplete="off" /></label>
-                <p className="settings-help">{t("firstRun.tunnelHelp")}</p>
-              </section>
-            </>
-          )}
-        </Card>
-        <FeedbackNotice feedback={feedback} />
-        {!data.configError && <div className="wizard-actions"><button className="button button-secondary" onClick={() => void saveWorkspace()} disabled={saving || !form.workspace.rootPath.trim()}>{saving ? t("firstRun.saving") : t("firstRun.save")}</button><button className="button button-primary" onClick={() => void startHarness()} disabled={saving || !data.eligibility?.canStart}>{t("firstRun.start")}</button></div>}
+  return <Sheet title={t("m8Settings.connection")} onClose={close}>
+    <div className="page-stack">
+      <TextField label={t("settings.tunnel.id")} value={draft.tunnelId} onChange={(event) => setField("tunnelId", event.target.value)} disabled={saving} placeholder={t("settings.tunnel.idPlaceholder")} />
+      <div className="form-field">
+        <span>{t("settings.tunnel.apiKey")}</span>
+        {apiKeyObserved && apiKeyConfigured && !replacing ? <div className="secret-state">
+          <StatusBadge tone="success">{t("settings.tunnel.configured")}</StatusBadge>
+          <Button variant="quiet" onClick={() => { setReplacing(true); setApiKey(""); }} disabled={saving}>{t("settings.tunnel.replace")}</Button>
+          <Button variant="quiet" className="danger-text" onClick={remove} disabled={saving}>{t("settings.tunnel.remove")}</Button>
+        </div> : (replacing || apiKeyObserved) ? <TextField label={t("settings.tunnel.apiKey")} type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setApiKeyError(false); }} disabled={saving} placeholder={t("settings.tunnel.apiKeyPlaceholder")} autoComplete="off" /> : <div className="secret-state">
+          <StatusBadge tone="neutral">{t("m8.unknown")}</StatusBadge>
+          <Button variant="quiet" onClick={() => { setReplacing(true); setApiKey(""); }} disabled={saving}>{t("settings.tunnel.replace")}</Button>
+        </div>}
+        {apiKeyError && <InlineFeedback error>{t("m8FirstRun.keyRequired")}</InlineFeedback>}
       </div>
+      <Disclosure title={t("m8.advanced")}>
+        <TextField label={t("settings.tunnel.proxy")} value={draft.controlPlaneHttpProxy} onChange={(event) => setField("controlPlaneHttpProxy", event.target.value)} disabled={saving} placeholder={t("settings.tunnel.proxyPlaceholder")} error={proxyError ? t(proxyError) : undefined} helper={t("settings.tunnel.proxyHelp")} />
+        <div className="form-field"><span>{t("settings.tunnel.client")}</span><div className="form-row">
+          <input className="path-input grow" aria-label={t("settings.tunnel.client")} value={draft.tunnelClientPath} readOnly placeholder={t("settings.tunnel.clientPlaceholder")} title={draft.tunnelClientPath || undefined} />
+          <Button variant="secondary" onClick={() => void detectClient()} disabled={saving}>{t("settings.tunnel.useBundled")}</Button>
+          <Button variant="secondary" onClick={() => void chooseClient()} disabled={saving}>{t("settings.tunnel.chooseOverride")}</Button>
+        </div></div>
+      </Disclosure>
+      {saving && <InlineFeedback>{t("common.saving")}</InlineFeedback>}
+      {conflict && <InlineFeedback error>{t("m8.conflict")} <Button variant="quiet" onClick={reload} disabled={saving}>{t("m8.reload")}</Button></InlineFeedback>}
+      {feedback && <FeedbackNotice feedback={feedback} />}
+      {unconfirmed && <InlineFeedback error>{t("m8.unknown")}</InlineFeedback>}
+      <div className="settings-actions"><Button variant="secondary" onClick={close} disabled={saving}>{t("common.cancel")}</Button><Button variant="primary" onClick={() => void apply()} disabled={saving || !dirty || conflict || unconfirmed}>{t("m8Settings.apply")}</Button></div>
     </div>
-  );
+  </Sheet>;
 }
 
-function SettingsSection({ eyebrow, title, children }: { eyebrow: string; title: string; children: ReactNode }) {
-  return <Card className="settings-section"><SectionHeading eyebrow={eyebrow} title={title} />{children}</Card>;
-}
+export { FirstRunWizard } from "./FirstRunWizard";

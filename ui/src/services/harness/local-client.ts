@@ -94,20 +94,32 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   };
   private harnessListener?: Unsubscribe;
   private componentListener?: ComponentStatesListener;
+  private observationVersion = 0;
+  private harnessVersion = 0;
 
   private call<T>(cmd: string, args?: Record<string, unknown>) {
     return invoke<T>(cmd, args);
   }
 
   private applyRuntimeState(state: RuntimeState, listener?: ComponentStatesListener) {
-    this.components = componentStatesFromRuntime(state);
+    // Runtime owns Runtime/MCP; its DTO reports no Tunnel observation.
+    this.components = { ...componentStatesFromRuntime(state), tunnel: this.components.tunnel };
     listener?.(this.components, state);
   }
 
   private applyHarnessStatus(state: HarnessStatus) {
+    this.observationVersion += 1;
+    this.harnessVersion += 1;
     this.harness = state;
     this.components = componentStatesFromHarness(state);
     this.componentListener?.(this.components);
+  }
+
+  private async observeHarness(command: string) {
+    const version = this.harnessVersion;
+    const state = await this.call<HarnessStatus>(command);
+    if (version === this.harnessVersion) this.applyHarnessStatus(state);
+    return this.harness;
   }
 
   private async ensureHarnessListener() {
@@ -194,8 +206,9 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   async runtimeStatus() {
+    const version = this.observationVersion;
     const state = await this.call<RuntimeState>("runtime_status");
-    this.applyRuntimeState(state);
+    if (version === this.observationVersion) this.applyRuntimeState(state);
     return state;
   }
 
@@ -217,28 +230,20 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   async harnessStart() {
-    const status = await this.call<HarnessStatus>("harness_start");
-    this.applyHarnessStatus(status);
-    return status;
+    return this.observeHarness("harness_start");
   }
 
   async harnessStatus() {
     await this.ensureHarnessListener();
-    const status = await this.call<HarnessStatus>("harness_status");
-    this.applyHarnessStatus(status);
-    return status;
+    return this.observeHarness("harness_status");
   }
 
   async harnessStop() {
-    const status = await this.call<HarnessStatus>("harness_stop");
-    this.applyHarnessStatus(status);
-    return status;
+    return this.observeHarness("harness_stop");
   }
 
   async harnessRestart() {
-    const status = await this.call<HarnessStatus>("harness_restart");
-    this.applyHarnessStatus(status);
-    return status;
+    return this.observeHarness("harness_restart");
   }
 
   getHarnessStatus() {
@@ -257,6 +262,7 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     this.componentListener = listener;
     const runtimeUnlisten = await listen<RuntimeProcessEvent>("runtime:process", (event) => {
       if (this.harnessListener) return;
+      this.observationVersion += 1;
       this.components = componentStatesFromProcess(event.payload, this.components);
       listener(this.components, undefined, event.payload);
 

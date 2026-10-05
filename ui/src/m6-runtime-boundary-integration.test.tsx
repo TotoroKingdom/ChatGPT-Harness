@@ -36,12 +36,13 @@ describe("M6 real Provider/client boundary Integration", () => {
     const reset = vi.spyOn(client, "configReset");
 
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "Local Runtime Setup", level: 2 })).toBeInTheDocument();
+    expect(await screen.findByText("Set up your local Harness.")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Configuration needs attention");
-    const resetButton = screen.getByRole("button", { name: "Reset configuration" });
+    const resetButton = screen.getAllByRole("button", { name: "Reset configuration" })[0];
     expect(resetButton).toBeEnabled();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(resetButton);
+    expect(screen.getByRole("dialog", { name: "Reset local configuration?" })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Reset configuration" }).at(-1)!);
     await waitFor(() => expect(reset).toHaveBeenCalledOnce());
     expect(configGet).toHaveBeenCalled();
     expect(await screen.findByRole("heading", { name: "Workspace", level: 2 })).toBeInTheDocument();
@@ -56,7 +57,7 @@ describe("M6 real Provider/client boundary Integration", () => {
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: /Settings$/ }));
-    await screen.findByDisplayValue("mock-tunnel");
+    await screen.findByText("mock-tunnel");
     fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "zh-CN" } });
     expect(await screen.findByText("语言偏好已保存。" )).toBeInTheDocument();
 

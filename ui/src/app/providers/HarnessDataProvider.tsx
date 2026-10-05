@@ -23,6 +23,7 @@ import type {
   Unsubscribe,
 } from "@/services/harness/client";
 import { overallStatus } from "@/services/harness/client";
+import { ConfigMutationQueue, configIntent, type ConfigIntent } from "./config-mutations";
 
 export type AsyncState<T> =
   | { status: "idle" | "loading" }
@@ -35,7 +36,7 @@ type ResourceState = {
   activity: AsyncState<ActivityListResult>;
   approvals: AsyncState<ApprovalsListResult>;
 };
-export type SaveResult = { ok: boolean; error?: HarnessClientError };
+export type SaveResult = { ok: boolean; error?: HarnessClientError; refreshUnconfirmed?: boolean };
 
 type ContextValue = ResourceState & {
   client: HarnessControlClient;
@@ -45,15 +46,19 @@ type ContextValue = ResourceState & {
   eligibility: StartEligibility | null;
   setupRequired: boolean;
   apiKeyConfigured: boolean;
+  apiKeyObserved: boolean;
   components: ComponentStates;
   harness: HarnessStatus;
+  harnessObserved: boolean;
   overall: OverallStatus;
   restartRequired: boolean;
   activeRevision: string | null;
   lastDiagnostics: DiagnosticRun | null;
   refreshConfig: () => Promise<void>;
+  refreshHarness: () => Promise<void>;
   resetConfig: () => Promise<SaveResult>;
   saveConfig: (config: AppConfig, apiKey?: string) => Promise<SaveResult>;
+  mutateConfig: (intent: ConfigIntent, apiKey?: string, initial?: AppConfig) => Promise<SaveResult>;
   setUiLanguage: (language: UiLanguage | null) => Promise<SaveResult>;
   deleteApiKey: () => Promise<void>;
   chooseWorkspace: () => Promise<string | null>;
@@ -194,19 +199,29 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const [configError, setConfigError] = useState<HarnessClientError | null>(null);
   const [eligibility, setEligibility] = useState<StartEligibility | null>(null);
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
+  const [apiKeyObserved, setApiKeyObserved] = useState(false);
   const [components, setComponents] = useState<ComponentStates>(client.getComponentStates());
   const [harness, setHarness] = useState<HarnessStatus>(client.getHarnessStatus());
+  const [harnessObserved, setHarnessObserved] = useState(false);
   const [activeRevision, setActiveRevision] = useState<string | null>(null);
   const [lastDiagnostics, setLastDiagnostics] = useState<DiagnosticRun | null>(null);
   const activityCursorRef = useRef<string | undefined>(undefined);
+  const observedSession = useRef<string | null | undefined>(undefined);
+  const resourceEpoch = useRef(0);
+  const observedComponents = useRef<string | undefined>(undefined);
+  const mutations = useRef(new ConfigMutationQueue());
+  const persistedVersion = useRef(0);
 
   const refreshConfig = useCallback(async () => {
+    const version = persistedVersion.current;
     const [content, location, key, start] = await Promise.allSettled([
       client.configGet(), client.configMetadata(), client.apiKeyStatus(), client.harnessStartEligibility(),
     ]);
     // Metadata is independent from content validation / migration.
     if (location.status === "fulfilled") setMetadata(location.value);
-    if (key.status === "fulfilled") setApiKeyConfigured(key.value);
+    if (version !== persistedVersion.current) return;
+    if (key.status === "fulfilled") { setApiKeyConfigured(key.value); setApiKeyObserved(true); }
+    else setApiKeyObserved(false);
     if (content.status === "fulfilled") {
       setConfig(content.value); setConfigLoaded(true); setConfigError(null);
       setEligibility(start.status === "fulfilled" ? start.value : null);
@@ -222,7 +237,20 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       if (!mounted) return;
       setComponents(nextComponents);
       const harnessState = client.getHarnessStatus();
+      const session = harnessState.activeSessionId ?? null;
+      const signature = `${nextComponents.runtime}:${nextComponents.mcp}:${nextComponents.tunnel}:${session}`;
+      if (observedComponents.current !== undefined && observedComponents.current !== signature) resourceEpoch.current += 1;
+      observedComponents.current = signature;
+      if (observedSession.current !== undefined && observedSession.current !== session) {
+        // Old policy/approval snapshots must not describe a new managed session.
+        setResources((current) => ({ ...current, policies: { status: "idle" }, approvals: { status: "idle" } }));
+      }
+      observedSession.current = session;
+      if (nextComponents.runtime !== "ready" && nextComponents.runtime !== "degraded") {
+        setResources((current) => ({ ...current, policies: { status: "idle" }, approvals: { status: "idle" } }));
+      }
       setHarness(harnessState);
+      setHarnessObserved(true);
       if (harnessState.lastError && nextComponents.runtime === "error") {
         setResources((current) => ({
           ...current,
@@ -253,7 +281,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
         }));
       } else if (process?.phase === "stopped") {
         setActiveRevision(null);
-        setResources((current) => ({ ...current, runtime: { status: "idle" } }));
+        setResources((current) => ({ ...current, runtime: { status: "idle" }, policies: { status: "idle" }, approvals: { status: "idle" } }));
       } else if (runtime) {
         setActiveRevision(runtime.runtimeId ? runtime.configRevision : null);
         setResources((current) => ({ ...current, runtime: { status: "success", data: runtime } }));
@@ -280,82 +308,105 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       activity: { status: "loading" },
       approvals: { status: "loading" },
     });
-    void Promise.all([
-      load(() => client.harnessStatus(), () => false),
-      rehydrateRuntime(client),
-      load(() => client.toolsList(), (data) => data.items.length === 0),
-      load(() => client.policiesList(), (data) => data.items.length === 0),
-      load(() => client.activityList(), (data) => data.items.length === 0),
-      load(() => client.approvalsList(), (data) => data.items.length === 0),
-    ]).then(([harnessResource, runtime, tools, policies, activity, approvals]) => {
+    void (async () => {
+      // Establish the managed session before reading its dependent resources.
+      const harnessResource = await load(() => client.harnessStatus(), () => false);
       if (!mounted) return;
-      if (harnessResource.status === "success" || harnessResource.status === "empty") {
-        setHarness(harnessResource.data);
-        client.setComponentStates({ runtime: harnessResource.data.runtime, mcp: harnessResource.data.mcp, tunnel: harnessResource.data.tunnel });
-      }
-      client.setComponentStates(runtime.components);
-      setComponents(runtime.components);
+      const confirmed = harnessResource.status === "success" || harnessResource.status === "empty";
+      if (confirmed) {
+        setHarness(harnessResource.data); setHarnessObserved(true);
+        const state = harnessResource.data;
+        observedComponents.current = `${state.runtime}:${state.mcp}:${state.tunnel}:${state.activeSessionId ?? null}`;
+        observedSession.current = state.activeSessionId ?? null;
+        client.setComponentStates({ runtime: state.runtime, mcp: state.mcp, tunnel: state.tunnel });
+        setComponents(client.getComponentStates());
+      } else setHarnessObserved(false);
+      const epoch = resourceEpoch.current;
+      const [runtime, tools, policies, activity, approvals] = await Promise.all([
+        rehydrateRuntime(client),
+        load(() => client.toolsList(), (data) => data.items.length === 0),
+        load(() => client.policiesList(), (data) => data.items.length === 0),
+        load(() => client.activityList(), (data) => data.items.length === 0),
+        load(() => client.approvalsList(), (data) => data.items.length === 0),
+      ]);
+      if (!mounted || epoch !== resourceEpoch.current) return;
+      const nextComponents = { ...runtime.components, tunnel: confirmed ? harnessResource.data.tunnel : runtime.components.tunnel };
+      client.setComponentStates(nextComponents); setComponents(nextComponents);
       setResources({ runtime: runtime.resource, tools, policies, activity, approvals });
       setActiveRevision(runtime.activeRevision);
-      if (activity.status === "success" || activity.status === "empty") {
-        activityCursorRef.current = activity.data.latestSequence;
-      }
-    });
+      if (activity.status === "success" || activity.status === "empty") activityCursorRef.current = activity.data.latestSequence;
+    })();
     return () => {
       mounted = false;
     };
   }, [client, refreshConfig]);
 
-  const saveConfig = useCallback(
-    async (next: AppConfig, apiKey?: string): Promise<SaveResult> => {
+  const mutateConfig = useCallback(
+    (intent: ConfigIntent, apiKey?: string, initial?: AppConfig): Promise<SaveResult> => mutations.current.run(async () => {
+      let saved: AppConfig;
       try {
-        const saved = await client.configSave(next, apiKey);
-        setConfig(saved);
-        if (apiKey?.trim()) setApiKeyConfigured(true);
-        setConfigError(null);
-        await refreshConfig();
-        return { ok: true };
+        const latest = (await client.configGet()) ?? initial;
+        if (!latest) throw new HarnessClientError("error", "Save configuration first.", undefined, "CONFIG_REQUIRED");
+        saved = await client.configSave(intent(latest), apiKey);
       } catch (error) {
-        const clientError = toClientError(error);
-        setConfigError(clientError);
-        return { ok: false, error: clientError };
+        // Config/SecretStore may have partially changed. Read back, never promise rollback.
+        persistedVersion.current += 1;
+        await refreshConfig();
+        return { ok: false, error: toClientError(error) };
       }
-    },
-    [client, refreshConfig],
+      persistedVersion.current += 1;
+      setConfig(saved); setConfigError(null);
+      if (apiKey?.trim()) { setApiKeyConfigured(true); setApiKeyObserved(true); }
+      let refreshUnconfirmed = false;
+      try {
+        const observed = await client.configGet();
+        if (observed) setConfig(observed);
+        else refreshUnconfirmed = true;
+        const start = await client.harnessStartEligibility();
+        setEligibility(start);
+      } catch { refreshUnconfirmed = true; }
+      return { ok: true, refreshUnconfirmed };
+    }), [client, refreshConfig],
+  );
+
+  const saveConfig = useCallback(
+    (next: AppConfig, apiKey?: string) => {
+      // First Run can persist the first complete object; subsequent saves merge intent.
+      if (!config) return mutations.current.run(async () => {
+        try {
+          if (await client.configGet()) throw new HarnessClientError("error", "Configuration changed. Reload before saving.", undefined, "CONFIG_CONFLICT");
+          const saved = await client.configSave(next, apiKey);
+          persistedVersion.current += 1;
+          setConfig(saved); setConfigError(null);
+          if (apiKey?.trim()) { setApiKeyConfigured(true); setApiKeyObserved(true); }
+          await refreshConfig();
+          return { ok: true };
+        } catch (error) { return { ok: false, error: toClientError(error) }; }
+      });
+      return mutateConfig(configIntent(config, next), apiKey);
+    }, [client, config, mutateConfig, refreshConfig],
   );
 
   const setUiLanguage = useCallback(
-    async (language: UiLanguage | null): Promise<SaveResult> => {
+    (language: UiLanguage | null): Promise<SaveResult> => mutations.current.run(async () => {
       try {
         const saved = await client.uiLanguageSet(language);
-        setConfig(saved);
-        setConfigError(null);
-        await refreshConfig();
+        persistedVersion.current += 1;
+        setConfig(saved); setConfigError(null);
         return { ok: true };
-      } catch (error) {
-        const clientError = toClientError(error);
-        setConfigError(clientError);
-        return { ok: false, error: clientError };
-      }
-    },
-    [client, refreshConfig],
+      } catch (error) { return { ok: false, error: toClientError(error) }; }
+    }), [client],
   );
 
-  const resetConfig = useCallback(async (): Promise<SaveResult> => {
+  const resetConfig = useCallback((): Promise<SaveResult> => mutations.current.run(async () => {
     try {
       await client.configReset();
-      setConfig(null);
-      setApiKeyConfigured(false);
-      setConfigError(null);
-      setLastDiagnostics(null);
+      persistedVersion.current += 1;
+      setConfig(null); setApiKeyConfigured(false); setApiKeyObserved(true); setConfigError(null); setLastDiagnostics(null);
       await refreshConfig();
       return { ok: true };
-    } catch (error) {
-      const clientError = toClientError(error);
-      setConfigError(clientError);
-      return { ok: false, error: clientError };
-    }
-  }, [client, refreshConfig]);
+    } catch (error) { persistedVersion.current += 1; await refreshConfig(); return { ok: false, error: toClientError(error) }; }
+  }), [client, refreshConfig]);
 
   const refreshLifecycleActivity = useCallback(() => {
     void client
@@ -371,6 +422,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   }, [client]);
 
   const refreshRuntimeResources = useCallback(async () => {
+    const epoch = resourceEpoch.current;
     const [runtime, tools, policies, activity, approvals] = await Promise.all([
       load(() => client.runtimeStatus(), () => false),
       load(() => client.toolsList(), (data) => data.items.length === 0),
@@ -379,6 +431,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       load(() => client.approvalsList(), (data) => data.items.length === 0),
     ]);
 
+    if (epoch !== resourceEpoch.current) return;
     if (activity.status === "success" || activity.status === "empty") {
       activityCursorRef.current = activity.data.latestSequence;
     }
@@ -386,8 +439,21 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   }, [client]);
 
   const refreshApprovals = useCallback(async () => {
+    const epoch = resourceEpoch.current;
     const approvals = await load(() => client.approvalsList(), (data) => data.items.length === 0);
-    setResources((current) => ({ ...current, approvals }));
+    if (epoch === resourceEpoch.current) setResources((current) => ({ ...current, approvals }));
+  }, [client]);
+
+  const refreshHarness = useCallback(async () => {
+    try {
+      const state = await client.harnessStatus();
+      setHarness(state); setHarnessObserved(true);
+      client.setComponentStates({ runtime: state.runtime, mcp: state.mcp, tunnel: state.tunnel });
+      setComponents(client.getComponentStates());
+      const runtime = await rehydrateRuntime(client);
+      setActiveRevision(runtime.activeRevision);
+      setResources((current) => ({ ...current, runtime: runtime.resource }));
+    } catch { setHarnessObserved(false); }
   }, [client]);
 
   const startHarness = useCallback(async (): Promise<SaveResult> => {
@@ -405,6 +471,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       const state = await start;
       setComponents(client.getComponentStates());
       setHarness(state);
+      setHarnessObserved(true);
       setActiveRevision(state.configRevision ?? null);
       await refreshRuntimeResources();
       return { ok: true };
@@ -426,6 +493,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       const stopped = await stop;
       setComponents(client.getComponentStates());
       setHarness(stopped);
+      setHarnessObserved(true);
       setActiveRevision(null);
       setResources((current) => ({ ...current, runtime: { status: "idle" } }));
       refreshLifecycleActivity();
@@ -487,23 +555,28 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       eligibility,
       setupRequired: configLoaded && (eligibility?.status === "setup_required" || !config?.workspace.rootPath),
       apiKeyConfigured,
+      apiKeyObserved,
       components,
       harness,
+      harnessObserved,
       overall: harness.lifecycle,
       activeRevision,
       restartRequired: activeRevision !== null && config !== null && activeRevision !== config.configRevision,
       lastDiagnostics,
       refreshConfig,
+      refreshHarness,
       resetConfig,
       saveConfig,
+      mutateConfig,
       setUiLanguage,
-      deleteApiKey: async () => {
+      deleteApiKey: () => mutations.current.run(async () => {
         await client.apiKeyDelete();
+        persistedVersion.current += 1;
         setApiKeyConfigured(false);
-        setConfig((current) =>
-          current ? { ...current, tunnel: { ...current.tunnel, apiKeyRef: undefined } } : current,
-        );
-      },
+        setApiKeyObserved(true);
+        // The command deletes SecretStore content, not the persisted reference.
+        await refreshConfig();
+      }),
       chooseWorkspace: () => client.chooseWorkspace(),
       chooseTunnelClient: () => client.chooseTunnelClient(),
       detectTunnelClient: () => client.detectTunnelClient(),
@@ -518,10 +591,12 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     [
       activeRevision,
       apiKeyConfigured,
+      apiKeyObserved,
       appendActivity,
       client,
       components,
       harness,
+      harnessObserved,
       config,
       configError,
       configLoaded,
@@ -529,12 +604,14 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       lastDiagnostics,
       metadata,
       refreshConfig,
+      refreshHarness,
       resetConfig,
       resources,
       refreshApprovals,
       restartHarness,
       runDiagnostics,
       saveConfig,
+      mutateConfig,
       setUiLanguage,
       startHarness,
       stopHarness,

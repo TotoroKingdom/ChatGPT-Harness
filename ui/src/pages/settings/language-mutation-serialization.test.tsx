@@ -5,57 +5,67 @@ import { MockHarnessControlClient } from "@/services/harness/mock-client";
 
 const state = vi.hoisted(() => ({ client: undefined as unknown as MockHarnessControlClient }));
 vi.mock("@/services/harness/factory", () => ({ createHarnessControlClient: () => state.client }));
+
 beforeEach(() => {
   window.history.replaceState({}, "", "/");
   state.client = new MockHarnessControlClient("ready");
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-it("prevents a full Settings save from overwriting an in-flight language preference", async () => {
-  let finish!: () => void;
-  const gate = new Promise<void>((resolve) => { finish = resolve; });
-  const persist = state.client.uiLanguageSet.bind(state.client);
-  vi.spyOn(state.client, "uiLanguageSet").mockImplementation(async (language) => { await gate; return persist(language); });
-  const fullSave = vi.spyOn(state.client, "configSave");
-  render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: /Settings$/ }));
-  await screen.findByDisplayValue("mock-tunnel");
-  fireEvent.change(screen.getByLabelText("Tunnel ID (required)"), { target: { value: "reviewed-draft" } });
-  fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "zh-CN" } });
-  const save = await screen.findByRole("button", { name: "保存更改" });
-  try {
-    expect(save).toBeDisabled();
-    fireEvent.click(save);
-    expect(fullSave).not.toHaveBeenCalled();
-  } finally { finish(); }
-  await screen.findByText("语言偏好已保存。");
-  fireEvent.click(screen.getByRole("button", { name: "保存更改" }));
-  await waitFor(() => expect(fullSave).toHaveBeenCalledOnce());
-  await waitFor(async () => {
-    const saved = await state.client.configGet();
-    expect(saved?.ui.language).toBe("zh-CN");
-    expect(saved?.tunnel.tunnelId).toBe("reviewed-draft");
-  });
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  window.history.replaceState({}, "", "/");
 });
 
-it("prevents language and reset mutations while a full Settings save is in flight", async () => {
+async function openSettings() {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Settings$/ }));
+  await screen.findByText("mock-tunnel");
+}
+function openConnectionEditor() {
+  fireEvent.click(document.querySelector("#settings-section-connection button")!);
+}
+function applyConnectionDraft() {
+  fireEvent.click(screen.getByRole("dialog").querySelector("button.button-primary")!);
+}
+
+it("serializes Language with Connection Apply while preserving both scoped intents", async () => {
   let finish!: () => void;
   const gate = new Promise<void>((resolve) => { finish = resolve; });
   const persist = state.client.configSave.bind(state.client);
-  vi.spyOn(state.client, "configSave").mockImplementation(async (config, key) => { await gate; return persist(config, key); });
+  const save = vi.spyOn(state.client, "configSave").mockImplementation(async (config, apiKey) => { await gate; return persist(config, apiKey); });
   const language = vi.spyOn(state.client, "uiLanguageSet");
-  const reset = vi.spyOn(state.client, "configReset");
-  render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: /Settings$/ }));
-  await screen.findByDisplayValue("mock-tunnel");
+
+  await openSettings();
+  openConnectionEditor();
   fireEvent.change(screen.getByLabelText("Tunnel ID (required)"), { target: { value: "reviewed-draft" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
-  try {
-    expect(screen.getByRole("combobox", { name: "Language" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reset Local Config" })).toBeDisabled();
-    expect(language).not.toHaveBeenCalled();
-    expect(reset).not.toHaveBeenCalled();
-  } finally { finish(); }
-  await screen.findByText("Changes saved.");
-  expect(screen.getByRole("combobox", { name: "Language" })).toBeEnabled();
+  applyConnectionDraft();
+  fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "zh-CN" } });
+
+  await waitFor(() => expect(save).toHaveBeenCalledOnce());
+  expect(language).not.toHaveBeenCalled();
+  finish();
+  await screen.findByText("语言偏好已保存。");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  const saved = await state.client.configGet();
+  expect(saved?.ui.language).toBe("zh-CN");
+  expect(saved?.tunnel.tunnelId).toBe("reviewed-draft");
+});
+
+it("does not start Reset while a Connection Apply is saving", async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const persist = state.client.configSave.bind(state.client);
+  vi.spyOn(state.client, "configSave").mockImplementation(async (config, apiKey) => { await gate; return persist(config, apiKey); });
+  const reset = vi.spyOn(state.client, "configReset");
+
+  await openSettings();
+  openConnectionEditor();
+  fireEvent.change(screen.getByLabelText("Tunnel ID (required)"), { target: { value: "reviewed-draft" } });
+  applyConnectionDraft();
+  const resetButton = screen.getByRole("button", { name: "Reset Local Config" });
+  expect(resetButton).toBeDisabled();
+  expect(reset).not.toHaveBeenCalled();
+  finish();
+  await waitFor(() => expect(resetButton).toBeEnabled());
 });

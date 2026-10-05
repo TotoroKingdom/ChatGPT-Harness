@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AppConfig,
@@ -33,6 +33,9 @@ import { ToolsPage } from "@/pages/tools/ToolsPage";
 import { PoliciesPage } from "@/pages/policies/PoliciesPage";
 import { ApprovalsPage } from "@/pages/approvals/ApprovalsPage";
 import { ActivityPage } from "@/pages/activity/ActivityPage";
+import type { useHarnessData } from "@/app/providers/HarnessDataProvider";
+import { MockHarnessControlClient } from "@/services/harness/mock-client";
+import { HarnessClientError } from "@/services/harness/errors";
 
 /*
  * This file is intentionally an independent M6 Integration gate.  It uses
@@ -100,6 +103,8 @@ function runtime(): RuntimeState {
   };
 }
 
+type HarnessDataFixture = ReturnType<typeof useHarnessData>;
+
 const tools: ToolDescriptor[] = [
   { name: "read_file", description: "Read a workspace file.", implemented: true, enabled: true, exposed: true, effectivePolicy: "allow", scope: "workspace", readiness: "ready", riskLevel: "low" },
   { name: "glob", description: "Find workspace paths.", implemented: true, enabled: true, exposed: true, effectivePolicy: "allow", scope: "workspace", readiness: "ready", riskLevel: "low" },
@@ -108,46 +113,72 @@ const tools: ToolDescriptor[] = [
   { name: "bash", description: "Run a controlled Git Bash command from the active Workspace. The cwd is an initial working directory, not a filesystem sandbox.", implemented: true, enabled: false, exposed: true, effectivePolicy: "ask", scope: "active_workspace", readiness: "unavailable", riskLevel: "high" },
 ];
 
-function makeSettingsContext(overrides: Record<string, unknown> = {}) {
+function makeDataContext(overrides: Partial<HarnessDataFixture> = {}): HarnessDataFixture {
+  const client = new MockHarnessControlClient("ready");
   return {
+    client,
     config: config(),
     configMetadata: { configDirectory: "C:\\config", configFile: "C:\\config\\config.json" },
     configError: null,
     eligibility: { status: "ready_to_start", canStart: true, message: "Local Runtime is ready to start." },
+    setupRequired: false,
     apiKeyConfigured: false,
+    apiKeyObserved: true,
+    components: { runtime: "ready", tunnel: "ready", mcp: "ready" },
+    harness: { lifecycle: "ready", runtime: "ready", tunnel: "ready", mcp: "ready", activeSessionId: "session-m6", configRevision: "7", lastError: null, tunnelReadiness: { controlPlaneConnected: true, mcpTargetReachable: true, healthCheckPassed: true, controlPlaneRoute: null, controlPlaneError: null } },
+    harnessObserved: true,
+    overall: "ready",
     restartRequired: false,
+    activeRevision: "7",
+    lastDiagnostics: null,
+    runtime: { status: "success", data: runtime() },
+    tools: { status: "success", data: { items: tools } },
+    policies: { status: "success", data: { items: [], effective: policySnapshot() } },
+    activity: { status: "empty", data: { items: [], latestSequence: "0" } },
+    approvals: { status: "empty", data: { items: [] } },
     chooseWorkspace: vi.fn().mockResolvedValue("C:\\workspace\\project"),
     chooseTunnelClient: vi.fn().mockResolvedValue("C:\\workspace\\tunnel-client"),
     detectTunnelClient: vi.fn().mockResolvedValue(null),
     deleteApiKey: vi.fn().mockResolvedValue(undefined),
     refreshConfig: vi.fn().mockResolvedValue(undefined),
+    refreshHarness: vi.fn().mockResolvedValue(undefined),
     saveConfig: vi.fn().mockResolvedValue({ ok: true }),
+    mutateConfig: vi.fn().mockResolvedValue({ ok: true }),
     setUiLanguage: vi.fn().mockResolvedValue({ ok: true }),
     resetConfig: vi.fn().mockResolvedValue({ ok: true }),
     restartHarness: vi.fn().mockResolvedValue({ ok: true }),
     startHarness: vi.fn().mockResolvedValue({ ok: true }),
     stopHarness: vi.fn().mockResolvedValue({ ok: true }),
+    runDiagnostics: vi.fn().mockResolvedValue({ runId: "diagnostic-m6", startedAt: "2026-10-04T00:00:00Z", finishedAt: "2026-10-04T00:00:01Z", overallStatus: "pass", checks: [] }),
+    appendActivity: vi.fn(),
+    subscribeToActivity: vi.fn().mockResolvedValue(() => undefined),
+    refreshApprovals: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
 
-function makeToolsContext(overrides: Record<string, unknown> = {}) {
+function makeSettingsContext(overrides: Partial<HarnessDataFixture> = {}): HarnessDataFixture {
+  return makeDataContext(overrides);
+}
+
+function makeToolsContext(overrides: Partial<HarnessDataFixture> = {}): HarnessDataFixture {
+  const client = new MockHarnessControlClient("ready");
   const effective = vi.fn().mockResolvedValue(tools.map((tool) => ({
     name: tool.name,
     availability: tool.name === "bash" ? "unavailable_by_mode" : "available",
     decision: tool.name === "bash" ? "deny" : "allow",
     readiness: tool.name === "bash" ? "unavailable" : "ready",
   })));
-  return {
-    client: { runtimeGetEffectiveTools: effective, chooseBashExecutable: vi.fn() },
+  vi.spyOn(client, "runtimeGetEffectiveTools").mockImplementation(effective);
+  return makeDataContext({
+    client,
     config: config(),
     tools: { status: "success", data: { items: tools } },
     components: { runtime: "ready", tunnel: "stopped", mcp: "ready" },
     runtime: { status: "success", data: runtime() },
     restartRequired: false,
-    saveConfig: vi.fn().mockResolvedValue({ ok: true }),
     ...overrides,
-  };
+  });
 }
 
 function policySnapshot(): PolicyEffectiveSnapshot {
@@ -162,6 +193,7 @@ function policySnapshot(): PolicyEffectiveSnapshot {
 }
 
 function approval(status: ApprovalRequest["status"] = "pending"): ApprovalRequest {
+  const now = Date.now();
   return {
     requestId: "request-m6-uuid",
     runtimeId: "runtime-m6",
@@ -172,8 +204,8 @@ function approval(status: ApprovalRequest["status"] = "pending"): ApprovalReques
     matchedRuleIds: ["user-rule-1"],
     policyReason: "matched_user_rules",
     riskLevel: "medium",
-    createdAt: "2026-10-04T00:00:00Z",
-    expiresAt: "2026-10-04T00:05:00Z",
+    createdAt: new Date(now - 60_000).toISOString(),
+    expiresAt: new Date(now + 300_000).toISOString(),
     status,
     decision: status === "approved" ? "allow_once" : undefined,
   };
@@ -328,19 +360,20 @@ describe("M6 Integration — primary React surfaces", () => {
   it("INT-26: Settings and First Run expose bilingual labels, help, validation, and language selector", async () => {
     state.context = makeSettingsContext();
     render(<FirstRunWizard onDone={vi.fn()} />);
-    expect(screen.getByText("Local Runtime Setup")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Configuration" })).toBeInTheDocument();
+    expect(screen.getByText("Set up your local Harness.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply and continue" })).toBeInTheDocument();
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
-    expect(screen.getByText("本地 Runtime 设置")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保存配置" })).toBeInTheDocument();
+    expect(screen.getByText("配置本地 Harness。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "应用并继续" })).toBeInTheDocument();
     cleanup();
 
     await initializeLanguage("en");
     state.context = makeSettingsContext();
     render(<SettingsPage />);
-    expect(screen.getByText("Configuration stays local and explicit")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "General", level: 2 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Control-plane HTTP proxy (optional)" }), { target: { value: "ftp://proxy" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(await screen.findByText("Proxy URL must use http:// or https://.")).toBeInTheDocument();
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
     expect(screen.getByText("代理 URL 必须使用 http:// 或 https://。" )).toBeInTheDocument();
@@ -351,21 +384,21 @@ describe("M6 Integration — primary React surfaces", () => {
     for (const locale of ["en", "zh-CN"] as const) {
       await initializeLanguage(locale);
       const resources = locale === "en" ? en : zhCN;
-      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-      const context = makeSettingsContext({ configError: { code: "CONFIG_INVALID" } });
+      const context = makeSettingsContext({ configError: new HarnessClientError("error", "Configuration needs attention.", undefined, "CONFIG_INVALID") });
       state.context = context;
       render(<SettingsPage />);
       expect(screen.getByRole("alert")).toHaveTextContent(resources.errors.codes.configInvalid);
       fireEvent.click(screen.getByRole("button", { name: resources.settings.actions.reset }));
-      expect(confirm).toHaveBeenCalledWith(resources.settings.actions.resetConfirm);
+      expect(screen.getByRole("dialog", { name: resources.settings.actions.reset })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: resources.common.cancel }));
       expect(context.resetConfig).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: resources.m8Settings.configure }));
       fireEvent.change(screen.getByRole("textbox", { name: locale === "en" ? "Tunnel ID (required)" : "Tunnel ID（必填）" }), { target: { value: "confirmed-draft" } });
-      fireEvent.click(screen.getByRole("button", { name: resources.settings.actions.save }));
-      expect(await screen.findByText(resources.settings.actions.savedNotice)).toBeInTheDocument();
-      expect(context.saveConfig).toHaveBeenCalledOnce();
-      expect(context.refreshConfig).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByRole("button", { name: resources.m8Settings.apply }));
+      expect(await screen.findByText(resources.m8.saved)).toBeInTheDocument();
+      expect(context.mutateConfig).toHaveBeenCalledOnce();
+      expect(context.saveConfig).not.toHaveBeenCalled();
       cleanup();
-      confirm.mockRestore();
     }
   });
 
@@ -373,13 +406,14 @@ describe("M6 Integration — primary React surfaces", () => {
     state.context = makeToolsContext();
     render(<ToolsPage />);
     expect(await screen.findByText("read_file")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^bash/ }));
     expect(screen.getByDisplayValue("C:\\Program Files\\Git\\bin\\bash.exe")).toBeInTheDocument();
-    expect(screen.getByText(/Bash is not an OS filesystem sandbox/)).toBeInTheDocument();
+    expect(screen.getByText(/Saved here does not mean Runtime validated it/)).toBeInTheDocument();
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
     expect(screen.getByRole("heading", { name: "工具" })).toBeInTheDocument();
     expect(screen.getByText("read_file")).toBeInTheDocument();
-    expect(screen.getByText(/Bash 不是操作系统文件系统沙箱/)).toBeInTheDocument();
-    expect(screen.getByText(/仍可访问该目录之外的文件和网络/)).toBeInTheDocument();
+    expect(screen.getByText(/这里保存成功不代表 Runtime 已完成校验/)).toBeInTheDocument();
+    expect(screen.getByText(/Bash 使用当前工作区作为初始工作目录/)).toBeInTheDocument();
     expect(screen.getByDisplayValue("C:\\Program Files\\Git\\bin\\bash.exe")).toBeInTheDocument();
   });
 
@@ -387,12 +421,11 @@ describe("M6 Integration — primary React surfaces", () => {
     const request = unclassifiedBashApproval();
     const approvalsResolve = vi.fn();
     const refreshApprovals = vi.fn().mockResolvedValue(undefined);
-    state.context = {
-      approvals: { status: "success", data: { items: [request] } },
-      components: { runtime: "ready" },
-      client: { approvalsResolve },
-      refreshApprovals,
-    };
+    const approvalClient = new MockHarnessControlClient("ready");
+    vi.spyOn(approvalClient, "approvalsResolve").mockImplementation(approvalsResolve);
+    vi.spyOn(approvalClient, "runtimeStatus").mockResolvedValue(runtime());
+    vi.spyOn(approvalClient, "approvalsList").mockResolvedValue({ items: [request] });
+    state.context = makeDataContext({ approvals: { status: "success", data: { items: [request] } }, client: approvalClient, refreshApprovals });
     render(<ApprovalsPage />);
     expect(screen.getByText(/Unclassified high risk/)).toBeInTheDocument();
     expect(screen.getByText(/Allow for session is disabled for unclassified high-risk commands/)).toBeInTheDocument();
@@ -406,20 +439,19 @@ describe("M6 Integration — primary React surfaces", () => {
   });
 
   it("INT-28: Policies localizes friendly labels while preserving IDs, matchers, and authored text", async () => {
-    state.context = {
+    state.context = makeDataContext({
       config: config(),
       policies: { status: "success", data: { items: [], effective: policySnapshot() } },
-      restartRequired: false,
       saveConfig: vi.fn().mockResolvedValue({ ok: true }),
       restartHarness: vi.fn(),
-    };
+    });
     render(<PoliciesPage />);
     expect(screen.getByText("system-deny-outside")).toBeInTheDocument();
     expect(screen.getByText("Keep this exact user name")).toBeInTheDocument();
     expect(screen.getByText("Keep this exact user reason")).toBeInTheDocument();
     expect(screen.getAllByText("read_file", { exact: true }).length).toBeGreaterThan(0);
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
-    expect(screen.getByText("拒绝工作区外访问")).toBeInTheDocument();
+    expect(screen.getAllByText("拒绝工作区外访问").length).toBeGreaterThan(0);
     expect(screen.getByText("Keep this exact user name")).toBeInTheDocument();
     expect(screen.getByText("Keep this exact user reason")).toBeInTheDocument();
     expect(screen.getAllByText("read_file", { exact: true }).length).toBeGreaterThan(0);
@@ -430,21 +462,22 @@ describe("M6 Integration — primary React surfaces", () => {
     const request = approval();
     const approvalsResolve = vi.fn();
     const refreshApprovals = vi.fn().mockResolvedValue(undefined);
-    state.context = {
-      approvals: { status: "success", data: { items: [request] } },
-      components: { runtime: "ready" },
-      client: { approvalsResolve },
-      refreshApprovals,
-    };
+    const approvalClient = new MockHarnessControlClient("ready");
+    vi.spyOn(approvalClient, "approvalsResolve").mockImplementation(approvalsResolve);
+    vi.spyOn(approvalClient, "runtimeStatus").mockResolvedValue(runtime());
+    vi.spyOn(approvalClient, "approvalsList").mockResolvedValue({ items: [request] });
+    state.context = makeDataContext({ approvals: { status: "success", data: { items: [request] } }, client: approvalClient, refreshApprovals });
     render(<ApprovalsPage />);
-    expect(screen.getByText(/request-m6-uuid/)).toBeInTheDocument();
-    expect(screen.getByText("write", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("write", { exact: true }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /^write/ }));
+    fireEvent.click(screen.getByText("Advanced evidence"));
+    expect(screen.getAllByText("request-m6-uuid").length).toBeGreaterThan(0);
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
-    expect(screen.getByText(/request-m6-uuid/)).toBeInTheDocument();
-    expect(screen.getByText("write", { exact: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "仅允许本次" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "创建规则" })).toBeEnabled();
+    expect(screen.getAllByText("request-m6-uuid").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("write", { exact: true }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "仅允许本次" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "创建规则" }).length).toBeGreaterThan(0);
     expect(approvalsResolve).not.toHaveBeenCalled();
     expect(refreshApprovals).toHaveBeenCalledTimes(1);
   });
@@ -474,21 +507,19 @@ describe("M6 Integration — primary React surfaces", () => {
       bashRiskFlagKey("command_substitution"),
     ];
     const read = vi.fn().mockResolvedValue([entry]);
-    state.context = {
-      client: { runtimeGetActivitySnapshot: read },
-      components: { runtime: "ready" },
-      runtime: { status: "success", data: runtime() },
-    };
+    const activityClient = new MockHarnessControlClient("ready");
+    vi.spyOn(activityClient, "runtimeGetActivitySnapshot").mockImplementation(read);
+    state.context = makeDataContext({ client: activityClient });
     render(<ActivityPage />);
     expect(await screen.findByText("Execution completed")).toBeInTheDocument();
-    expect(screen.getByText("read_file")).toBeInTheDocument();
-    expect(screen.getByText("Succeeded")).toBeInTheDocument();
+    expect(screen.getAllByText("read_file").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Success").length).toBeGreaterThan(0);
     const englishMappings = typedKeys.map((key) => i18n.t(key));
     typedKeys.forEach((key) => expect(i18n.t(key)).not.toBe(key));
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
     expect(screen.getByText("执行已完成")).toBeInTheDocument();
-    expect(screen.getByText("read_file")).toBeInTheDocument();
-    expect(screen.getByText("成功")).toBeInTheDocument();
+    expect(screen.getAllByText("read_file").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("成功").length).toBeGreaterThan(0);
     expect(screen.getByText("2026-10-04T00:00:00Z")).toBeInTheDocument();
     expect(read).toHaveBeenCalledOnce();
     expect(entry.requestId).toBe("request-m6-uuid");
@@ -543,6 +574,7 @@ describe("M6 Integration — typed errors and shared states", () => {
   it("INT-34: accessibility labels and focus identity update with language", async () => {
     state.context = makeSettingsContext();
     render(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     const input = screen.getByRole("textbox", { name: "Tunnel ID (required)" });
     input.focus();
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
@@ -557,7 +589,8 @@ describe("M6 Integration — typed errors and shared states", () => {
     render(<ToolsPage />);
     expect(await screen.findByText("read_file")).toBeInTheDocument();
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
-    expect(screen.getByText("read_file")).toBeInTheDocument();
+    expect(screen.getAllByText("read_file").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /^bash/ }));
     expect(screen.getByDisplayValue("C:\\Program Files\\Git\\bin\\bash.exe")).toBeInTheDocument();
     expect(i18n.t("read_file")).toBe("read_file");
     expect(i18n.t("system-deny-outside")).toBe("system-deny-outside");
@@ -572,9 +605,15 @@ describe("M6 Integration — typed errors and shared states", () => {
     const harnessStop = vi.fn();
     const harnessRestart = vi.fn();
     const setUiLanguage = vi.fn().mockResolvedValue({ ok: true });
+    const lifecycleClient = new MockHarnessControlClient("ready");
+    vi.spyOn(lifecycleClient, "runtimeStart").mockImplementation(runtimeStart);
+    vi.spyOn(lifecycleClient, "runtimeStop").mockImplementation(runtimeStop);
+    vi.spyOn(lifecycleClient, "harnessStart").mockImplementation(harnessStart);
+    vi.spyOn(lifecycleClient, "harnessStop").mockImplementation(harnessStop);
+    vi.spyOn(lifecycleClient, "harnessRestart").mockImplementation(harnessRestart);
     state.context = makeSettingsContext({
       setUiLanguage,
-      client: { runtimeStart, runtimeStop, harnessStart, harnessStop, harnessRestart },
+      client: lifecycleClient,
       startHarness: harnessStart,
       stopHarness: harnessStop,
       restartHarness: harnessRestart,
@@ -613,85 +652,95 @@ describe("M6 Integration — M0–M5 callback regression", () => {
       security: { workspaceValidation: "validated_at_initialization", policyEngineLoaded: true },
       tools: { effectiveCount: 1, declaredCount: 1 },
     });
-    state.context = {
+    const overviewClient = new MockHarnessControlClient("ready");
+    vi.spyOn(overviewClient, "runtimeGetDiagnostics").mockImplementation(runtimeGetDiagnostics);
+    state.context = makeDataContext({
       overall: "stopped",
-      eligibility: { status: "ready_to_start", canStart: true },
+      eligibility: { status: "ready_to_start", canStart: true, message: "Harness is ready to start." },
       components: { runtime: "stopped", tunnel: "stopped", mcp: "stopped" },
-      restartRequired: false,
-      harness: { tunnelReadiness: null, lastError: null },
+      harness: { lifecycle: "stopped", runtime: "stopped", tunnel: "stopped", mcp: "stopped", activeSessionId: null, configRevision: null, lastError: null, tunnelReadiness: null },
       runtime: { status: "idle" },
-      client: { runtimeGetDiagnostics },
+      client: overviewClient,
       startHarness,
       stopHarness,
       restartHarness,
-    };
+    });
     render(<OverviewPage />);
-    fireEvent.click(screen.getByRole("button", { name: "启动 Harness" }));
+    fireEvent.click(screen.getByRole("button", { name: /Start Harness|启动 Harness/ }));
     await waitFor(() => expect(startHarness).toHaveBeenCalledOnce());
 
     cleanup();
-    state.context = {
+    state.context = makeDataContext({
       overall: "ready",
-      eligibility: { status: "ready_to_start", canStart: true },
+      eligibility: { status: "ready_to_start", canStart: true, message: "Harness is ready to start." },
       components: { runtime: "ready", tunnel: "stopped", mcp: "ready" },
       restartRequired: true,
-      harness: { tunnelReadiness: null, lastError: null },
+      harness: { lifecycle: "ready", runtime: "ready", tunnel: "stopped", mcp: "ready", activeSessionId: "session-m6", configRevision: "7", lastError: null, tunnelReadiness: null },
       runtime: { status: "success", data: runtime() },
-      client: { runtimeGetDiagnostics },
+      client: overviewClient,
       startHarness,
       stopHarness,
       restartHarness,
-    };
+    });
     render(<OverviewPage />);
-    fireEvent.click(screen.getByRole("button", { name: "停止 Harness" }));
+    fireEvent.click(screen.getByRole("button", { name: /Stop Harness|停止 Harness/ }));
     await waitFor(() => expect(stopHarness).toHaveBeenCalledOnce());
-    fireEvent.click(screen.getByRole("button", { name: "重启 Harness" }));
+    fireEvent.click(screen.getByRole("button", { name: /Restart Harness|重启 Harness/ }));
     await waitFor(() => expect(restartHarness).toHaveBeenCalledOnce());
 
     cleanup();
     const toolSave = vi.fn().mockResolvedValue({ ok: true });
-    const toolContext = makeToolsContext({ saveConfig: toolSave });
+    const toolContext = makeToolsContext({ mutateConfig: toolSave });
     state.context = toolContext;
     render(<ToolsPage />);
     await screen.findByText("read_file");
     fireEvent.click(screen.getByRole("button", { name: "刷新工具" }));
     await waitFor(() => expect(toolContext.client.runtimeGetEffectiveTools).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole("checkbox", { name: /read_file/ }));
+    fireEvent.click(screen.getByRole("switch", { name: /read_file/ }));
     await waitFor(() => expect(toolSave).toHaveBeenCalledOnce());
-    fireEvent.click(screen.getByRole("checkbox", { name: /自动检测 Git Bash/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^bash/ }));
+    fireEvent.click(screen.getByRole("switch", { name: /Auto detect Git Bash|自动检测 Git Bash/ }));
     await waitFor(() => expect(toolSave).toHaveBeenCalledTimes(2));
-    expect(toolSave.mock.calls[1][0].bash.autoDetect).toBe(false);
+    const secondIntent = toolSave.mock.calls[1][0] as (latest: AppConfig) => AppConfig;
+    expect(secondIntent(config()).bash.autoDetect).toBe(false);
 
     cleanup();
     const policySave = vi.fn().mockResolvedValue({ ok: true });
-    state.context = {
+    state.context = makeDataContext({
       config: config(),
       policies: { status: "success", data: { items: [], effective: policySnapshot() } },
-      restartRequired: false,
-      saveConfig: policySave,
+      mutateConfig: policySave,
       restartHarness,
-    };
+    });
     render(<PoliciesPage />);
-    fireEvent.change(screen.getByRole("combobox", { name: /read_file.*目标默认值/ }), { target: { value: "deny" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存策略变更" }));
+    const readDefault = screen.getByRole("radiogroup", { name: /read_file/ });
+    fireEvent.click(within(readDefault).getByRole("radio", { name: /DENY|拒绝/ }));
     await waitFor(() => expect(policySave).toHaveBeenCalledOnce());
-    expect(policySave.mock.calls[0][0].policies.toolDefaults.readFile).toBe("deny");
+    const policyIntent = policySave.mock.calls[0][0] as (latest: AppConfig) => AppConfig;
+    expect(policyIntent(config()).policies.toolDefaults.readFile).toBe("deny");
 
     cleanup();
-    const resolve = vi.fn().mockResolvedValue({ approval: approval() });
+    const callbackRequest = approval();
+    const resolve = vi.fn().mockResolvedValue({ approval: callbackRequest });
     const refresh = vi.fn().mockResolvedValue(undefined);
-    state.context = { approvals: { status: "success", data: { items: [approval()] } }, components: { runtime: "ready" }, client: { approvalsResolve: resolve }, refreshApprovals: refresh };
+    const callbackApprovalClient = new MockHarnessControlClient("ready");
+    vi.spyOn(callbackApprovalClient, "approvalsResolve").mockImplementation(resolve);
+    vi.spyOn(callbackApprovalClient, "runtimeStatus").mockResolvedValue(runtime());
+    vi.spyOn(callbackApprovalClient, "approvalsList").mockResolvedValue({ items: [callbackRequest] });
+    state.context = makeDataContext({ approvals: { status: "success", data: { items: [callbackRequest] } }, client: callbackApprovalClient, refreshApprovals: refresh });
     render(<ApprovalsPage />);
-    fireEvent.click(screen.getByRole("button", { name: "仅允许本次" }));
+    fireEvent.click(screen.getByRole("button", { name: /Allow once|仅允许本次/ }));
     await waitFor(() => expect(resolve).toHaveBeenCalledWith("request-m6-uuid", "allow_once"));
     expect(refresh).toHaveBeenCalled();
 
     cleanup();
     const activityRead = vi.fn().mockResolvedValue([]);
-    state.context = { client: { runtimeGetActivitySnapshot: activityRead }, components: { runtime: "ready" }, runtime: { status: "success", data: runtime() } };
+    const callbackActivityClient = new MockHarnessControlClient("ready");
+    vi.spyOn(callbackActivityClient, "runtimeGetActivitySnapshot").mockImplementation(activityRead);
+    state.context = makeDataContext({ client: callbackActivityClient });
     render(<ActivityPage />);
-    await screen.findByText("没有保留的活动记录");
-    fireEvent.click(screen.getByRole("button", { name: "刷新活动记录" }));
+    await screen.findByText(/No retained activity in this snapshot|此快照中没有保留的活动记录/);
+    fireEvent.click(screen.getByRole("button", { name: /Refresh activity|刷新活动记录/ }));
     await waitFor(() => expect(activityRead).toHaveBeenCalledTimes(2));
   });
 

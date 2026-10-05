@@ -12,7 +12,7 @@ const dirs = ["pages", "components"];
 const allowedIdentity = new Set(["H", "Harness", "ChatGPT Harness", "MCP", "Runtime", "Tunnel"]);
 const allowedExamples = new Set(["http://127.0.0.1:7897", "git", '["status", "--short"]']);
 const visibleAttributes = new Set(["title", "label", "aria-label", "placeholder", "description", "eyebrow"]);
-const keyPattern = /^(?:app|common|nav|status|enum|overview|tools|policies|activity|approvals|settings|firstRun|errors|policy|bash|validation)\./;
+const keyPattern = /^(?:app|common|nav|status|enum|overview|tools|policies|activity|approvals|settings|firstRun|errors|policy|bash|validation|m7|m8[A-Za-z]*)\./;
 function files(directory: string): string[] {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const file = path.join(directory, entry.name);
@@ -59,6 +59,17 @@ it("resolves every literal presentation key directly in both locales", () => {
       if (ts.isStringLiteral(node) && keyPattern.test(node.text)) {
         for (const [locale, resources] of [["en", en], ["zh-CN", zhCN]] as const) {
           if (!exists(resources, node.text)) issues.push(`${path.relative(root, file)}: ${locale}: ${node.text}`);
+        }
+      }
+      // A bounded page-local translation helper uses the shared locale bundle.
+      // Audit its literal members as well as direct t("namespace.key") calls.
+      if (file.endsWith("ApprovalsPage.tsx") && ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        const argument = node.expression.text === "tx" ? node.arguments[1] : node.expression.text === "m8Key" ? node.arguments[0] : undefined;
+        if (argument && ts.isStringLiteral(argument)) {
+          const key = `m8Approvals.${argument.text}`;
+          for (const [locale, resources] of [["en", en], ["zh-CN", zhCN]] as const) {
+            if (!exists(resources, key)) issues.push(`${path.relative(root, file)}: ${locale}: ${key}`);
+          }
         }
       }
       ts.forEachChild(node, visit);

@@ -15,7 +15,10 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({
 async function openSettings() {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Settings$/ }));
-  await screen.findByDisplayValue("mock-tunnel");
+  await screen.findByText("mock-tunnel");
+}
+function openConnectionEditor() {
+  fireEvent.click(document.querySelector("#settings-section-connection button")!);
 }
 function lifecycleSpies() {
   return ["runtimeStart", "runtimeStop", "harnessStart", "harnessStop", "harnessRestart"].map((method) =>
@@ -33,6 +36,7 @@ describe("language preference with the actual Provider and local mock adapter", 
     const persist = state.client.uiLanguageSet.bind(state.client);
     vi.spyOn(state.client, "uiLanguageSet").mockImplementation(async (language) => { await gate; return persist(language); });
     await openSettings();
+    openConnectionEditor();
     fireEvent.change(screen.getByLabelText("Tunnel ID (required)"), { target: { value: "unsaved-draft" } });
     const input = screen.getByDisplayValue("unsaved-draft");
     fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "zh-CN" } });

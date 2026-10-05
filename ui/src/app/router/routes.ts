@@ -13,13 +13,21 @@ export type PolicyDraftHandoff = {
   name: string;
   reason: string;
   matcher?: PolicyMatcherConfig;
+  approvalRequestId?: string;
 };
+
+export type NavigationOptions = {
+  policyDraft?: PolicyDraftHandoff;
+  objectId?: string;
+  settingsSection?: "general" | "workspace" | "connection" | "security" | "advanced" | "danger";
+};
+export type Navigate = (page: PageKey, options?: NavigationOptions) => void;
 
 export const pages: Array<{ key: PageKey; label: string; eyebrow: string }> = [
   { key: "overview", label: "nav.overview", eyebrow: "nav.eyebrows.overview" },
   { key: "tools", label: "nav.tools", eyebrow: "nav.eyebrows.tools" },
   { key: "policies", label: "nav.policies", eyebrow: "nav.eyebrows.policies" },
-  { key: "activity", label: "nav.activity", eyebrow: "nav.eyebrows.activity" },
   { key: "approvals", label: "nav.approvals", eyebrow: "nav.eyebrows.approvals" },
+  { key: "activity", label: "nav.activity", eyebrow: "nav.eyebrows.activity" },
   { key: "settings", label: "nav.settings", eyebrow: "nav.eyebrows.settings" },
 ];

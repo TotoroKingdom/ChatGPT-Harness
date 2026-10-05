@@ -29,10 +29,10 @@ describe("M1 application shell", () => {
     render(<App />);
     fireEvent.click(nav("Tools"));
     expect(await screen.findByText("read_file")).toBeInTheDocument();
-    expect(screen.getAllByText("ON").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Available").length).toBeGreaterThan(0);
+    expect(screen.getByRole("switch", { name: "Saved Enabled state for read_file" })).toHaveAttribute("aria-checked", "true");
+    expect((await screen.findAllByText("Available")).length).toBeGreaterThan(0);
     fireEvent.click(nav("Policies"));
-    expect(await screen.findByText("Allow workspace capabilities")).toBeInTheDocument();
+    expect((await screen.findAllByText("Allow workspace capabilities")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("DENY").length).toBeGreaterThan(0);
   });
 
@@ -46,7 +46,7 @@ describe("M1 application shell", () => {
     window.history.replaceState({}, "", "/?mock=empty");
     render(<App />);
     fireEvent.click(nav("Tools"));
-    expect(await screen.findByText("No tools reported")).toBeInTheDocument();
+    expect((await screen.findAllByText("Runtime has not reported this tool.")).length).toBe(5);
     cleanup();
     window.history.replaceState({}, "", "/?mock=error");
     render(<App />);
@@ -59,25 +59,19 @@ describe("M2 configuration and lifecycle experience", () => {
     window.history.replaceState({}, "", "/?setup=first-run");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Local Runtime Setup", level: 2 })).toBeInTheDocument();
-    expect(screen.getByText("First run")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Workspace", level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Runtime", level: 2 })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Tunnel connection", level: 2 })).toBeInTheDocument();
-    expect(screen.getByText("Tunnel ID (required)")).toBeInTheDocument();
-    expect(screen.getByText("API Key (required)")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Workspace", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Harness" })).not.toBeInTheDocument();
     expect(screen.queryByText("Control-plane HTTP proxy (optional)")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Security", level: 2 })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Diagnostics", level: 2 })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start Harness" })).toBeDisabled();
-
     fireEvent.click(screen.getByRole("button", { name: "Choose Folder" }));
-    expect(await screen.findByDisplayValue("D:\\example-project")).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Enter tunnel ID"), { target: { value: "mock-tunnel" } });
-    fireEvent.change(screen.getByPlaceholderText("Enter API Key"), { target: { value: "mock-api-key" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Configuration" }));
-    expect(await screen.findByText("Configuration saved. Harness readiness has been refreshed.")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Connection" });
+    fireEvent.change(screen.getByLabelText("Tunnel ID (required)"), { target: { value: "mock-tunnel" } });
+    fireEvent.change(screen.getByLabelText("API Key (required)"), { target: { value: "mock-api-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply and continue" }));
+    await screen.findByRole("heading", { name: "Readiness" });
+    expect(screen.getByText(/Configuration is prepared/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Start Harness" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Start Harness" }));
     expect(await screen.findByRole("heading", { name: "Overview", level: 1 })).toBeInTheDocument();
@@ -94,9 +88,11 @@ describe("M2 configuration and lifecycle experience", () => {
   it("shows Config Mismatch in Settings and clears it after restart", async () => {
     render(<App />);
     fireEvent.click(nav("Settings"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Configure" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     const tunnelId = await screen.findByDisplayValue("mock-tunnel");
     fireEvent.change(tunnelId, { target: { value: "updated-tunnel" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     const restart = await screen.findByRole("button", { name: "Restart Harness" });
     expect(screen.getByText("Config Mismatch — Restart Required")).toBeInTheDocument();
     fireEvent.click(restart);
@@ -109,20 +105,15 @@ describe("M2 configuration and lifecycle experience", () => {
   it("validates and saves the control-plane-only proxy from Settings", async () => {
     render(<App />);
     fireEvent.click(nav("Settings"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Configure" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Configure" }));
     const proxy = await screen.findByLabelText("Control-plane HTTP proxy (optional)");
-    fireEvent.click(screen.getByRole("button", { name: "Choose Folder" }));
-    await screen.findByDisplayValue("D:\\example-project");
     fireEvent.change(proxy, { target: { value: "socks5://127.0.0.1:7897" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(await screen.findByText("Proxy URL must use http:// or https://.")).toBeInTheDocument();
 
     fireEvent.change(proxy, { target: { value: "http://127.0.0.1:7897" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(await screen.findByText("Config Mismatch — Restart Required")).toBeInTheDocument();
   });
 });
-
-
-
-
-

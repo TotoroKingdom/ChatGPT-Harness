@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import App from "@/App";
 import { initializeLanguage } from "@/i18n";
@@ -15,7 +15,6 @@ it.each(["CONFIG_MIGRATION_FAILED", "CONFIG_SCHEMA_UNSUPPORTED"])("preserves met
   const retry = vi.spyOn(state.client, "configMetadata");
   const copy = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: copy } });
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   const { container } = render(<App />);
   expect(await screen.findByText(code)).toBeInTheDocument();
   expect(screen.getByText("The original configuration has not been overwritten.")).toBeInTheDocument();
@@ -26,10 +25,16 @@ it.each(["CONFIG_MIGRATION_FAILED", "CONFIG_SCHEMA_UNSUPPORTED"])("preserves met
   expect(copy).toHaveBeenCalledWith(path.value);
   fireEvent.click(screen.getByRole("button", { name: "Retry reload / migration" }));
   await waitFor(() => expect(retry).toHaveBeenCalledTimes(2));
+  // Recovery reset is a destructive mutation and now uses the shared Dialog;
+  // a window.confirm spy would bypass the production confirmation path.
   fireEvent.click(screen.getByRole("button", { name: "Reset configuration" }));
-  expect(confirm).toHaveBeenCalledOnce(); expect(reset).not.toHaveBeenCalled();
-  confirm.mockReturnValue(true);
+  const dialog = screen.getByRole("dialog", { name: "Reset local configuration?" });
+  expect(within(dialog).getByText(/removes local Workspace/i)).toBeInTheDocument();
+  expect(reset).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(reset).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Reset configuration" }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Reset local configuration?" })).getByRole("button", { name: "Reset configuration" }));
   await waitFor(() => expect(reset).toHaveBeenCalledOnce());
 });
 

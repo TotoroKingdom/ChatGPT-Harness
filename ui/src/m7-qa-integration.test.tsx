@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PolicyEffectiveSnapshot, ToolStatusReason } from "@protocol/v1";
 import en from "@/i18n/en.json";
@@ -105,14 +105,19 @@ describe("M7 Integration — typed remediation and invalid Policy UX", () => {
 
     vi.spyOn(state.client, "runtimeGetEffectiveTools").mockResolvedValue(parsed);
     renderWithProvider(<ToolsPage />);
-    expect(await screen.findByText("Tool disabled")).toBeInTheDocument();
-    expect(screen.getByText("Enable the tool, save, and restart Harness.")).toBeInTheDocument();
-    expect(screen.getByText("Approval required")).toBeInTheDocument();
-    expect(screen.getByText("Invoke the tool and resolve the request in Approval Center.")).toBeInTheDocument();
-    expect(screen.getByText("Denied by Policy")).toBeInTheDocument();
-    expect(screen.getByText("Review the matched User Policy rules, save changes, and restart Harness.")).toBeInTheDocument();
-    expect(screen.getByText("Git Bash unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Configure or auto-detect a valid Git Bash executable, then restart Harness.")).toBeInTheDocument();
+    // M8 keeps compact rows focused on the configured/effective summary. The
+    // Runtime reason and deterministic remediation remain available in the
+    // contextual Tool Inspector for each row.
+    const inspect = async (tool: string, reason: string, remediation: string) => {
+      fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${tool}\\b`) }));
+      expect(await screen.findByText(reason)).toBeInTheDocument();
+      expect(screen.getByText(remediation, { exact: false })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    };
+    await inspect("write", "Tool disabled", "Enable the tool, save, and restart Harness.");
+    await inspect("glob", "Approval required", "Invoke the tool and resolve the request in Approval Center.");
+    await inspect("edit", "Denied by Policy", "Review the matched User Policy rules, save changes, and restart Harness.");
+    await inspect("bash", "Git Bash unavailable", "Configure or auto-detect a valid Git Bash executable, then restart Harness.");
   });
 
   it("INT-34: invalid effective Policy stays fail closed and points to Policy repair", async () => {
@@ -136,7 +141,8 @@ describe("M7 Integration — typed remediation and invalid Policy UX", () => {
     vi.spyOn(state.client, "policiesList").mockResolvedValue({ ...current, effective: invalid });
 
     renderWithProvider(<PoliciesPage />);
-    expect(await screen.findByText("Invalid policy snapshot — fail closed")).toBeInTheDocument();
+    expect(await screen.findByText("Critical: invalid Policy snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Fail closed")).toBeInTheDocument();
     expect(screen.getByText("Policy-controlled tools are denied until a valid snapshot is compiled by the next Runtime generation.")).toBeInTheDocument();
     expect(screen.getAllByText("Repair invalid Policy configuration and restart. Execution remains denied until valid.").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Denied").length).toBeGreaterThan(0);
@@ -147,12 +153,14 @@ describe("M7 Integration — typed remediation and invalid Policy UX", () => {
 describe("M7 Integration — revision truth and Activity evidence", () => {
   it("INT-35: a Runtime-affecting save separates desired config from the active snapshot", async () => {
     renderWithProvider(<SettingsPage />);
-    await screen.findByDisplayValue("D:\\example-project");
+    const configure = await screen.findByRole("button", { name: "Configure" });
+    await waitFor(() => expect(configure).toBeEnabled());
+    fireEvent.click(configure);
     const tunnel = screen.getByRole("textbox", { name: "Tunnel ID (required)" });
     fireEvent.change(tunnel, { target: { value: "saved-but-not-active" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
-    expect(await screen.findByText("Changes saved.")).toBeInTheDocument();
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
     const revision = screen.getByRole("region", { name: "Configuration revisions" });
     await waitFor(() => expect(revision).toHaveTextContent("Saved revision: 8"));
     expect(revision).toHaveTextContent("Active revision: 7");
@@ -198,19 +206,23 @@ describe("M7 Integration — revision truth and Activity evidence", () => {
     vi.spyOn(state.client, "runtimeGetActivitySnapshot").mockResolvedValue(entries);
 
     const { container } = renderWithProvider(<ActivityPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Diagnostic detail" }));
-    expect(screen.getByText("request-m7-evidence")).toBeInTheDocument();
-    expect(screen.getByText(/logicalPath.*notes\.txt/)).toBeInTheDocument();
-    expect(screen.getByText("rule-m7-review")).toBeInTheDocument();
-    expect(screen.getByText("approval-m7-evidence")).toBeInTheDocument();
-    expect(screen.getByText("42")).toBeInTheDocument();
-    expect(screen.getByText(/bytesWritten/)).toBeInTheDocument();
-    expect(screen.getAllByText("Execution failed").length).toBeGreaterThan(0);
+    const row = await screen.findByTestId("activity-row-event:event-m7-evidence");
+    fireEvent.click(within(row).getByRole("button"));
+    const detail = await screen.findByRole("dialog", { name: "Activity details" });
+    expect(within(detail).getByText("request-m7-evidence")).toBeInTheDocument();
+    expect(within(detail).getAllByText(/logicalPath.*notes\.txt/).length).toBeGreaterThan(0);
+    expect(within(detail).getByText("42")).toBeInTheDocument();
+    expect(within(detail).getAllByText(/bytesWritten/).length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("Execution failed").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("Failed").length).toBeGreaterThan(0);
+    fireEvent.click(within(detail).getByText("Advanced evidence"));
+    expect(within(detail).getByText(/rule-m7-review/)).toBeInTheDocument();
+    expect(within(detail).getByText(/approval-m7-evidence/)).toBeInTheDocument();
     expect(container).not.toHaveTextContent("CONTENT_SENTINEL");
     expect(container).not.toHaveTextContent("RESULT_SENTINEL");
 
     await act(async () => { await i18n.changeLanguage("zh-CN"); });
-    expect(screen.getByRole("button", { name: "诊断详情" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "活动详情" })).toBeInTheDocument();
     expect(screen.getByText("request-m7-evidence")).toBeInTheDocument();
     expect(screen.getByText(/logicalPath.*notes\.txt/)).toBeInTheDocument();
   });
