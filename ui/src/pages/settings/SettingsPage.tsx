@@ -12,6 +12,7 @@ import { useDraftGuard, useDraftNavigation } from "@/app/router/DraftNavigation"
 import type { NavigationOptions } from "@/app/router/routes";
 import { assertUnchanged } from "@/app/providers/config-mutations";
 import { validateControlPlaneProxy } from "./configuration";
+import { normalizeThemePreference, type ThemePreference } from "@/theme/theme";
 
 export { validateControlPlaneProxy } from "./configuration";
 
@@ -69,8 +70,11 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
   const data = useHarnessData();
   const { requestLeave, finishDraft } = useDraftNavigation();
   const [languageSelection, setLanguageSelection] = useState<UiLanguage | "">(() => data.config?.ui.language ?? "");
+  const [themeSelection, setThemeSelection] = useState<ThemePreference>(() => normalizeThemePreference(data.config?.ui.theme));
   const [languageSaving, setLanguageSaving] = useState(false);
   const [languageFeedback, setLanguageFeedback] = useState<Feedback | null>(null);
+  const [themeSaving, setThemeSaving] = useState(false);
+  const [themeFeedback, setThemeFeedback] = useState<Feedback | null>(null);
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [workspaceFeedback, setWorkspaceFeedback] = useState<Feedback | null>(null);
   const [connectionOpen, setConnectionOpen] = useState(false);
@@ -92,6 +96,10 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
   useEffect(() => {
     if (!languageSaving) setLanguageSelection(data.config?.ui.language ?? "");
   }, [data.config?.ui.language, languageSaving]);
+
+  useEffect(() => {
+    if (!themeSaving) setThemeSelection(normalizeThemePreference(data.config?.ui.theme));
+  }, [data.config?.ui.theme, themeSaving]);
 
   useEffect(() => {
     if (!initialSection) return;
@@ -142,6 +150,34 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
       setLanguageFeedback(errorFeedback(error));
     } finally {
       setLanguageSaving(false);
+    }
+  };
+
+  const changeTheme = async (preference: ThemePreference) => {
+    if (themeSaving || resetting || !data.config || preference === themeSelection) return;
+    const previousPreference = normalizeThemePreference(data.config.ui.theme);
+    setThemeSelection(preference);
+    data.setThemePreference(preference);
+    setThemeSaving(true);
+    setThemeFeedback(null);
+    try {
+      const result = await data.mutateConfig((latest) => ({
+        ...latest,
+        ui: { ...latest.ui, theme: preference },
+      }));
+      if (result.ok) {
+        setThemeFeedback({ kind: "success", key: result.refreshUnconfirmed ? "m8.refreshUnconfirmed" : "settings.themeSaved" });
+      } else {
+        data.setThemePreference(previousPreference);
+        setThemeSelection(previousPreference);
+        setThemeFeedback(saveError(result));
+      }
+    } catch (error) {
+      data.setThemePreference(previousPreference);
+      setThemeSelection(previousPreference);
+      setThemeFeedback(errorFeedback(error));
+    } finally {
+      setThemeSaving(false);
     }
   };
 
@@ -331,6 +367,22 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
         </Select>} />
         {languageSaving && <InlineFeedback>{t("settings.languageSaving")}</InlineFeedback>}
         {languageFeedback && <FeedbackNotice feedback={languageFeedback} />}
+      </Section>)}
+
+      {section("appearance", <Section title={t("settings.appearance")}>
+        <Row title={t("settings.theme")} summary={t("settings.themeHelp")} controls={<Segmented
+          value={themeSelection}
+          label={t("settings.theme")}
+          disabled={themeSaving || resetting || !data.config}
+          options={[
+            { value: "system" as const, label: t("settings.themes.system") },
+            { value: "light" as const, label: t("settings.themes.light") },
+            { value: "dark" as const, label: t("settings.themes.dark") },
+          ]}
+          onChange={(value) => void changeTheme(value)}
+        />} />
+        {themeSaving && <InlineFeedback>{t("settings.themeSaving")}</InlineFeedback>}
+        {themeFeedback && <FeedbackNotice feedback={themeFeedback} />}
       </Section>)}
 
       {section("workspace", <Section title={t("m8Settings.workspace")}>

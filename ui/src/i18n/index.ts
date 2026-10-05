@@ -4,6 +4,7 @@ import type { AppConfig, UiLanguage } from "@protocol/v1";
 import en from "./en.json";
 import zhCN from "./zh-CN.json";
 import { resolveLanguage, supportedLanguages, systemLocales } from "./resolve-language";
+import { bootstrapTheme } from "@/theme/theme";
 
 export const i18n = i18next.createInstance();
 i18n.use(initReactI18next);
@@ -32,7 +33,15 @@ export async function bootstrapPresentation(
   locales: readonly string[] = systemLocales(),
 ) {
   let saved: UiLanguage | undefined;
-  try { saved = (await configGet())?.ui.language; } catch { /* Provider owns recovery. */ }
+  let savedTheme: unknown;
+  try {
+    const config = await configGet();
+    saved = config?.ui.language;
+    savedTheme = config?.ui.theme;
+  } catch {
+    /* Provider owns recovery; presentation falls back to the M8 dark theme. */
+  }
+  bootstrapTheme(savedTheme);
   await initializeLanguage(resolveLanguage(saved, locales));
   render();
 }

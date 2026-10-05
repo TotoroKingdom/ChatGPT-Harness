@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "@protocol/v1";
 import { i18n, initializeLanguage } from "@/i18n";
 import { SettingsPage } from "./SettingsPage";
+import { applyTheme, resolveEffectiveTheme, type ThemePreference } from "@/theme/theme";
 
 const state = vi.hoisted(() => ({ context: undefined as any }));
 
@@ -27,6 +28,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
 
 function makeContext(overrides: Record<string, unknown> = {}) {
   const saved = config();
+  const setThemePreference = vi.fn((preference: ThemePreference) => applyTheme(resolveEffectiveTheme(preference, false)));
   return {
     config: saved,
     configMetadata: { configDirectory: "D:\\config", configFile: "D:\\config\\config.json" },
@@ -35,6 +37,9 @@ function makeContext(overrides: Record<string, unknown> = {}) {
     apiKeyConfigured: false,
     apiKeyObserved: true,
     restartRequired: false,
+    themePreference: "dark" as ThemePreference,
+    effectiveTheme: "dark" as const,
+    setThemePreference,
     components: { runtime: "stopped", tunnel: "stopped", mcp: "stopped" },
     harness: { lifecycle: "stopped", runtime: "stopped", tunnel: "stopped", mcp: "stopped", tunnelReadiness: null },
     runtime: { status: "success", data: { securityMode: "normal" } },
@@ -88,6 +93,61 @@ describe("M8 Settings section/list workflow", () => {
     expect(document.documentElement.lang).toBe("en");
     expect(screen.getByRole("combobox", { name: "Language" })).toHaveValue("");
     expect(state.context.restartHarness).not.toHaveBeenCalled();
+  });
+
+  it("defaults a missing theme to Dark and saves Light through scoped config mutation", async () => {
+    const mutateConfig = vi.fn().mockResolvedValue({ ok: true });
+    const setThemePreference = vi.fn((preference: ThemePreference) => applyTheme(resolveEffectiveTheme(preference, false)));
+    state.context = makeContext({ mutateConfig, setThemePreference });
+    render(<SettingsPage />);
+
+    expect(screen.getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Light" }));
+    expect(document.documentElement.dataset.theme).toBe("light");
+    await waitFor(() => expect(mutateConfig).toHaveBeenCalledOnce());
+
+    const intent = mutateConfig.mock.calls[0][0] as (latest: AppConfig) => AppConfig;
+    const next = intent(state.context.config);
+    expect(next.ui.theme).toBe("light");
+    expect(next.workspace).toEqual(state.context.config.workspace);
+    expect(next.tools).toEqual(state.context.config.tools);
+    expect(state.context.restartHarness).not.toHaveBeenCalled();
+  });
+
+  it("selects System and resolves its effective theme from the OS", async () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockReturnValue({ matches: true }),
+    });
+    const mutateConfig = vi.fn().mockResolvedValue({ ok: true });
+    const setThemePreference = vi.fn((preference: ThemePreference) => applyTheme(resolveEffectiveTheme(preference, true)));
+    state.context = makeContext({ mutateConfig, setThemePreference });
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByRole("radio", { name: "System" }));
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await waitFor(() => expect(mutateConfig).toHaveBeenCalledOnce());
+    const intent = mutateConfig.mock.calls[0][0] as (latest: AppConfig) => AppConfig;
+    expect(intent(state.context.config).ui.theme).toBe("system");
+
+    if (originalMatchMedia) Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: originalMatchMedia });
+    else Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("rolls the theme back when persistence fails", async () => {
+    const mutateConfig = vi.fn().mockResolvedValue({ ok: false, error: { code: "CONFIG_WRITE_FAILED" } });
+    const setThemePreference = vi.fn((preference: ThemePreference) => applyTheme(resolveEffectiveTheme(preference, false)));
+    state.context = makeContext({ mutateConfig, setThemePreference });
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByRole("radio", { name: "Light" }));
+
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true"));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(setThemePreference).toHaveBeenNthCalledWith(1, "light");
+    expect(setThemePreference).toHaveBeenNthCalledWith(2, "dark");
+    expect(screen.getByText("CONFIG_WRITE_FAILED")).toBeInTheDocument();
   });
 
   it("saves a picked Workspace through a scoped mutation only", async () => {

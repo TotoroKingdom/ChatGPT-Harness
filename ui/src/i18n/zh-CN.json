@@ -496,6 +496,16 @@
     }
   },
   "settings": {
+    "appearance": "外观",
+    "theme": "主题",
+    "themeHelp": "选择跟随系统外观，或使用固定主题。",
+    "themes": {
+      "system": "跟随系统",
+      "light": "浅色",
+      "dark": "深色"
+    },
+    "themeSaving": "正在保存主题偏好…",
+    "themeSaved": "主题偏好已保存。",
     "language": "语言",
     "followSystem": "跟随系统",
     "languages": {

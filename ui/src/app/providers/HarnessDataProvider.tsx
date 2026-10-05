@@ -24,6 +24,16 @@ import type {
 } from "@/services/harness/client";
 import { overallStatus } from "@/services/harness/client";
 import { ConfigMutationQueue, configIntent, type ConfigIntent } from "./config-mutations";
+import {
+  applyTheme,
+  getBootstrappedThemePreference,
+  getSystemThemeDark,
+  normalizeThemePreference,
+  observeSystemTheme,
+  resolveEffectiveTheme,
+  type EffectiveTheme,
+  type ThemePreference,
+} from "@/theme/theme";
 
 export type AsyncState<T> =
   | { status: "idle" | "loading" }
@@ -60,6 +70,9 @@ type ContextValue = ResourceState & {
   saveConfig: (config: AppConfig, apiKey?: string) => Promise<SaveResult>;
   mutateConfig: (intent: ConfigIntent, apiKey?: string, initial?: AppConfig) => Promise<SaveResult>;
   setUiLanguage: (language: UiLanguage | null) => Promise<SaveResult>;
+  themePreference: ThemePreference;
+  effectiveTheme: EffectiveTheme;
+  setThemePreference: (preference: ThemePreference) => void;
   deleteApiKey: () => Promise<void>;
   chooseWorkspace: () => Promise<string | null>;
   chooseTunnelClient: () => Promise<string | null>;
@@ -195,6 +208,10 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const [resources, setResources] = useState<ResourceState>(initial);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => getBootstrappedThemePreference());
+  const [effectiveTheme, setEffectiveTheme] = useState<EffectiveTheme>(() => (
+    typeof document !== "undefined" && document.documentElement.dataset.theme === "light" ? "light" : "dark"
+  ));
   const [metadata, setMetadata] = useState<ConfigMetadata | null>(null);
   const [configError, setConfigError] = useState<HarnessClientError | null>(null);
   const [eligibility, setEligibility] = useState<StartEligibility | null>(null);
@@ -211,6 +228,14 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const observedComponents = useRef<string | undefined>(undefined);
   const mutations = useRef(new ConfigMutationQueue());
   const persistedVersion = useRef(0);
+
+  const setThemePreference = useCallback((preference: ThemePreference) => {
+    const normalized = normalizeThemePreference(preference);
+    const effective = resolveEffectiveTheme(normalized, getSystemThemeDark());
+    setThemePreferenceState(normalized);
+    setEffectiveTheme(effective);
+    applyTheme(effective);
+  }, []);
 
   const refreshConfig = useCallback(async () => {
     const version = persistedVersion.current;
@@ -229,6 +254,22 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       setConfig(null); setConfigLoaded(true); setConfigError(toClientError(content.reason)); setEligibility(null);
     }
   }, [client]);
+
+  useEffect(() => {
+    if (!configLoaded) return;
+    setThemePreference(normalizeThemePreference(config?.ui.theme));
+  }, [configLoaded, config?.ui.theme, setThemePreference]);
+
+  useEffect(() => {
+    if (themePreference !== "system") return;
+    const update = (systemDark: boolean) => {
+      const effective = resolveEffectiveTheme("system", systemDark);
+      setEffectiveTheme(effective);
+      applyTheme(effective);
+    };
+    update(getSystemThemeDark());
+    return observeSystemTheme(update);
+  }, [themePreference]);
 
   useEffect(() => {
     let mounted = true;
@@ -563,6 +604,9 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       activeRevision,
       restartRequired: activeRevision !== null && config !== null && activeRevision !== config.configRevision,
       lastDiagnostics,
+      themePreference,
+      effectiveTheme,
+      setThemePreference,
       refreshConfig,
       refreshHarness,
       resetConfig,
@@ -602,6 +646,8 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       configLoaded,
       eligibility,
       lastDiagnostics,
+      themePreference,
+      effectiveTheme,
       metadata,
       refreshConfig,
       refreshHarness,
@@ -613,6 +659,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       saveConfig,
       mutateConfig,
       setUiLanguage,
+      setThemePreference,
       startHarness,
       stopHarness,
       subscribeToActivity,

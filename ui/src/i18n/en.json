@@ -496,6 +496,16 @@
     }
   },
   "settings": {
+    "appearance": "Appearance",
+    "theme": "Theme",
+    "themeHelp": "Choose whether Harness follows the system appearance or uses a fixed theme.",
+    "themes": {
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "themeSaving": "Saving theme preference…",
+    "themeSaved": "Theme preference saved.",
     "language": "Language",
     "followSystem": "Follow system",
     "languages": {

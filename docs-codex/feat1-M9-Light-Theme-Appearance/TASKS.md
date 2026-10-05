@@ -1,6 +1,6 @@
 # M9 TASKS — Light Theme & Appearance
 
-> Status: READY FOR CODEX IMPLEMENTATION  
+> Status: M9 — DEVELOPMENT COMPLETE
 > Source of truth: `SPEC.md` → `PLAN.md` → this file  
 > Milestone boundary: focused UI appearance feature, no full V3 acceptance
 

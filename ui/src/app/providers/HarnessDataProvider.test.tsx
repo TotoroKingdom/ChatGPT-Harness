@@ -80,6 +80,11 @@ function LanguageProbe() {
   );
 }
 
+function ThemeProbe() {
+  const { themePreference, effectiveTheme, restartRequired } = useHarnessData();
+  return <><output data-testid="theme-preference">{themePreference}</output><output data-testid="effective-theme">{effectiveTheme}</output><output data-testid="theme-restart-required">{String(restartRequired)}</output></>;
+}
+
 function RuntimeProbe() {
   const { components, restartRequired, runtime } = useHarnessData();
   const runtimeId =
@@ -166,6 +171,38 @@ describe("HarnessDataProvider activity subscription", () => {
     expect(languageSet).toHaveBeenCalledWith("zh-CN");
     expect(fullConfigSave).not.toHaveBeenCalled();
     await expect(client.configGet()).resolves.toEqual(expect.objectContaining({ ui: { language: "zh-CN" } }));
+  });
+
+  it("applies persisted System theme and follows OS changes without Runtime restart state", async () => {
+    const persisted = await client.configGet();
+    if (!persisted) throw new Error("mock config missing");
+    await client.configSave({ ...persisted, ui: { ...persisted.ui, theme: "system" } });
+
+    const originalMatchMedia = window.matchMedia;
+    let listener: ((event: MediaQueryListEvent) => void) | undefined;
+    const media = {
+      matches: false,
+      addEventListener: vi.fn((_type: string, next: (event: MediaQueryListEvent) => void) => { listener = next; }),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: vi.fn().mockReturnValue(media) });
+
+    render(<HarnessDataProvider><ThemeProbe /></HarnessDataProvider>);
+    await waitFor(() => {
+      expect(screen.getByTestId("theme-preference")).toHaveTextContent("system");
+      expect(screen.getByTestId("effective-theme")).toHaveTextContent("light");
+      expect(document.documentElement.dataset.theme).toBe("light");
+    });
+
+    act(() => listener?.({ matches: true } as MediaQueryListEvent));
+    await waitFor(() => {
+      expect(screen.getByTestId("effective-theme")).toHaveTextContent("dark");
+      expect(document.documentElement.dataset.theme).toBe("dark");
+    });
+    expect(screen.getByTestId("theme-restart-required")).toHaveTextContent("false");
+
+    if (originalMatchMedia) Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: originalMatchMedia });
+    else Reflect.deleteProperty(window, "matchMedia");
   });
 });
 

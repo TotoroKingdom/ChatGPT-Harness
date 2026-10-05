@@ -23,14 +23,35 @@ describe("pre-render presentation bootstrap", () => {
     const render = vi.fn(() => {
       expect(i18n.language).toBe("zh-CN");
       expect(document.documentElement.lang).toBe("zh-CN");
+      expect(document.documentElement.dataset.theme).toBe("dark");
     });
     await bootstrapPresentation(async () => ({ ui: { language: "zh-CN" } } as AppConfig), render, ["en-US"]);
     expect(render).toHaveBeenCalledOnce();
     expect(i18n.options.fallbackLng).toEqual(["en"]);
   });
+
+  it.each(["light", "dark"] as const)("applies saved %s before rendering", async (theme) => {
+    const render = vi.fn(() => expect(document.documentElement.dataset.theme).toBe(theme));
+    await bootstrapPresentation(async () => ({ ui: { theme } } as AppConfig), render, ["en-US"]);
+    expect(render).toHaveBeenCalledOnce();
+  });
+
+  it("applies System using the current OS preference before rendering", async () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockReturnValue({ matches: true }),
+    });
+    const render = vi.fn(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    await bootstrapPresentation(async () => ({ ui: { theme: "system" } } as AppConfig), render, ["en-US"]);
+    expect(render).toHaveBeenCalledOnce();
+    if (originalMatchMedia) Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: originalMatchMedia });
+    else Reflect.deleteProperty(window, "matchMedia");
+  });
   it("still renders on config failure using system language", async () => {
     const get = vi.fn().mockRejectedValue({ code: "CONFIG_INVALID" });
-    const render = vi.fn();
+    const render = vi.fn(() => expect(document.documentElement.dataset.theme).toBe("dark"));
     await bootstrapPresentation(get, render, ["zh-CN"]);
     expect(render).toHaveBeenCalledOnce();
     expect(i18n.language).toBe("zh-CN");
@@ -39,5 +60,6 @@ describe("pre-render presentation bootstrap", () => {
   it("defaults deterministically to English without config or locale", async () => {
     await bootstrapPresentation(async () => null, () => {}, []);
     expect(document.documentElement.lang).toBe("en");
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 });
