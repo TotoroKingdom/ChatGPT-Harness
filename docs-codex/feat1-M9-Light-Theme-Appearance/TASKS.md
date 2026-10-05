@@ -1,8 +1,9 @@
 # M9 TASKS — Light Theme & Appearance
 
-> Status: M9 — DEVELOPMENT COMPLETE
+> Status: M9 — ACCEPTED / FROZEN
 > Source of truth: `SPEC.md` → `PLAN.md` → this file  
 > Milestone boundary: focused UI appearance feature, no full V3 acceptance
+> Final acceptance: `FINAL_ACCEPTANCE.md`
 
 ## Execution rules
 
@@ -328,11 +329,29 @@ npm run build
 M9 — DEVELOPMENT COMPLETE
 ```
 
-不要求：
+开发阶段不要求：
 
 - External ChatGPT full-chain manual acceptance
 - 整体 V3 人工验收
 - Portable/installer 发布验收
 - `V3 — ACCEPTED / FROZEN` 标记
 
-这些如后续需要，应作为独立发布/验收工作处理。
+这些与 M9 最终收口相关的结果记录在 `FINAL_ACCEPTANCE.md`；本次人工视觉验收仅覆盖 M9 Light Theme & Appearance，不代表 Full V3 External Acceptance。
+
+---
+
+## M9 Final Closeout
+
+- Focused QA：PASS。
+- M9 Portable 构建：PASS，最终版本为 `0.1.2`。
+- Light Theme palette corrective：已完成。
+- 人工视觉验收：PASS（用户确认）。
+- Vite chunk size warning 与既有 Rust warning：非阻塞项。
+
+最终状态：
+
+```text
+M9 — ACCEPTED / FROZEN
+```
+
+本次收口不修改 M9 功能范围，不将整个 V3 标记为 `ACCEPTED / FROZEN`。

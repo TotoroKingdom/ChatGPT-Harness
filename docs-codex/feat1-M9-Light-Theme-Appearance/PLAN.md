@@ -1,8 +1,9 @@
 # M9 PLAN — Light Theme & Appearance
 
-> Status: IMPLEMENTATION PLAN  
+> Status: IMPLEMENTATION COMPLETE / CLOSED
 > Depends on: `SPEC.md` and completed M8 UI/UX redesign  
 > Scope: focused UI appearance increment
+> Final acceptance: `FINAL_ACCEPTANCE.md`
 
 ## 1. Delivery strategy
 
@@ -300,4 +301,4 @@ ui/src-tauri/**
 M9 — DEVELOPMENT COMPLETE
 ```
 
-后续是否发布、打 Portable、做更大范围产品验收，由独立发布决策决定，不属于 M9 的完成门槛。
+最终 Portable 构建、人工视觉验收与冻结结论由 `FINAL_ACCEPTANCE.md` 独立记录；本次收口不启动后续 Milestone，也不将整个 V3 标记为 `ACCEPTED / FROZEN`。

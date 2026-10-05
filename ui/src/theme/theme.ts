@@ -26,11 +26,11 @@ export function resolveEffectiveTheme(
 }
 
 export function getSystemThemeDark(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
   try {
     return window.matchMedia(SYSTEM_THEME_QUERY).matches;
   } catch {
-    return false;
+    return true;
   }
 }
 

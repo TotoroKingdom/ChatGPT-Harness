@@ -1,9 +1,10 @@
 # M9 SPEC — Light Theme & Appearance
 
-> Status: DRAFT FOR IMPLEMENTATION  
+> Status: ACCEPTED / FROZEN
 > Milestone: M9 — Light Theme & Appearance  
 > Baseline: M8 Codex-inspired Minimal Developer Desktop UI  
 > Scope: UI appearance only; no full V3 external acceptance
+> Final acceptance: `FINAL_ACCEPTANCE.md`
 
 ## 1. Objective
 
@@ -285,4 +286,4 @@ M9 不进行 V3 总体验收。完成条件只验证本里程碑：
 8. Theme 切换不改变 Runtime、Tool、Policy、Approval、Activity 或 Restart Required 语义。
 9. 前端 unit/integration regression、typecheck 与 production build 通过。
 
-达到以上条件即可认为 M9 Development Complete；不附加 Full V3 External Acceptance gate。
+达到以上条件即可认为 M9 Development Complete；本 Milestone 的 Portable 构建与人工视觉验收由 `FINAL_ACCEPTANCE.md` 记录；不附加 Full V3 External Acceptance gate。

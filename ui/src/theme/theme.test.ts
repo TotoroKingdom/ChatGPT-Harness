@@ -91,7 +91,15 @@ describe("system theme observer", () => {
   });
 
   it("uses a dark-safe fallback when matchMedia is unavailable", () => {
-    expect(getSystemThemeDark()).toBe(false);
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: undefined });
+
+    expect(getSystemThemeDark()).toBe(true);
+    expect(bootstrapTheme("system")).toEqual({ preference: "system", effectiveTheme: "dark" });
     expect(observeSystemTheme(vi.fn())).toEqual(expect.any(Function));
+
+    bootstrapTheme("dark");
+    if (originalMatchMedia) Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: originalMatchMedia });
+    else Reflect.deleteProperty(window, "matchMedia");
   });
 });
