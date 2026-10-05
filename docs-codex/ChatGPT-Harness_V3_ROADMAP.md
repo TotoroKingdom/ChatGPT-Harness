@@ -476,7 +476,7 @@ Activity / Audit 至少保留：
 - M0–M7 已实现的产品能力、安全语义、Protocol 和 Runtime authoritative behavior 保持不变。
 - 不修改 Policy precedence、Approval semantics、WorkspaceGuard、Bash enforcement、Config migration 语义。
 - M8 先完成 UX Audit、Information Architecture、Interaction Wireframes 与 Design System 冻结，再生成实现级 `SPEC.md` / `PLAN.md` / `TASKS.md`。
-- M8 完成并人工验收后，再进入 `M9 — Full V3 External Acceptance`。
+- M8 的深色视觉系统作为 M9 的结构与交互基线；M9 只增加 Appearance 与浅色主题，不再次重做信息架构或交互模型。
 
 ## Exit Criteria
 
@@ -489,80 +489,69 @@ Activity / Audit 至少保留：
 
 ---
 
-# M9 — Full V3 External Acceptance
+# M9 — Light Theme & Appearance
 
 ## Goal
 
-对完整 V3 能力执行最终 External ChatGPT 手工验收。
+在 M8 已完成的 Codex-inspired Minimal Developer Desktop UI 上增加可切换的浅色主题，使用户可以在深色与浅色外观之间即时切换；浅色视觉方向借鉴 Codex 的克制、中性、低装饰浅色系，但不复制具体页面或品牌资产。
 
-## Golden Paths
+## Scope
 
-### File write
+- 保留 M8 现有 Dark theme，新增 Light theme。
+- Settings 增加 Appearance / Theme 设置，支持 `System / Light / Dark`。
+- Theme 切换即时生效，不要求 Runtime restart，不产生 `Restart required`。
+- Theme preference 本地持久化，并在应用重启后恢复。
+- 启动阶段在 React 首次渲染前解析并应用 theme，避免明显的 dark/light flash。
+- 复用 M8 semantic design tokens；组件不得通过新增大量主题专用分支实现浅色模式。
+- Light theme 覆盖 Sidebar、main surface、selected/hover、buttons、inputs、segmented controls、switches、tables、Inspector、Sheet、Dialog、notices、status、focus、disabled、code/mono、overlay 与 scrollbar 等共享状态。
 
-```text
-ChatGPT → write → Workspace file created
-```
+## Visual Direction
 
-### File edit
+浅色主题保持 M8 的 Developer Tool / Desktop App 气质：
 
-```text
-ChatGPT → edit → exact file modification
-```
+- warm-neutral / neutral near-white background，不使用刺眼纯白作为所有层级背景。
+- Sidebar 与 secondary surface 使用非常浅的中性灰建立层级。
+- Selected / hover 依靠轻微明度差和细边框，不使用高饱和品牌色大面积填充。
+- Primary text 接近黑色但避免纯黑；secondary / muted text 使用清晰的中性灰层级。
+- Border 保持轻、薄、低对比，但必须能区分控件和分区。
+- Success / warning / danger / info 继续使用克制的 semantic color；状态色不承担普通导航或装饰作用。
+- 不新增 gradient、glassmorphism、glow、重阴影、彩色 card wall 或 oversized rounded controls。
+- Dark / Light 只改变 appearance，不改变 spacing、typography、information hierarchy、interaction grammar 或功能语义。
 
-### Tool disable
-
-```text
-Disable tool
-→ Runtime no longer exposes it
-→ stale call rejected
-```
-
-### Policy deny
-
-```text
-ChatGPT → tool call
-→ Policy DENY
-→ no execution
-→ Activity evidence
-```
-
-### Approval
+建议从以下浅色 token 区间起步并按真实界面微调：
 
 ```text
-ChatGPT → ASK operation
-→ Approval Center
-→ Allow once
-→ exact request resumes
+--bg:               #f7f7f5
+--surface-1:        #f2f2ef
+--surface-2:        #ecece8
+--surface-selected: #e7e7e2
+--overlay:          #ffffff
+--border:           #deded8
+--border-strong:    #c9c9c2
+--text-primary:     #20201e
+--text-secondary:   #60605b
+--text-muted:       #85857e
+--text-disabled:    #a7a7a0
 ```
 
-### Bash
+这些值是 Codex-inspired 起点，不是要求复制 Codex 的私有或逐像素颜色表；实现时以整体层级、对比度和一致性为准。
 
-```text
-Developer/Test Mode
-→ bash enabled
-→ ASK
-→ approve
-→ command executes
-→ output + audit recorded
-```
+## Boundary
 
-### Bash deny
-
-```text
-Denied command
-→ no shell execution
-→ evidence recorded
-```
+- 不重新设计 M8 的信息架构、页面结构、交互流程和组件模型。
+- 不修改 Runtime、Policy、Approval、WorkspaceGuard、Bash、Tunnel 或 MCP 行为。
+- 优先只修改 `ui/src/**`；已有 `UiConfig.theme` 可作为持久化入口。
+- 不增加新的整体 V3 External Acceptance 里程碑；M9 只验证本里程碑自身的主题功能和视觉回归。
+- 不引入自定义字体资产或新的品牌视觉体系。
 
 ## Exit Criteria
 
-V3 只有在完整 External ChatGPT 链路完成手工验收后才能标记：
-
-```text
-V3 — ACCEPTED / FROZEN
-```
-
-自动化测试只能声明其真实覆盖范围，不能替代 External ChatGPT E2E。
+1. 用户可在 `System / Light / Dark` 三种 Appearance 设置间即时切换。
+2. Light theme 覆盖全部主要页面、共享组件和 overlay surface，无明显深色残留或不可读状态。
+3. Theme preference 持久化并在重新启动应用后正确恢复；System 模式跟随系统外观。
+4. 首次渲染前应用已解析 theme，正常启动不存在明显主题闪烁。
+5. Theme 切换不触发 Runtime restart，不改变配置的 Runtime effective semantics。
+6. 自动化测试覆盖 theme resolve、persistence、bootstrap 与关键 UI 状态；仅做 M9 范围的视觉检查，不再执行完整 V3 总体验收。
 
 ---
 
@@ -589,9 +578,7 @@ M7 Migration / Evidence / Hardening
     ↓
 M8 UI/UX Simplification & Visual Redesign
     ↓
-M9 Full External Acceptance
-    ↓
-V3 ACCEPTED / FROZEN
+M9 Light Theme & Appearance
 ```
 
 ---
