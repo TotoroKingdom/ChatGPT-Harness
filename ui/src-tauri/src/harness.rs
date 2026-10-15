@@ -41,7 +41,7 @@ pub struct HarnessErrorSummary {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessStatus {
     pub lifecycle: HarnessLifecycle,
@@ -736,5 +736,55 @@ mod tests {
         controller.on_tunnel_event(Some("active-instance"), TunnelState::Ready, None, None);
 
         assert_eq!(controller.status().lifecycle, HarnessLifecycle::Ready);
+    }
+
+    #[test]
+    fn active_tunnel_recovers_harness_from_degraded_to_ready() {
+        let controller = controller();
+        controller.update(|inner| {
+            inner.tunnel_instance = Some("active-instance".into());
+            inner.status.lifecycle = HarnessLifecycle::Degraded;
+            inner.status.runtime = HarnessComponentStatus::Ready;
+            inner.status.mcp = HarnessComponentStatus::Ready;
+            inner.status.tunnel = HarnessComponentStatus::Degraded;
+        });
+
+        let stale = TunnelReadinessEvidence {
+            control_plane_connected: false,
+            mcp_target_reachable: true,
+            health_check_passed: true,
+            control_plane_route: None,
+            control_plane_error: Some("Control-plane poll has been stale for 91 seconds.".into()),
+            last_successful_poll_timestamp: Some(1_799_999_909.0),
+            last_successful_poll_age_seconds: Some(91.0),
+        };
+        controller.on_tunnel_event(
+            Some("active-instance"),
+            TunnelState::Degraded,
+            Some(&stale),
+            None,
+        );
+        assert_eq!(controller.status().lifecycle, HarnessLifecycle::Degraded);
+
+        let fresh = TunnelReadinessEvidence {
+            control_plane_connected: true,
+            mcp_target_reachable: true,
+            health_check_passed: true,
+            control_plane_route: None,
+            control_plane_error: None,
+            last_successful_poll_timestamp: Some(1_799_999_990.0),
+            last_successful_poll_age_seconds: Some(10.0),
+        };
+        controller.on_tunnel_event(
+            Some("active-instance"),
+            TunnelState::Ready,
+            Some(&fresh),
+            None,
+        );
+
+        let status = controller.status();
+        assert_eq!(status.lifecycle, HarnessLifecycle::Ready);
+        assert_eq!(status.tunnel, HarnessComponentStatus::Ready);
+        assert_eq!(status.tunnel_readiness, Some(fresh));
     }
 }

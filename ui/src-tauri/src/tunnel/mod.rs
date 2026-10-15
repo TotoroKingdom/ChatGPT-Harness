@@ -20,6 +20,8 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const READINESS_MONITOR_INTERVAL: Duration = Duration::from_millis(500);
 const READINESS_LOSS_TOLERANCE: u32 = 6;
+const CONTROL_PLANE_POLL_FRESHNESS: Duration = Duration::from_secs(90);
+const CONTROL_PLANE_POLL_METRIC: &str = "commands_poll_last_successful_timestamp_seconds";
 const TUNNEL_API_KEY_ENV: &str = "HARNESS_TUNNEL_API_KEY";
 const TUNNEL_CLIENT_FILE_NAME: &str = "tunnel-client.exe";
 const CLOUDFLARED_FILE_NAME: &str = "cloudflared.exe";
@@ -64,7 +66,7 @@ pub struct TunnelControlPlaneRoute {
     pub proxy_url: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelReadinessEvidence {
     pub control_plane_connected: bool,
@@ -72,6 +74,8 @@ pub struct TunnelReadinessEvidence {
     pub health_check_passed: bool,
     pub control_plane_route: Option<TunnelControlPlaneRoute>,
     pub control_plane_error: Option<String>,
+    pub last_successful_poll_timestamp: Option<f64>,
+    pub last_successful_poll_age_seconds: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,7 +99,7 @@ struct AdminChannel {
     probe_status: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TunnelStatus {
     pub state: TunnelState,
     pub instance: Option<TunnelInstance>,
@@ -394,6 +398,8 @@ impl TunnelProcessManager {
                 health_check_passed: true,
                 control_plane_route: None,
                 control_plane_error: None,
+                last_successful_poll_timestamp: None,
+                last_successful_poll_age_seconds: None,
             })
         } else {
             wait_for_ready(&process, launch.startup_timeout)
@@ -978,18 +984,34 @@ fn probe_ready(url: &str) -> Result<TunnelReadinessEvidence, TunnelProcessError>
         ));
     }
 
-    let poll_succeeded = health_get(url, "/metrics")
+    let metrics = health_get(url, "/metrics")
         .ok()
         .filter(|(status, _)| *status == 200)
-        .is_some_and(|(_, body)| last_successful_poll(&body));
-    let control_plane_connected = poll_succeeded && metadata_error.is_none();
-    let control_plane_error = if control_plane_connected {
+        .map(|(_, body)| body);
+    let last_successful_poll_timestamp =
+        metrics.as_deref().and_then(last_successful_poll_timestamp);
+    let now = unix_timestamp_seconds();
+    let last_successful_poll_age_seconds =
+        last_successful_poll_timestamp.and_then(|timestamp| poll_age_seconds(timestamp, now));
+    let poll_is_fresh = control_plane_poll_is_fresh(last_successful_poll_timestamp, now);
+    let control_plane_connected = poll_is_fresh && metadata_error.is_none();
+    let control_plane_error = if let Some(error) = metadata_error {
+        Some(error)
+    } else if poll_is_fresh {
         None
+    } else if let Some(timestamp) = last_successful_poll_timestamp {
+        if timestamp > now {
+            Some("Control-plane poll timestamp is in the future.".into())
+        } else if let Some(age_seconds) = last_successful_poll_age_seconds {
+            Some(format!(
+                "Control-plane poll has been stale for {} seconds.",
+                age_seconds.floor() as u64
+            ))
+        } else {
+            Some("Control-plane poll timestamp is invalid.".into())
+        }
     } else {
-        Some(
-            metadata_error
-                .unwrap_or_else(|| "Control-plane poll has not completed successfully yet.".into()),
-        )
+        Some("Control-plane poll has not completed successfully yet.".into())
     };
 
     Ok(TunnelReadinessEvidence {
@@ -998,6 +1020,8 @@ fn probe_ready(url: &str) -> Result<TunnelReadinessEvidence, TunnelProcessError>
         health_check_passed: true,
         control_plane_route: route,
         control_plane_error,
+        last_successful_poll_timestamp,
+        last_successful_poll_age_seconds,
     })
 }
 
@@ -1017,15 +1041,40 @@ fn state_from_readiness(
     )
 }
 
-fn last_successful_poll(metrics: &str) -> bool {
-    metrics.lines().any(|line| {
-        line.starts_with("commands_poll_last_successful_timestamp_seconds")
-            && line
-                .split_whitespace()
-                .last()
-                .and_then(|value| value.parse::<f64>().ok())
-                .is_some_and(|value| value > 0.0)
+fn unix_timestamp_seconds() -> f64 {
+    Utc::now().timestamp_millis() as f64 / 1_000.0
+}
+
+fn last_successful_poll_timestamp(metrics: &str) -> Option<f64> {
+    metrics.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let metric_name = fields.next()?;
+        if metric_name != CONTROL_PLANE_POLL_METRIC
+            && !metric_name
+                .strip_prefix(CONTROL_PLANE_POLL_METRIC)
+                .is_some_and(|suffix| suffix.starts_with('{'))
+        {
+            return None;
+        }
+        let value = fields.next()?.parse::<f64>().ok()?;
+        (value.is_finite() && value > 0.0).then_some(value)
     })
+}
+
+fn poll_age_seconds(timestamp: f64, now: f64) -> Option<f64> {
+    if !timestamp.is_finite() || timestamp <= 0.0 || !now.is_finite() || timestamp > now {
+        return None;
+    }
+    let age_seconds = now - timestamp;
+    age_seconds.is_finite().then_some(age_seconds)
+}
+
+fn control_plane_poll_is_fresh(timestamp: Option<f64>, now: f64) -> bool {
+    let Some(timestamp) = timestamp else {
+        return false;
+    };
+    poll_age_seconds(timestamp, now)
+        .is_some_and(|age| age <= CONTROL_PLANE_POLL_FRESHNESS.as_secs_f64())
 }
 
 fn health_get(url: &str, path: &str) -> Result<(u16, String), TunnelProcessError> {
@@ -1606,7 +1655,7 @@ mod tests {
         }
     }
 
-    fn admin_server(metadata_error: Option<&str>, last_poll: f64) -> String {
+    fn admin_server(metadata_error: Option<&str>, last_poll: Option<f64>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let metadata_error = metadata_error.map(str::to_owned);
@@ -1633,9 +1682,11 @@ mod tests {
                         "channels": [{"name": "main", "probe_status": "ok"}]
                     })
                     .to_string(),
-                    "/metrics" => {
-                        format!("commands_poll_last_successful_timestamp_seconds{{}} {last_poll}\n")
-                    }
+                    "/metrics" => last_poll
+                        .map(|value| {
+                            format!("commands_poll_last_successful_timestamp_seconds{{}} {value}\n")
+                        })
+                        .unwrap_or_default(),
                     _ => String::new(),
                 };
                 let response = format!(
@@ -1667,6 +1718,8 @@ mod tests {
                 health_check_passed: true,
                 control_plane_route: None,
                 control_plane_error: None,
+                last_successful_poll_timestamp: None,
+                last_successful_poll_age_seconds: None,
             })
         );
         assert!(manager.stop().unwrap().accepted);
@@ -1810,13 +1863,98 @@ mod tests {
     }
 
     #[test]
-    fn poll_metric_requires_a_nonzero_success_timestamp() {
-        assert!(!last_successful_poll(
-            "commands_poll_last_successful_timestamp_seconds{} 0\n"
-        ));
-        assert!(last_successful_poll(
-            "commands_poll_last_successful_timestamp_seconds{} 1789923600\n"
-        ));
+    fn poll_metric_parses_only_positive_finite_timestamps() {
+        assert_eq!(
+            last_successful_poll_timestamp("commands_poll_last_successful_timestamp_seconds{} 0\n"),
+            None
+        );
+        assert_eq!(
+            last_successful_poll_timestamp(
+                "commands_poll_last_successful_timestamp_seconds{} NaN\n"
+            ),
+            None
+        );
+        assert_eq!(
+            last_successful_poll_timestamp(
+                "commands_poll_last_successful_timestamp_seconds{} -1\n"
+            ),
+            None
+        );
+        assert_eq!(last_successful_poll_timestamp("other_metric 10\n"), None);
+        assert_eq!(
+            last_successful_poll_timestamp(
+                "commands_poll_last_successful_timestamp_seconds{} 1789923600\n"
+            ),
+            Some(1_789_923_600.0)
+        );
+    }
+
+    #[test]
+    fn stale_poll_timestamp_is_not_control_plane_connected() {
+        let stale = Utc::now().timestamp() as f64 - 91.0;
+        let evidence = probe_ready(&admin_server(None, Some(stale))).unwrap();
+
+        assert!(!evidence.control_plane_connected);
+        assert!(evidence
+            .last_successful_poll_age_seconds
+            .is_some_and(|age| age > CONTROL_PLANE_POLL_FRESHNESS.as_secs_f64()));
+        assert!(evidence
+            .control_plane_error
+            .as_deref()
+            .is_some_and(|message| message.contains("stale for")));
+        assert_eq!(state_from_readiness(&evidence).0, TunnelState::Degraded);
+    }
+
+    #[test]
+    fn poll_freshness_accepts_fresh_boundaries_and_rejects_stale_or_future() {
+        let now = 1_800_000_000.0;
+
+        assert!(control_plane_poll_is_fresh(Some(now - 10.0), now));
+        assert!(control_plane_poll_is_fresh(Some(now - 89.0), now));
+        assert!(!control_plane_poll_is_fresh(Some(now - 91.0), now));
+        assert!(!control_plane_poll_is_fresh(Some(now + 1.0), now));
+        assert!(!control_plane_poll_is_fresh(None, now));
+    }
+
+    #[test]
+    fn zero_or_missing_poll_timestamp_is_degraded() {
+        let zero = probe_ready(&admin_server(None, Some(0.0))).unwrap();
+        assert!(!zero.control_plane_connected);
+        assert_eq!(state_from_readiness(&zero).0, TunnelState::Degraded);
+
+        let missing = probe_ready(&admin_server(None, None)).unwrap();
+        assert!(!missing.control_plane_connected);
+        assert_eq!(state_from_readiness(&missing).0, TunnelState::Degraded);
+    }
+
+    #[test]
+    fn future_poll_timestamp_is_not_considered_fresh() {
+        let future = unix_timestamp_seconds() + 10.0;
+        let evidence = probe_ready(&admin_server(None, Some(future))).unwrap();
+
+        assert!(!evidence.control_plane_connected);
+        assert_eq!(evidence.last_successful_poll_timestamp, Some(future));
+        assert_eq!(evidence.last_successful_poll_age_seconds, None);
+        assert_eq!(
+            evidence.control_plane_error.as_deref(),
+            Some("Control-plane poll timestamp is in the future.")
+        );
+        assert_eq!(state_from_readiness(&evidence).0, TunnelState::Degraded);
+    }
+
+    #[test]
+    fn stale_poll_recovers_to_ready_after_a_new_successful_poll() {
+        let stale =
+            probe_ready(&admin_server(None, Some(unix_timestamp_seconds() - 91.0))).unwrap();
+        assert_eq!(state_from_readiness(&stale).0, TunnelState::Degraded);
+
+        let recovered =
+            probe_ready(&admin_server(None, Some(unix_timestamp_seconds() - 10.0))).unwrap();
+        assert!(recovered.control_plane_connected);
+        assert!(recovered
+            .last_successful_poll_age_seconds
+            .is_some_and(|age| age < CONTROL_PLANE_POLL_FRESHNESS.as_secs_f64()));
+        assert_eq!(state_from_readiness(&recovered), (TunnelState::Ready, None));
     }
 
     #[test]
@@ -1838,6 +1976,8 @@ mod tests {
                 proxy_url: Some("http://127.0.0.1:7897".into()),
             }),
             control_plane_error: Some("401 Unauthorized".into()),
+            last_successful_poll_timestamp: None,
+            last_successful_poll_age_seconds: None,
         };
         let (state, error) = state_from_readiness(&evidence);
         assert_eq!(state, TunnelState::Degraded);
@@ -1846,7 +1986,7 @@ mod tests {
 
     #[test]
     fn live_admin_evidence_distinguishes_unauthorized_from_connected() {
-        let degraded = probe_ready(&admin_server(Some("401 Unauthorized"), 0.0)).unwrap();
+        let degraded = probe_ready(&admin_server(Some("401 Unauthorized"), Some(0.0))).unwrap();
         assert!(!degraded.control_plane_connected);
         assert_eq!(
             degraded.control_plane_route.as_ref().unwrap().route_mode,
@@ -1857,7 +1997,7 @@ mod tests {
             "CONTROL_PLANE_UNAUTHORIZED"
         );
 
-        let ready = probe_ready(&admin_server(None, 1_789_923_600.0)).unwrap();
+        let ready = probe_ready(&admin_server(None, Some(unix_timestamp_seconds() - 1.0))).unwrap();
         assert!(ready.control_plane_connected);
         assert_eq!(state_from_readiness(&ready), (TunnelState::Ready, None));
     }

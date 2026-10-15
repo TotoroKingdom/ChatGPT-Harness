@@ -38,6 +38,8 @@ export type HarnessStatus = {
       proxyUrl?: string | null;
     } | null;
     controlPlaneError?: string | null;
+    lastSuccessfulPollTimestamp?: number | null;
+    lastSuccessfulPollAgeSeconds?: number | null;
   } | null;
 };
 export type ConfigMetadata = { configDirectory: string; configFile: string };

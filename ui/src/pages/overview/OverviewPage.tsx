@@ -68,7 +68,7 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
     {selected && <Inspector title={selected === "mcp" ? "MCP" : selected === "runtime" ? "Runtime" : "Tunnel"} onClose={() => setSelected(null)}>
       <StatusBadge>{observed ? t(componentStatusKey(data.components[selected])) : t("m8.unknown")}</StatusBadge><p>{t("overview.authority")}</p>
       <Disclosure title={t("m8.advanced")}><ConfigRevisionStatus />
-        {selected === "tunnel" && tunnelReadiness && <pre>{JSON.stringify({ controlPlaneConnected: tunnelReadiness.controlPlaneConnected, mcpTargetReachable: tunnelReadiness.mcpTargetReachable, healthCheckPassed: tunnelReadiness.healthCheckPassed, controlPlaneRoute: tunnelReadiness.controlPlaneRoute }, null, 2)}</pre>}
+        {selected === "tunnel" && tunnelReadiness && <pre>{JSON.stringify({ controlPlaneConnected: tunnelReadiness.controlPlaneConnected, mcpTargetReachable: tunnelReadiness.mcpTargetReachable, healthCheckPassed: tunnelReadiness.healthCheckPassed, lastSuccessfulPollTimestamp: tunnelReadiness.lastSuccessfulPollTimestamp, lastSuccessfulPollAgeSeconds: tunnelReadiness.lastSuccessfulPollAgeSeconds, controlPlaneError: tunnelReadiness.controlPlaneError, controlPlaneRoute: tunnelReadiness.controlPlaneRoute }, null, 2)}</pre>}
         {data.harness?.lastError && <code>{data.harness.lastError.code}</code>}
       </Disclosure>
     </Inspector>}
