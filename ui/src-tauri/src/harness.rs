@@ -3,7 +3,7 @@ use crate::{
     runtime::{RuntimeEventSink, RuntimeProcessPhase, RuntimeSupervisor, SupervisorError},
     tunnel::{
         resolve_tunnel, TunnelEventSink, TunnelLaunch, TunnelProcessError, TunnelProcessManager,
-        TunnelReadinessEvidence, TunnelState,
+        TunnelReadinessEvidence, TunnelState, TunnelStatus,
     },
 };
 use harness_control_protocol::{AppConfig, SecurityMode, StartEligibility, StartEligibilityStatus};
@@ -340,24 +340,13 @@ impl HarnessController {
                 true,
             ));
         };
+        let instance_id = instance.instance_id.clone();
         self.update(|inner| {
-            inner.tunnel_instance = Some(instance.instance_id.clone());
-            inner.status.tunnel = match tunnel_status.state {
-                TunnelState::Ready => HarnessComponentStatus::Ready,
-                TunnelState::Degraded => HarnessComponentStatus::Degraded,
-                TunnelState::Failed => HarnessComponentStatus::Error,
-                _ => HarnessComponentStatus::Starting,
-            };
-            inner.status.tunnel_readiness = tunnel_status.readiness.clone();
-            inner.status.last_error = tunnel_status
-                .last_error
-                .as_ref()
-                .map(error_summary_from_tunnel);
-            inner.status.lifecycle = if inner.status.tunnel == HarnessComponentStatus::Ready {
-                HarnessLifecycle::Ready
-            } else {
-                HarnessLifecycle::Degraded
-            };
+            inner.tunnel_instance = Some(instance_id.clone());
+        });
+        let tunnel_status = self.tunnel.status().unwrap_or(tunnel_status);
+        self.update(|inner| {
+            apply_tunnel_start_snapshot_if_pending(inner, &instance_id, &tunnel_status);
         });
         let status = self.status();
         let _ = runtime_state;
@@ -518,6 +507,7 @@ impl HarnessController {
             if inner.tunnel_instance.as_deref() != instance_id {
                 return;
             }
+            let previous = inner.status.clone();
             match state {
                 TunnelState::Ready => {
                     inner.status.tunnel = HarnessComponentStatus::Ready;
@@ -545,7 +535,7 @@ impl HarnessController {
                 TunnelState::Starting => inner.status.tunnel = HarnessComponentStatus::Starting,
             }
             inner.status.tunnel_readiness = readiness.cloned();
-            changed = true;
+            changed = harness_status_event_changed(&previous, &inner.status);
         }
         if changed {
             let status = self.status();
@@ -587,6 +577,98 @@ fn stopped_status() -> HarnessStatus {
         config_revision: None,
         last_error: None,
         tunnel_readiness: None,
+    }
+}
+
+fn apply_tunnel_start_snapshot_if_pending(
+    inner: &mut HarnessInner,
+    instance_id: &str,
+    tunnel_status: &TunnelStatus,
+) {
+    if inner.tunnel_instance.as_deref() != Some(instance_id)
+        || inner.status.tunnel != HarnessComponentStatus::Starting
+    {
+        return;
+    }
+    inner.status.tunnel = match tunnel_status.state {
+        TunnelState::Ready => HarnessComponentStatus::Ready,
+        TunnelState::Degraded => HarnessComponentStatus::Degraded,
+        TunnelState::Failed => HarnessComponentStatus::Error,
+        _ => HarnessComponentStatus::Starting,
+    };
+    inner.status.tunnel_readiness = tunnel_status.readiness.clone();
+    inner.status.last_error = tunnel_status
+        .last_error
+        .as_ref()
+        .map(error_summary_from_tunnel);
+    inner.status.lifecycle = if inner.status.tunnel == HarnessComponentStatus::Ready {
+        HarnessLifecycle::Ready
+    } else {
+        HarnessLifecycle::Degraded
+    };
+}
+
+fn harness_status_event_changed(previous: &HarnessStatus, next: &HarnessStatus) -> bool {
+    previous.lifecycle != next.lifecycle
+        || previous.runtime != next.runtime
+        || previous.mcp != next.mcp
+        || previous.tunnel != next.tunnel
+        || previous.active_session_id != next.active_session_id
+        || previous.config_revision != next.config_revision
+        || !harness_error_event_equivalent(previous.last_error.as_ref(), next.last_error.as_ref())
+        || !readiness_event_equivalent(
+            previous.tunnel_readiness.as_ref(),
+            next.tunnel_readiness.as_ref(),
+        )
+}
+
+fn harness_error_event_equivalent(
+    previous: Option<&HarnessErrorSummary>,
+    next: Option<&HarnessErrorSummary>,
+) -> bool {
+    match (previous, next) {
+        (None, None) => true,
+        (Some(previous), Some(next)) => {
+            previous.code == next.code
+                && control_plane_error_event_equivalent(
+                    Some(previous.message.as_str()),
+                    Some(next.message.as_str()),
+                )
+        }
+        _ => false,
+    }
+}
+
+fn readiness_event_equivalent(
+    previous: Option<&TunnelReadinessEvidence>,
+    next: Option<&TunnelReadinessEvidence>,
+) -> bool {
+    match (previous, next) {
+        (None, None) => true,
+        (Some(previous), Some(next)) => {
+            previous.control_plane_connected == next.control_plane_connected
+                && previous.mcp_target_reachable == next.mcp_target_reachable
+                && previous.health_check_passed == next.health_check_passed
+                && previous.control_plane_route == next.control_plane_route
+                && control_plane_error_event_equivalent(
+                    previous.control_plane_error.as_deref(),
+                    next.control_plane_error.as_deref(),
+                )
+                && previous.last_successful_poll_timestamp == next.last_successful_poll_timestamp
+        }
+        _ => false,
+    }
+}
+
+fn control_plane_error_event_equivalent(previous: Option<&str>, next: Option<&str>) -> bool {
+    const STALE_PREFIX: &str = "Control-plane poll has been stale for ";
+    match (previous, next) {
+        (Some(previous), Some(next))
+            if previous.starts_with(STALE_PREFIX) && next.starts_with(STALE_PREFIX) =>
+        {
+            true
+        }
+        _ => previous == next,
     }
 }
 
@@ -684,9 +766,27 @@ fn error_summary_from_tunnel(error: &TunnelProcessError) -> HarnessErrorSummary 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn controller() -> HarnessController {
         HarnessController::new(RuntimeSupervisor::new(), TunnelProcessManager::new())
+    }
+
+    fn readiness(
+        control_plane_connected: bool,
+        timestamp: f64,
+        age_seconds: f64,
+        error: Option<&str>,
+    ) -> TunnelReadinessEvidence {
+        TunnelReadinessEvidence {
+            control_plane_connected,
+            mcp_target_reachable: true,
+            health_check_passed: true,
+            control_plane_route: None,
+            control_plane_error: error.map(str::to_owned),
+            last_successful_poll_timestamp: Some(timestamp),
+            last_successful_poll_age_seconds: Some(age_seconds),
+        }
     }
 
     #[test]
@@ -786,5 +886,140 @@ mod tests {
         assert_eq!(status.lifecycle, HarnessLifecycle::Ready);
         assert_eq!(status.tunnel, HarnessComponentStatus::Ready);
         assert_eq!(status.tunnel_readiness, Some(fresh));
+    }
+
+    #[test]
+    fn age_only_readiness_updates_do_not_emit_status() {
+        let controller = controller();
+        let initial = readiness(true, 1_800_000_000.0, 10.0, None);
+        controller.update(|inner| {
+            inner.tunnel_instance = Some("active-instance".into());
+            inner.status.lifecycle = HarnessLifecycle::Ready;
+            inner.status.runtime = HarnessComponentStatus::Ready;
+            inner.status.mcp = HarnessComponentStatus::Ready;
+            inner.status.tunnel = HarnessComponentStatus::Ready;
+            inner.status.tunnel_readiness = Some(initial);
+        });
+        let emitted = Arc::new(AtomicUsize::new(0));
+        let emitted_by_sink = emitted.clone();
+        controller.set_status_sink(Arc::new(move |_| {
+            emitted_by_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let aged = readiness(true, 1_800_000_000.0, 10.5, None);
+        controller.on_tunnel_event(
+            Some("active-instance"),
+            TunnelState::Ready,
+            Some(&aged),
+            None,
+        );
+
+        assert_eq!(emitted.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            controller
+                .status()
+                .tunnel_readiness
+                .unwrap()
+                .last_successful_poll_age_seconds,
+            Some(10.5)
+        );
+    }
+
+    #[test]
+    fn stale_age_message_updates_do_not_emit_status() {
+        let controller = controller();
+        let initial = readiness(
+            false,
+            1_800_000_000.0,
+            91.0,
+            Some("Control-plane poll has been stale for 91 seconds."),
+        );
+        controller.update(|inner| {
+            inner.tunnel_instance = Some("active-instance".into());
+            inner.status.lifecycle = HarnessLifecycle::Degraded;
+            inner.status.runtime = HarnessComponentStatus::Ready;
+            inner.status.mcp = HarnessComponentStatus::Ready;
+            inner.status.tunnel = HarnessComponentStatus::Degraded;
+            inner.status.tunnel_readiness = Some(initial);
+            inner.status.last_error = Some(HarnessErrorSummary {
+                code: "CONTROL_PLANE_UNAVAILABLE".into(),
+                message: "Control-plane poll has been stale for 91 seconds.".into(),
+            });
+        });
+        let emitted = Arc::new(AtomicUsize::new(0));
+        let emitted_by_sink = emitted.clone();
+        controller.set_status_sink(Arc::new(move |_| {
+            emitted_by_sink.fetch_add(1, Ordering::SeqCst);
+        }));
+        let error = TunnelProcessError {
+            code: "CONTROL_PLANE_UNAVAILABLE".into(),
+            message: "Control-plane poll has been stale for 92 seconds.".into(),
+        };
+        let aged = readiness(
+            false,
+            1_800_000_000.0,
+            92.0,
+            Some("Control-plane poll has been stale for 92 seconds."),
+        );
+
+        controller.on_tunnel_event(
+            Some("active-instance"),
+            TunnelState::Degraded,
+            Some(&aged),
+            Some(&error),
+        );
+
+        assert_eq!(emitted.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            controller
+                .status()
+                .tunnel_readiness
+                .unwrap()
+                .last_successful_poll_age_seconds,
+            Some(92.0)
+        );
+    }
+
+    #[test]
+    fn startup_snapshot_does_not_overwrite_a_newer_tunnel_event() {
+        let mut inner = HarnessInner {
+            status: HarnessStatus {
+                lifecycle: HarnessLifecycle::Ready,
+                runtime: HarnessComponentStatus::Ready,
+                mcp: HarnessComponentStatus::Ready,
+                tunnel: HarnessComponentStatus::Ready,
+                active_session_id: Some("session".into()),
+                config_revision: Some("1".into()),
+                last_error: None,
+                tunnel_readiness: Some(readiness(true, 1_800_000_010.0, 1.0, None)),
+            },
+            runtime_generation: None,
+            tunnel_instance: Some("active-instance".into()),
+        };
+        let stale_snapshot = TunnelStatus {
+            state: TunnelState::Degraded,
+            instance: None,
+            readiness: Some(readiness(
+                false,
+                1_799_999_900.0,
+                100.0,
+                Some("Control-plane poll has been stale for 100 seconds."),
+            )),
+            last_exit: None,
+            last_error: Some(TunnelProcessError {
+                code: "CONTROL_PLANE_UNAVAILABLE".into(),
+                message: "Control-plane poll has been stale for 100 seconds.".into(),
+            }),
+        };
+
+        apply_tunnel_start_snapshot_if_pending(&mut inner, "active-instance", &stale_snapshot);
+
+        assert_eq!(inner.status.lifecycle, HarnessLifecycle::Ready);
+        assert_eq!(inner.status.tunnel, HarnessComponentStatus::Ready);
+        assert!(inner
+            .status
+            .tunnel_readiness
+            .as_ref()
+            .is_some_and(|evidence| evidence.control_plane_connected));
     }
 }
