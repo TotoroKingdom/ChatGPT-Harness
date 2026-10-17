@@ -615,11 +615,28 @@ fn harness_status_event_changed(previous: &HarnessStatus, next: &HarnessStatus) 
         || previous.tunnel != next.tunnel
         || previous.active_session_id != next.active_session_id
         || previous.config_revision != next.config_revision
-        || previous.last_error != next.last_error
+        || !harness_error_event_equivalent(previous.last_error.as_ref(), next.last_error.as_ref())
         || !readiness_event_equivalent(
             previous.tunnel_readiness.as_ref(),
             next.tunnel_readiness.as_ref(),
         )
+}
+
+fn harness_error_event_equivalent(
+    previous: Option<&HarnessErrorSummary>,
+    next: Option<&HarnessErrorSummary>,
+) -> bool {
+    match (previous, next) {
+        (None, None) => true,
+        (Some(previous), Some(next)) => {
+            previous.code == next.code
+                && control_plane_error_event_equivalent(
+                    Some(previous.message.as_str()),
+                    Some(next.message.as_str()),
+                )
+        }
+        _ => false,
+    }
 }
 
 fn readiness_event_equivalent(
