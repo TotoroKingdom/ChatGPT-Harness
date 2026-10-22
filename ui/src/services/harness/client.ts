@@ -20,6 +20,12 @@ import type {
 export type ComponentStatus = "stopped" | "starting" | "ready" | "degraded" | "error" | "stopping";
 export type OverallStatus = "stopped" | "starting" | "ready" | "degraded" | "error" | "stopping";
 export type ComponentStates = { runtime: ComponentStatus; tunnel: ComponentStatus; mcp: ComponentStatus };
+export type TunnelHealthState = "unknown" | "starting" | "stopping" | "ready" | "degraded" | "failed" | "stopped";
+export type TunnelHealth = {
+  process: TunnelHealthState;
+  localMcp: TunnelHealthState;
+  controlPlane: TunnelHealthState;
+};
 export type HarnessStatus = {
   lifecycle: OverallStatus;
   runtime: ComponentStatus;
@@ -28,6 +34,7 @@ export type HarnessStatus = {
   activeSessionId?: string | null;
   configRevision?: string | null;
   lastError?: { code: string; message: string } | null;
+  tunnelHealth?: TunnelHealth | null;
   tunnelReadiness?: {
     controlPlaneConnected: boolean;
     mcpTargetReachable: boolean;

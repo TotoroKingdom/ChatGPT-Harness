@@ -32,6 +32,8 @@ import type {
 } from "./client";
 import { MockHarnessControlClient } from "./mock-client";
 
+const HARNESS_RECONCILE_INTERVAL_MS = 10_000;
+
 const tauriAvailable = () =>
   typeof window !== "undefined" &&
   Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
@@ -90,10 +92,15 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     activeSessionId: null,
     configRevision: null,
     lastError: null,
+    tunnelHealth: null,
     tunnelReadiness: null,
   };
   private harnessListener?: Unsubscribe;
+  private harnessListenerPromise?: Promise<void>;
   private componentListener?: ComponentStatesListener;
+  private harnessReconcileTimer?: number;
+  private harnessReconcileInFlight = false;
+  private harnessSubscriptionEpoch = 0;
   private observationVersion = 0;
   private harnessVersion = 0;
 
@@ -124,9 +131,55 @@ export class TauriHarnessControlClient implements HarnessControlClient {
 
   private async ensureHarnessListener() {
     if (this.harnessListener) return;
-    this.harnessListener = await listen<HarnessStatus>("harness:status", (event) => {
-      this.applyHarnessStatus(event.payload);
-    });
+    if (this.harnessListenerPromise) return this.harnessListenerPromise;
+    const epoch = this.harnessSubscriptionEpoch;
+    const pending = (async () => {
+      const unlisten = await listen<HarnessStatus>("harness:status", (event) => {
+        this.applyHarnessStatus(event.payload);
+      });
+      if (epoch !== this.harnessSubscriptionEpoch) {
+        unlisten();
+        return;
+      }
+      this.harnessListener = unlisten;
+      this.startHarnessReconciliation();
+    })();
+    this.harnessListenerPromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.harnessListenerPromise === pending) this.harnessListenerPromise = undefined;
+    }
+  }
+
+  private startHarnessReconciliation() {
+    if (this.harnessReconcileTimer !== undefined || typeof window === "undefined") return;
+    this.harnessReconcileTimer = window.setInterval(() => {
+      void this.reconcileHarnessStatus();
+    }, HARNESS_RECONCILE_INTERVAL_MS);
+  }
+
+  private stopHarnessReconciliation() {
+    if (this.harnessReconcileTimer === undefined || typeof window === "undefined") return;
+    window.clearInterval(this.harnessReconcileTimer);
+    this.harnessReconcileTimer = undefined;
+    this.harnessReconcileInFlight = false;
+  }
+
+  private async reconcileHarnessStatus() {
+    if (!this.harnessListener || this.harnessReconcileInFlight) return;
+    this.harnessReconcileInFlight = true;
+    try {
+      await this.observeHarness("harness_status");
+    } catch {
+      // Keep the last confirmed state; the next reconciliation retries.
+    } finally {
+      this.harnessReconcileInFlight = false;
+    }
+  }
+
+  private invalidateHarnessObservations() {
+    this.harnessVersion += 1;
   }
 
   async configGet() {
@@ -230,6 +283,8 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   async harnessStart() {
+    await this.ensureHarnessListener();
+    this.invalidateHarnessObservations();
     return this.observeHarness("harness_start");
   }
 
@@ -239,10 +294,14 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   async harnessStop() {
+    await this.ensureHarnessListener();
+    this.invalidateHarnessObservations();
     return this.observeHarness("harness_stop");
   }
 
   async harnessRestart() {
+    await this.ensureHarnessListener();
+    this.invalidateHarnessObservations();
     return this.observeHarness("harness_restart");
   }
 
@@ -274,8 +333,11 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     });
     return () => {
       runtimeUnlisten();
+      this.harnessSubscriptionEpoch += 1;
+      this.invalidateHarnessObservations();
       this.harnessListener?.();
       this.harnessListener = undefined;
+      this.stopHarnessReconciliation();
       this.componentListener = undefined;
     };
   }

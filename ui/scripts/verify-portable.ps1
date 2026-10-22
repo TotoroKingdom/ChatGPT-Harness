@@ -20,6 +20,31 @@ function Assert-File([string]$Path, [string]$Description) {
     if ((Get-Item -LiteralPath $Path).Length -le 0) { throw "$Description is empty: $Path" }
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hash = $sha.ComputeHash($stream)
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    return ([BitConverter]::ToString($hash)).Replace("-", "")
+}
+
+function Get-Sha256Text([string]$Text) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))
+    } finally {
+        $sha.Dispose()
+    }
+    return ([BitConverter]::ToString($hash)).Replace("-", "")
+}
+
 $manifestPath = Join-Path $portablePath "distribution.json"
 $uiExecutable = Join-Path $portablePath "chatgpt-harness-ui.exe"
 $runtimeExecutable = Join-Path $portablePath "runtime\chatgpt-harness-runtime.exe"
@@ -43,6 +68,39 @@ if ($manifest.runtime.relative_path -ne "runtime/chatgpt-harness-runtime.exe" -o
     $manifest.tunnel.relative_path -ne "tunnel/tunnel-client.exe" -or
     $manifest.tunnel.cloudflared_relative_path -ne "tunnel/cloudflared.exe") {
     throw "Portable manifest paths are invalid."
+}
+if ([string]::IsNullOrWhiteSpace($manifest.build_sha) -or
+    [string]::IsNullOrWhiteSpace($manifest.source_state_sha256) -or
+    [string]::IsNullOrWhiteSpace($manifest.ui_sha256) -or
+    [string]::IsNullOrWhiteSpace($manifest.runtime_sha256) -or
+    [string]::IsNullOrWhiteSpace($manifest.tunnel_client_sha256) -or
+    [string]::IsNullOrWhiteSpace($manifest.cloudflared_sha256)) {
+    throw "Portable manifest provenance is incomplete."
+}
+$currentBuildSha = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false rev-parse HEAD 2>$null)
+if ($LASTEXITCODE -ne 0) { throw "Could not determine current source revision." }
+$currentBuildSha = $currentBuildSha.Trim()
+$currentStatus = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false status --porcelain 2>$null) -join "`n"
+$currentDiff = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false diff --binary HEAD 2>$null) -join "`n"
+$currentCachedDiff = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false diff --cached --binary 2>$null) -join "`n"
+$currentSourceDirty = -not [string]::IsNullOrWhiteSpace($currentStatus)
+$currentSourceState = Get-Sha256Text ($currentBuildSha + "`n" + $currentStatus + "`n" + $currentDiff + "`n" + $currentCachedDiff)
+if ($manifest.build_sha -ne $currentBuildSha -or
+    [bool]$manifest.source_dirty -ne $currentSourceDirty -or
+    $manifest.source_state_sha256 -ne $currentSourceState) {
+    throw "Portable source provenance does not match the current worktree."
+}
+$hashChecks = @(
+    @{Path=$uiExecutable; Expected=$manifest.ui_sha256; Name="UI"},
+    @{Path=$runtimeExecutable; Expected=$manifest.runtime_sha256; Name="Runtime"},
+    @{Path=$tunnelExecutable; Expected=$manifest.tunnel_client_sha256; Name="tunnel-client"},
+    @{Path=$cloudflaredExecutable; Expected=$manifest.cloudflared_sha256; Name="cloudflared"}
+)
+foreach ($check in $hashChecks) {
+    $actual = Get-Sha256 $check.Path
+    if ($actual -ne $check.Expected) {
+        throw "$($check.Name) SHA-256 does not match distribution.json."
+    }
 }
 
 $iconPath = Join-Path $repositoryRoot "ui\src-tauri\icons\portable\generated\icon.ico"

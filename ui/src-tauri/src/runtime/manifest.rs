@@ -17,6 +17,20 @@ pub(crate) struct DistributionManifest {
     pub(crate) distribution_id: String,
     pub(crate) app_version: String,
     pub(crate) runtime_version: String,
+    #[serde(default)]
+    pub(crate) build_sha: Option<String>,
+    #[serde(default)]
+    pub(crate) source_dirty: bool,
+    #[serde(default)]
+    pub(crate) source_state_sha256: Option<String>,
+    #[serde(default)]
+    pub(crate) ui_sha256: Option<String>,
+    #[serde(default)]
+    pub(crate) runtime_sha256: Option<String>,
+    #[serde(default)]
+    pub(crate) tunnel_client_sha256: Option<String>,
+    #[serde(default)]
+    pub(crate) cloudflared_sha256: Option<String>,
     pub(crate) protocol_version: u32,
     pub(crate) runtime: RuntimeManifest,
     pub(crate) tunnel: TunnelManifest,
@@ -87,6 +101,27 @@ pub(crate) fn validate(
             "Installed distribution application version is incompatible.",
         ));
     }
+    if manifest.runtime_version != manifest.app_version {
+        return Err(SupervisorError::distribution(
+            "Installed distribution Runtime version is incompatible.",
+        ));
+    }
+    for hash in [
+        manifest.ui_sha256.as_deref(),
+        manifest.runtime_sha256.as_deref(),
+        manifest.tunnel_client_sha256.as_deref(),
+        manifest.cloudflared_sha256.as_deref(),
+        manifest.source_state_sha256.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if hash.len() != 64 || !hash.chars().all(|value| value.is_ascii_hexdigit()) {
+            return Err(SupervisorError::distribution(
+                "Installed distribution provenance hash is invalid.",
+            ));
+        }
+    }
     Ok(manifest.clone())
 }
 
@@ -104,6 +139,13 @@ mod tests {
             distribution_id: DISTRIBUTION_ID.into(),
             app_version: env!("CARGO_PKG_VERSION").into(),
             runtime_version: env!("CARGO_PKG_VERSION").into(),
+            build_sha: None,
+            source_dirty: false,
+            source_state_sha256: None,
+            ui_sha256: None,
+            runtime_sha256: None,
+            tunnel_client_sha256: None,
+            cloudflared_sha256: None,
             protocol_version: PROTOCOL_VERSION,
             runtime: RuntimeManifest {
                 relative_path: RUNTIME_RELATIVE_PATH.into(),
@@ -140,6 +182,12 @@ mod tests {
         assert!(validate(&value).is_err());
         let mut value = valid();
         value.app_version = "0.0.0".into();
+        assert!(validate(&value).is_err());
+        let mut value = valid();
+        value.runtime_version = "0.0.0".into();
+        assert!(validate(&value).is_err());
+        let mut value = valid();
+        value.source_state_sha256 = Some("not-a-sha".into());
         assert!(validate(&value).is_err());
         let mut value = valid();
         value.protocol_version += 1;

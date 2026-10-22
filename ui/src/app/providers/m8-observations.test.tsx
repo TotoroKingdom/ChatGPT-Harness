@@ -114,6 +114,40 @@ describe("M8 observation ordering", () => {
     expect(client.getComponentStates()).toEqual({ runtime: "stopped", tunnel: "stopped", mcp: "stopped" });
   });
 
+  it("reconciles harness status on a low-frequency timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const initial = harnessState();
+      const degraded = harnessState({
+        lifecycle: "degraded",
+        tunnel: "degraded",
+        tunnelHealth: {
+          process: "ready",
+          localMcp: "ready",
+          controlPlane: "degraded",
+        },
+      });
+      let calls = 0;
+      tauri.listen.mockResolvedValue(vi.fn());
+      tauri.invoke.mockImplementation(async (command: string) => {
+        if (command === "harness_status") return calls++ === 0 ? initial : degraded;
+        throw new Error(`Unexpected command: ${command}`);
+      });
+      const client = new TauriHarnessControlClient();
+
+      await expect(client.harnessStatus()).resolves.toEqual(initial);
+      expect(calls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(calls).toBe(2);
+      expect(client.getHarnessStatus()).toEqual(degraded);
+      expect(client.getComponentStates().tunnel).toBe("degraded");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   function ProviderProbe() {
     const data = useHarnessData();
     return (

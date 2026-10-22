@@ -5,8 +5,9 @@ pub(crate) use discovery::resolve_tunnel;
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     fs,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -18,9 +19,21 @@ use std::{
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(not(test))]
 const READINESS_MONITOR_INTERVAL: Duration = Duration::from_millis(500);
+#[cfg(test)]
+const READINESS_MONITOR_INTERVAL: Duration = Duration::from_millis(20);
 const READINESS_LOSS_TOLERANCE: u32 = 6;
 const CONTROL_PLANE_POLL_FRESHNESS: Duration = Duration::from_secs(90);
+const CONTROL_PLANE_RESTART_AGE: Duration = Duration::from_secs(120);
+const RECOVERY_BASE_DELAY: Duration = Duration::from_secs(1);
+const RECOVERY_MAX_DELAY: Duration = Duration::from_secs(60);
+const RECOVERY_WINDOW: Duration = Duration::from_secs(10 * 60);
+const RECOVERY_COOLDOWN: Duration = Duration::from_secs(10 * 60);
+const RECOVERY_MAX_ATTEMPTS: usize = 6;
+const RECOVERY_MAX_TOTAL_ATTEMPTS: u32 = 12;
+const LOG_ROLL_BYTES: u64 = 5 * 1024 * 1024;
+const LOG_ROLL_FILES: usize = 3;
 const CONTROL_PLANE_POLL_METRIC: &str = "commands_poll_last_successful_timestamp_seconds";
 const TUNNEL_API_KEY_ENV: &str = "HARNESS_TUNNEL_API_KEY";
 const TUNNEL_CLIENT_FILE_NAME: &str = "tunnel-client.exe";
@@ -66,6 +79,76 @@ pub struct TunnelControlPlaneRoute {
     pub proxy_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelHealthState {
+    Unknown,
+    Starting,
+    Stopping,
+    Ready,
+    Degraded,
+    Failed,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelHealth {
+    pub process: TunnelHealthState,
+    pub local_mcp: TunnelHealthState,
+    pub control_plane: TunnelHealthState,
+}
+
+impl TunnelHealth {
+    pub(crate) fn starting() -> Self {
+        Self {
+            process: TunnelHealthState::Starting,
+            local_mcp: TunnelHealthState::Unknown,
+            control_plane: TunnelHealthState::Unknown,
+        }
+    }
+
+    pub(crate) fn stopped() -> Self {
+        Self {
+            process: TunnelHealthState::Stopped,
+            local_mcp: TunnelHealthState::Stopped,
+            control_plane: TunnelHealthState::Stopped,
+        }
+    }
+
+    fn stopping() -> Self {
+        Self {
+            process: TunnelHealthState::Stopping,
+            local_mcp: TunnelHealthState::Stopping,
+            control_plane: TunnelHealthState::Stopping,
+        }
+    }
+
+    pub(crate) fn failed() -> Self {
+        Self {
+            process: TunnelHealthState::Failed,
+            local_mcp: TunnelHealthState::Failed,
+            control_plane: TunnelHealthState::Failed,
+        }
+    }
+
+    fn probe_failed(previous: Option<&Self>) -> Self {
+        Self {
+            process: TunnelHealthState::Ready,
+            local_mcp: previous
+                .map(|health| health.local_mcp)
+                .unwrap_or(TunnelHealthState::Unknown),
+            control_plane: TunnelHealthState::Unknown,
+        }
+    }
+
+    fn all_ready(self) -> bool {
+        self.process == TunnelHealthState::Ready
+            && self.local_mcp == TunnelHealthState::Ready
+            && self.control_plane == TunnelHealthState::Ready
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelReadinessEvidence {
@@ -103,6 +186,8 @@ struct AdminChannel {
 pub struct TunnelStatus {
     pub state: TunnelState,
     pub instance: Option<TunnelInstance>,
+    pub generation: u64,
+    pub health: TunnelHealth,
     pub readiness: Option<TunnelReadinessEvidence>,
     pub last_exit: Option<TunnelExit>,
     pub last_error: Option<TunnelProcessError>,
@@ -131,6 +216,7 @@ impl TunnelCredential {
 
 /// Public launch data plus a short-lived credential. The credential is never
 /// copied into status, errors, events, or serialized state.
+#[derive(Clone)]
 pub struct TunnelLaunch {
     pub executable_path: PathBuf,
     pub cloudflared_path: PathBuf,
@@ -139,6 +225,7 @@ pub struct TunnelLaunch {
     pub runtime_endpoint: String,
     credential: Option<TunnelCredential>,
     health_url_file: Option<PathBuf>,
+    log_file: Option<PathBuf>,
     startup_timeout: Duration,
 }
 
@@ -152,6 +239,7 @@ impl TunnelLaunch {
             runtime_endpoint: runtime_endpoint.into(),
             credential: None,
             health_url_file: None,
+            log_file: None,
             startup_timeout: STARTUP_TIMEOUT,
         }
     }
@@ -181,6 +269,11 @@ impl TunnelLaunch {
         self
     }
 
+    pub(crate) fn with_log_file(mut self, path: PathBuf) -> Self {
+        self.log_file = Some(path);
+        self
+    }
+
     #[cfg(test)]
     fn with_startup_timeout(mut self, timeout: Duration) -> Self {
         self.startup_timeout = timeout;
@@ -204,11 +297,94 @@ struct TunnelInner {
     observer: Option<Arc<dyn TunnelEventSink>>,
 }
 
+#[derive(Clone)]
+struct TunnelLogger {
+    path: Arc<Mutex<Option<PathBuf>>>,
+}
+
+impl TunnelLogger {
+    fn new() -> Self {
+        Self {
+            path: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn set_path(&self, path: Option<PathBuf>) {
+        if let Ok(mut current) = self.path.lock() {
+            *current = path;
+        }
+    }
+
+    fn event(&self, event: &str, fields: serde_json::Value) {
+        let Ok(path) = self.path.lock() else {
+            return;
+        };
+        let Some(path) = path.as_ref() else {
+            return;
+        };
+        let record = serde_json::json!({
+            "time": timestamp(),
+            "component": "tunnel-supervisor",
+            "event": event,
+            "fields": redact_json(fields),
+        });
+        let Ok(line) = serde_json::to_string(&record) else {
+            return;
+        };
+        let _ = append_rolled_log(path, &line);
+    }
+}
+
+struct RecoveryState {
+    desired_running: bool,
+    generation: u64,
+    launch: Option<TunnelLaunch>,
+    recovering: bool,
+    token: u64,
+    total_attempts: u32,
+    attempts: VecDeque<Instant>,
+    blocked: Option<TunnelProcessError>,
+}
+
+impl RecoveryState {
+    fn new() -> Self {
+        Self {
+            desired_running: false,
+            generation: 0,
+            launch: None,
+            recovering: false,
+            token: 0,
+            total_attempts: 0,
+            attempts: VecDeque::new(),
+            blocked: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryTrigger {
+    ProcessExit,
+    HealthProbe,
+    ControlPlaneStale,
+}
+
+impl RecoveryTrigger {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ProcessExit => "process_exit",
+            Self::HealthProbe => "health_probe",
+            Self::ControlPlaneStale => "control_plane_stale",
+        }
+    }
+}
+
 pub(crate) trait TunnelEventSink: Send + Sync {
     fn tunnel_event(
         &self,
+        generation: u64,
         instance_id: Option<&str>,
         state: TunnelState,
+        health: TunnelHealth,
         readiness: Option<&TunnelReadinessEvidence>,
         error: Option<&TunnelProcessError>,
     );
@@ -216,8 +392,13 @@ pub(crate) trait TunnelEventSink: Send + Sync {
 
 pub struct TunnelProcessManager {
     inner: Arc<Mutex<TunnelInner>>,
+    recovery: Arc<Mutex<RecoveryState>>,
+    operation: Arc<Mutex<()>>,
+    logger: TunnelLogger,
     #[cfg(test)]
     test_command: Option<TestTunnelCommand>,
+    #[cfg(test)]
+    auto_recovery_enabled: bool,
     #[cfg(test)]
     stop_timeout: Duration,
 }
@@ -226,8 +407,13 @@ impl Clone for TunnelProcessManager {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            recovery: self.recovery.clone(),
+            operation: self.operation.clone(),
+            logger: self.logger.clone(),
             #[cfg(test)]
             test_command: self.test_command.clone(),
+            #[cfg(test)]
+            auto_recovery_enabled: self.auto_recovery_enabled,
             #[cfg(test)]
             stop_timeout: self.stop_timeout,
         }
@@ -255,14 +441,21 @@ impl TunnelProcessManager {
                 status: TunnelStatus {
                     state: TunnelState::Stopped,
                     instance: None,
+                    generation: 0,
+                    health: TunnelHealth::stopped(),
                     readiness: None,
                     last_exit: None,
                     last_error: None,
                 },
                 observer: None,
             })),
+            recovery: Arc::new(Mutex::new(RecoveryState::new())),
+            operation: Arc::new(Mutex::new(())),
+            logger: TunnelLogger::new(),
             #[cfg(test)]
             test_command: None,
+            #[cfg(test)]
+            auto_recovery_enabled: false,
             #[cfg(test)]
             stop_timeout: STOP_TIMEOUT,
         }
@@ -275,6 +468,54 @@ impl TunnelProcessManager {
     }
 
     pub fn start(&self, launch: TunnelLaunch) -> Result<TunnelStatus, TunnelProcessError> {
+        let _operation = self.lock_operation();
+        self.start_internal(launch)
+    }
+
+    fn start_internal(&self, launch: TunnelLaunch) -> Result<TunnelStatus, TunnelProcessError> {
+        let generation = self.begin_manual_start();
+        self.logger.set_path(launch.log_file.clone());
+        self.logger.event(
+            "manual_start_requested",
+            serde_json::json!({
+                "generation": generation,
+                "tunnel_version": crate::runtime::manifest::TUNNEL_CLIENT_VERSION,
+            }),
+        );
+        match self.start_instance(launch.clone(), generation) {
+            Ok(status) => {
+                self.arm_recovery(generation, launch);
+                self.logger.event(
+                    "manual_start_succeeded",
+                    serde_json::json!({
+                        "generation": generation,
+                        "instance_id": status.instance.as_ref().map(|instance| instance.instance_id.as_str()),
+                        "pid": status.instance.as_ref().map(|instance| instance.pid),
+                        "state": status.state,
+                    }),
+                );
+                Ok(status)
+            }
+            Err(error) => {
+                self.disarm_recovery(generation);
+                self.logger.event(
+                    "manual_start_failed",
+                    serde_json::json!({
+                        "generation": generation,
+                        "error_code": error.code,
+                        "error": error.message,
+                    }),
+                );
+                Err(error)
+            }
+        }
+    }
+
+    fn start_instance(
+        &self,
+        launch: TunnelLaunch,
+        recovery_generation: u64,
+    ) -> Result<TunnelStatus, TunnelProcessError> {
         #[cfg(test)]
         let test_mode = self.test_command.is_some();
         #[cfg(not(test))]
@@ -314,15 +555,17 @@ impl TunnelProcessManager {
             inner.status = TunnelStatus {
                 state: TunnelState::Starting,
                 instance: None,
+                generation: recovery_generation,
+                health: TunnelHealth::starting(),
                 readiness: None,
                 last_exit: None,
                 last_error: None,
             };
             uuid::Uuid::new_v4().to_string()
         };
-        self.notify(None, TunnelState::Starting, None);
+        self.notify(Some(&instance_id), TunnelState::Starting, None);
 
-        let child = match self.spawn_process(
+        let mut child = match self.spawn_process(
             &executable_path,
             &cloudflared_path,
             &launch,
@@ -335,6 +578,25 @@ impl TunnelProcessManager {
                 return Err(error);
             }
         };
+        let child_pid = child.id();
+        if let Some(stdout) = child.stdout.take() {
+            spawn_child_output_logger(
+                stdout,
+                self.logger.clone(),
+                child_pid,
+                instance_id.clone(),
+                "stdout",
+            );
+        }
+        if let Some(stderr) = child.stderr.take() {
+            spawn_child_output_logger(
+                stderr,
+                self.logger.clone(),
+                child_pid,
+                instance_id.clone(),
+                "stderr",
+            );
+        }
 
         #[cfg(windows)]
         let job = match create_job_for_child(&child) {
@@ -389,7 +651,7 @@ impl TunnelProcessManager {
             inner.process = Some(process.clone());
             inner.status.instance = Some(instance.clone());
         }
-        spawn_exit_watcher(self.inner.clone(), process.clone());
+        spawn_exit_watcher(self.clone(), process.clone(), recovery_generation);
 
         let readiness = if test_mode {
             Ok(TunnelReadinessEvidence {
@@ -428,6 +690,7 @@ impl TunnelProcessManager {
             }
             let (state, error) = state_from_readiness(&readiness);
             inner.status.state = state;
+            inner.status.health = health_from_readiness(&readiness);
             inner.status.readiness = Some(readiness);
             inner.status.last_error = error;
         }
@@ -438,12 +701,279 @@ impl TunnelProcessManager {
             status.last_error.as_ref(),
         );
         if !test_mode {
-            spawn_readiness_watcher(self.inner.clone(), process);
+            spawn_readiness_watcher(self.clone(), process, recovery_generation);
         }
         Ok(status)
     }
 
+    fn begin_manual_start(&self) -> u64 {
+        let mut recovery = self.lock_recovery();
+        recovery.generation = recovery.generation.wrapping_add(1);
+        recovery.desired_running = false;
+        recovery.launch = None;
+        recovery.recovering = false;
+        recovery.total_attempts = 0;
+        recovery.attempts.clear();
+        recovery.blocked = None;
+        recovery.generation
+    }
+
+    fn arm_recovery(&self, generation: u64, launch: TunnelLaunch) {
+        let mut recovery = self.lock_recovery();
+        if recovery.generation == generation {
+            recovery.desired_running = true;
+            recovery.launch = Some(launch);
+            recovery.blocked = None;
+        }
+    }
+
+    fn disarm_recovery(&self, generation: u64) {
+        let mut recovery = self.lock_recovery();
+        if recovery.generation == generation {
+            recovery.desired_running = false;
+            recovery.launch = None;
+            recovery.recovering = false;
+            recovery.total_attempts = 0;
+            recovery.attempts.clear();
+            recovery.blocked = None;
+            recovery.generation = recovery.generation.wrapping_add(1);
+        }
+    }
+
+    fn disarm_for_manual_stop(&self) -> u64 {
+        let mut recovery = self.lock_recovery();
+        recovery.desired_running = false;
+        recovery.launch = None;
+        recovery.recovering = false;
+        recovery.total_attempts = 0;
+        recovery.attempts.clear();
+        recovery.blocked = None;
+        recovery.generation = recovery.generation.wrapping_add(1);
+        recovery.generation
+    }
+
+    fn note_recovered(&self, generation: u64, state: TunnelState) {
+        let mut recovery = self.lock_recovery();
+        if recovery.generation != generation {
+            return;
+        }
+        recovery.recovering = false;
+        if state == TunnelState::Ready {
+            recovery.token = recovery.token.wrapping_add(1);
+            recovery.blocked = None;
+        }
+    }
+
+    fn schedule_recovery(
+        &self,
+        generation: u64,
+        trigger: RecoveryTrigger,
+        error: Option<&TunnelProcessError>,
+    ) {
+        #[cfg(test)]
+        if !self.auto_recovery_enabled {
+            return;
+        }
+
+        let now = Instant::now();
+        let (delay, attempt, launch, token) = {
+            let mut recovery = self.lock_recovery();
+            if !recovery.desired_running || recovery.generation != generation || recovery.recovering
+            {
+                return;
+            }
+            if let Some(error) = error {
+                if recovery_is_non_retryable(error) {
+                    recovery.blocked = Some(error.clone());
+                    self.logger.event(
+                        "recovery_blocked",
+                        serde_json::json!({
+                            "generation": generation,
+                            "trigger": trigger.as_str(),
+                            "error_code": error.code,
+                            "error": error.message,
+                        }),
+                    );
+                    return;
+                }
+            }
+            if recovery.total_attempts >= RECOVERY_MAX_TOTAL_ATTEMPTS {
+                let error = TunnelProcessError::recovery_exhausted();
+                recovery.blocked = Some(error.clone());
+                self.logger.event(
+                    "recovery_exhausted",
+                    serde_json::json!({
+                        "generation": generation,
+                        "trigger": trigger.as_str(),
+                        "attempts": recovery.total_attempts,
+                        "error_code": error.code,
+                    }),
+                );
+                return;
+            }
+            let Some(launch) = recovery.launch.clone() else {
+                return;
+            };
+            recovery.total_attempts = recovery.total_attempts.saturating_add(1);
+            recovery
+                .attempts
+                .retain(|attempt| now.duration_since(*attempt) <= RECOVERY_WINDOW);
+            let mut attempt = recovery.attempts.len() + 1;
+            let delay = if recovery.attempts.len() >= RECOVERY_MAX_ATTEMPTS {
+                recovery.attempts.clear();
+                attempt = 1;
+                self.logger.event(
+                    "recovery_budget_cooldown",
+                    serde_json::json!({
+                        "generation": generation,
+                        "trigger": trigger.as_str(),
+                        "cooldown_ms": RECOVERY_COOLDOWN.as_millis(),
+                    }),
+                );
+                RECOVERY_COOLDOWN
+            } else {
+                recovery.attempts.push_back(now);
+                recovery_delay(attempt, recovery_jitter_seed(generation, attempt))
+            };
+            recovery.recovering = true;
+            recovery.token = recovery.token.wrapping_add(1);
+            (delay, attempt, launch, recovery.token)
+        };
+
+        self.logger.event(
+            "recovery_scheduled",
+            serde_json::json!({
+                "generation": generation,
+                "trigger": trigger.as_str(),
+                "attempt": attempt,
+                "delay_ms": delay.as_millis(),
+                "error_code": error.map(|error| error.code.as_str()),
+                "error": error.map(|error| error.message.as_str()),
+            }),
+        );
+        let manager = self.clone();
+        thread::spawn(move || {
+            thread::sleep(delay);
+            manager.perform_recovery(generation, trigger, launch, token);
+        });
+    }
+
+    fn perform_recovery(
+        &self,
+        generation: u64,
+        trigger: RecoveryTrigger,
+        launch: TunnelLaunch,
+        token: u64,
+    ) {
+        let _operation = self.lock_operation();
+        if !self.recovery_is_current(generation, token) {
+            self.lock_recovery().recovering = false;
+            return;
+        }
+
+        if let Some(process) = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.process.as_ref().cloned())
+        {
+            self.logger.event(
+                "recovery_stopping_previous_instance",
+                serde_json::json!({
+                    "generation": generation,
+                    "trigger": trigger.as_str(),
+                    "instance_id": process.instance.instance_id,
+                    "pid": process.instance.pid,
+                }),
+            );
+            if let Ok(mut inner) = self.lock_inner() {
+                inner.status.state = TunnelState::Stopping;
+                inner.status.health = TunnelHealth::stopping();
+                self.notify_locked(
+                    &inner,
+                    Some(&process.instance.instance_id),
+                    TunnelState::Stopping,
+                    None,
+                );
+            }
+            if let Err(error) = self.stop_process(&process) {
+                self.lock_recovery().recovering = false;
+                self.logger.event(
+                    "recovery_stop_failed",
+                    serde_json::json!({
+                        "generation": generation,
+                        "trigger": trigger.as_str(),
+                        "error_code": error.code,
+                        "error": error.message,
+                    }),
+                );
+                self.schedule_recovery(generation, trigger, Some(&error));
+                return;
+            }
+            remove_health_file(&process.health_url_file);
+        }
+
+        if !self.recovery_is_current(generation, token) {
+            self.lock_recovery().recovering = false;
+            return;
+        }
+
+        self.logger.event(
+            "recovery_started",
+            serde_json::json!({
+                "generation": generation,
+                "trigger": trigger.as_str(),
+            }),
+        );
+        match self.start_instance(launch, generation) {
+            Ok(status) => {
+                self.note_recovered(generation, status.state);
+                self.logger.event(
+                    "recovery_succeeded",
+                    serde_json::json!({
+                        "generation": generation,
+                        "trigger": trigger.as_str(),
+                        "instance_id": status.instance.as_ref().map(|instance| instance.instance_id.as_str()),
+                        "pid": status.instance.as_ref().map(|instance| instance.pid),
+                        "state": status.state,
+                    }),
+                );
+            }
+            Err(error) => {
+                self.lock_recovery().recovering = false;
+                self.logger.event(
+                    "recovery_failed",
+                    serde_json::json!({
+                        "generation": generation,
+                        "trigger": trigger.as_str(),
+                        "error_code": error.code,
+                        "error": error.message,
+                    }),
+                );
+                self.schedule_recovery(generation, trigger, Some(&error));
+            }
+        }
+    }
+
+    fn recovery_is_current(&self, generation: u64, token: u64) -> bool {
+        let recovery = self.lock_recovery();
+        recovery.token == token
+            && recovery.desired_running
+            && recovery.generation == generation
+            && recovery.blocked.is_none()
+    }
+
     pub fn stop(&self) -> Result<TunnelStopResult, TunnelProcessError> {
+        let _operation = self.lock_operation();
+        self.stop_internal()
+    }
+
+    fn stop_internal(&self) -> Result<TunnelStopResult, TunnelProcessError> {
+        let generation = self.disarm_for_manual_stop();
+        self.logger.event(
+            "manual_stop_requested",
+            serde_json::json!({ "generation": generation }),
+        );
         let instance_id = {
             let inner = self.lock_inner()?;
             inner
@@ -452,7 +982,7 @@ impl TunnelProcessManager {
                 .map(|process| process.instance.instance_id.clone())
         };
         match instance_id {
-            Some(instance_id) => self.stop_instance(&instance_id),
+            Some(instance_id) => self.stop_instance_internal(&instance_id),
             None => Ok(TunnelStopResult {
                 accepted: false,
                 forced: false,
@@ -461,6 +991,14 @@ impl TunnelProcessManager {
     }
 
     pub fn stop_instance(
+        &self,
+        expected_instance_id: &str,
+    ) -> Result<TunnelStopResult, TunnelProcessError> {
+        let _operation = self.lock_operation();
+        self.stop_instance_internal(expected_instance_id)
+    }
+
+    fn stop_instance_internal(
         &self,
         expected_instance_id: &str,
     ) -> Result<TunnelStopResult, TunnelProcessError> {
@@ -490,6 +1028,7 @@ impl TunnelProcessManager {
                 return Err(TunnelProcessError::instance_mismatch());
             }
             inner.status.state = TunnelState::Stopping;
+            inner.status.health = TunnelHealth::stopping();
             inner.status.last_error = None;
             self.notify_locked(
                 &inner,
@@ -499,6 +1038,14 @@ impl TunnelProcessManager {
             );
             process
         };
+        let generation = self.disarm_for_manual_stop();
+        self.logger.event(
+            "manual_stop_instance_requested",
+            serde_json::json!({
+                "generation": generation,
+                "instance_id": expected_instance_id,
+            }),
+        );
 
         let result = self.stop_process(&process);
         match result {
@@ -517,6 +1064,7 @@ impl TunnelProcessManager {
     }
 
     pub fn restart(&self, launch: TunnelLaunch) -> Result<TunnelStatus, TunnelProcessError> {
+        let _operation = self.lock_operation();
         let active_instance_id = {
             let inner = self.lock_inner()?;
             inner
@@ -525,7 +1073,7 @@ impl TunnelProcessManager {
                 .map(|process| process.instance.instance_id.clone())
         };
         if let Some(instance_id) = active_instance_id {
-            let stopped = self.stop_instance(&instance_id)?;
+            let stopped = self.stop_instance_internal(&instance_id)?;
             if !stopped.accepted {
                 return Err(TunnelProcessError::conflict(
                     "Tunnel client could not be stopped before restart.",
@@ -539,7 +1087,7 @@ impl TunnelProcessManager {
                 ));
             }
         }
-        self.start(launch)
+        self.start_internal(launch)
     }
 
     pub fn status(&self) -> Result<TunnelStatus, TunnelProcessError> {
@@ -585,8 +1133,8 @@ impl TunnelProcessManager {
         configure_real_command(&mut command, cloudflared_path, launch, health_url_file)?;
         command
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -647,6 +1195,7 @@ impl TunnelProcessManager {
                 })
             {
                 inner.status.state = TunnelState::Failed;
+                inner.status.health = TunnelHealth::failed();
                 inner.status.last_error = Some(error.clone());
                 inner.status.readiness = None;
                 self.notify_locked(&inner, instance_id, TunnelState::Failed, Some(&error));
@@ -681,6 +1230,18 @@ impl TunnelProcessManager {
         })
     }
 
+    fn lock_recovery(&self) -> MutexGuard<'_, RecoveryState> {
+        self.recovery
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn lock_operation(&self) -> MutexGuard<'_, ()> {
+        self.operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[cfg(test)]
     fn with_test_command(command: TestTunnelCommand) -> Self {
         Self {
@@ -689,15 +1250,27 @@ impl TunnelProcessManager {
                 status: TunnelStatus {
                     state: TunnelState::Stopped,
                     instance: None,
+                    generation: 0,
+                    health: TunnelHealth::stopped(),
                     readiness: None,
                     last_exit: None,
                     last_error: None,
                 },
                 observer: None,
             })),
+            recovery: Arc::new(Mutex::new(RecoveryState::new())),
+            operation: Arc::new(Mutex::new(())),
+            logger: TunnelLogger::new(),
             test_command: Some(command),
+            auto_recovery_enabled: false,
             stop_timeout: Duration::from_millis(50),
         }
+    }
+
+    #[cfg(test)]
+    fn with_auto_recovery(mut self) -> Self {
+        self.auto_recovery_enabled = true;
+        self
     }
 
     #[cfg(test)]
@@ -827,7 +1400,9 @@ fn wait_for_ready(
         }
         if let Some(url) = discovered_url.as_deref() {
             if let Ok(evidence) = probe_ready(url) {
-                return Ok(evidence);
+                if evidence.mcp_target_reachable {
+                    return Ok(evidence);
+                }
             }
         }
         if Instant::now() >= deadline {
@@ -839,20 +1414,30 @@ fn wait_for_ready(
     }
 }
 
-fn spawn_readiness_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunnelProcess) {
+fn spawn_readiness_watcher(
+    manager: TunnelProcessManager,
+    process: ManagedTunnelProcess,
+    recovery_generation: u64,
+) {
     thread::spawn(move || {
         let mut failures = 0;
+        let mut health_recovery_requested = false;
+        let mut control_plane_recovery_requested = false;
+        let mut local_mcp_failures = 0;
+        let mut local_mcp_recovery_requested = false;
+        let mut no_success_since: Option<Instant> = None;
         loop {
             thread::sleep(READINESS_MONITOR_INTERVAL);
             if wait_for_exit(&process.exited, Duration::from_millis(0)) {
                 return;
             }
-            let is_current = inner.lock().ok().is_some_and(|inner| {
-                (inner.status.state == TunnelState::Ready
-                    || inner.status.state == TunnelState::Degraded)
-                    && inner.process.as_ref().is_some_and(|active| {
-                        active.instance.instance_id == process.instance.instance_id
-                    })
+            let is_current = manager.inner.lock().ok().is_some_and(|inner| {
+                !matches!(
+                    inner.status.state,
+                    TunnelState::Stopping | TunnelState::Stopped
+                ) && inner.process.as_ref().is_some_and(|active| {
+                    active.instance.instance_id == process.instance.instance_id
+                })
             });
             if !is_current {
                 return;
@@ -868,16 +1453,26 @@ fn spawn_readiness_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunne
                 .and_then(probe_ready);
             if let Ok(evidence) = result {
                 failures = 0;
+                health_recovery_requested = false;
                 let (next_state, next_error) = state_from_readiness(&evidence);
-                if let Ok(mut inner) = inner.lock() {
+                let next_health = health_from_readiness(&evidence);
+                if evidence.mcp_target_reachable {
+                    local_mcp_failures = 0;
+                    local_mcp_recovery_requested = false;
+                } else {
+                    local_mcp_failures += 1;
+                }
+                if let Ok(mut inner) = manager.inner.lock() {
                     if inner.process.as_ref().is_some_and(|active| {
                         active.instance.instance_id == process.instance.instance_id
                     }) {
                         let changed = inner.status.state != next_state
                             || inner.status.last_error != next_error
+                            || inner.status.health != next_health
                             || inner.status.readiness.as_ref() != Some(&evidence);
                         inner.status.state = next_state;
-                        inner.status.readiness = Some(evidence);
+                        inner.status.health = next_health;
+                        inner.status.readiness = Some(evidence.clone());
                         inner.status.last_error = next_error.clone();
                         if changed {
                             notify_inner(
@@ -886,43 +1481,121 @@ fn spawn_readiness_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunne
                                 next_state,
                                 next_error.as_ref(),
                             );
+                            manager.logger.event(
+                                "readiness_transition",
+                                serde_json::json!({
+                                    "generation": recovery_generation,
+                                    "instance_id": process.instance.instance_id,
+                                    "state": next_state,
+                                    "health": next_health,
+                                    "error_code": next_error.as_ref().map(|error| error.code.as_str()),
+                                    "error": next_error.as_ref().map(|error| error.message.as_str()),
+                                }),
+                            );
                         }
                     }
                 }
+                if next_state == TunnelState::Ready {
+                    manager.note_recovered(recovery_generation, next_state);
+                }
+
+                let has_valid_poll_age = evidence.last_successful_poll_timestamp.is_some()
+                    && evidence.last_successful_poll_age_seconds.is_some();
+                let control_plane_stale = if has_valid_poll_age {
+                    no_success_since = None;
+                    evidence
+                        .last_successful_poll_age_seconds
+                        .is_some_and(|age| age >= CONTROL_PLANE_RESTART_AGE.as_secs_f64())
+                } else {
+                    let since = no_success_since.get_or_insert_with(Instant::now);
+                    since.elapsed() >= CONTROL_PLANE_RESTART_AGE
+                };
+                if control_plane_stale && !control_plane_recovery_requested {
+                    control_plane_recovery_requested = true;
+                    manager.schedule_recovery(
+                        recovery_generation,
+                        RecoveryTrigger::ControlPlaneStale,
+                        next_error.as_ref(),
+                    );
+                } else if !control_plane_stale {
+                    control_plane_recovery_requested = false;
+                }
+                if next_state == TunnelState::Failed
+                    && next_health.control_plane == TunnelHealthState::Failed
+                    && !health_recovery_requested
+                {
+                    health_recovery_requested = true;
+                    manager.schedule_recovery(
+                        recovery_generation,
+                        RecoveryTrigger::HealthProbe,
+                        next_error.as_ref(),
+                    );
+                }
+                if local_mcp_failures >= READINESS_LOSS_TOLERANCE
+                    && next_error
+                        .as_ref()
+                        .is_some_and(|error| error.code == "TUNNEL_MCP_UNAVAILABLE")
+                    && !local_mcp_recovery_requested
+                {
+                    local_mcp_recovery_requested = true;
+                    manager.schedule_recovery(
+                        recovery_generation,
+                        RecoveryTrigger::HealthProbe,
+                        next_error.as_ref(),
+                    );
+                }
             } else {
                 failures += 1;
-                if let Ok(mut inner) = inner.lock() {
+                let error = TunnelProcessError::readiness(
+                    "Tunnel readiness probe is temporarily unhealthy.",
+                );
+                let next_state = if failures >= READINESS_LOSS_TOLERANCE {
+                    TunnelState::Failed
+                } else {
+                    TunnelState::Degraded
+                };
+                let previous_health = manager.inner.lock().ok().map(|inner| inner.status.health);
+                let next_health = TunnelHealth::probe_failed(previous_health.as_ref());
+                if let Ok(mut inner) = manager.inner.lock() {
                     if inner.process.as_ref().is_none_or(|active| {
                         active.instance.instance_id != process.instance.instance_id
                     }) {
                         return;
                     }
-                    let error = TunnelProcessError::readiness(
-                        "Tunnel readiness probe is temporarily unhealthy.",
-                    );
-                    if failures >= READINESS_LOSS_TOLERANCE {
-                        inner.status.state = TunnelState::Failed;
-                        inner.status.readiness = None;
-                        inner.status.last_error = Some(error.clone());
+                    let changed = inner.status.state != next_state
+                        || inner.status.health != next_health
+                        || inner.status.last_error.as_ref() != Some(&error);
+                    inner.status.state = next_state;
+                    inner.status.health = next_health;
+                    inner.status.last_error = Some(error.clone());
+                    if changed {
                         notify_inner(
                             &inner,
                             Some(&process.instance.instance_id),
-                            TunnelState::Failed,
+                            next_state,
                             Some(&error),
                         );
-                    } else {
-                        inner.status.state = TunnelState::Degraded;
-                        inner.status.last_error = Some(error.clone());
-                        notify_inner(
-                            &inner,
-                            Some(&process.instance.instance_id),
-                            TunnelState::Degraded,
-                            Some(&error),
+                        manager.logger.event(
+                            "health_probe_failed",
+                            serde_json::json!({
+                                "generation": recovery_generation,
+                                "instance_id": process.instance.instance_id,
+                                "consecutive_failures": failures,
+                                "state": next_state,
+                                "health": next_health,
+                                "error_code": error.code,
+                                "error": error.message,
+                            }),
                         );
                     }
                 }
-                if failures >= READINESS_LOSS_TOLERANCE {
-                    return;
+                if failures >= READINESS_LOSS_TOLERANCE && !health_recovery_requested {
+                    health_recovery_requested = true;
+                    manager.schedule_recovery(
+                        recovery_generation,
+                        RecoveryTrigger::HealthProbe,
+                        Some(&error),
+                    );
                 }
             }
         }
@@ -976,13 +1649,8 @@ fn probe_ready(url: &str) -> Result<TunnelReadinessEvidence, TunnelProcessError>
                 == Some("ok");
             (route, status.tunnel_metadata_error, mcp_ready)
         }
-        Err(error) => (None, Some(error.message), true),
+        Err(error) => (None, Some(error.message), false),
     };
-    if !mcp_target_reachable {
-        return Err(TunnelProcessError::readiness(
-            "Tunnel MCP target probe is not healthy.",
-        ));
-    }
 
     let metrics = health_get(url, "/metrics")
         .ok()
@@ -1028,17 +1696,53 @@ fn probe_ready(url: &str) -> Result<TunnelReadinessEvidence, TunnelProcessError>
 fn state_from_readiness(
     evidence: &TunnelReadinessEvidence,
 ) -> (TunnelState, Option<TunnelProcessError>) {
-    if evidence.control_plane_connected {
+    let health = health_from_readiness(evidence);
+    if health.all_ready() {
         return (TunnelState::Ready, None);
     }
-    let message = evidence
+    let control_message = evidence
         .control_plane_error
         .clone()
         .unwrap_or_else(|| "Control-plane connection is unavailable.".into());
-    (
-        TunnelState::Degraded,
-        Some(TunnelProcessError::control_plane(message)),
-    )
+    let control_error = TunnelProcessError::control_plane(control_message);
+    if control_error.code == "CONTROL_PLANE_UNAUTHORIZED" {
+        return (TunnelState::Failed, Some(control_error));
+    }
+    if health.local_mcp != TunnelHealthState::Ready {
+        return (
+            TunnelState::Degraded,
+            Some(TunnelProcessError::mcp_unavailable(
+                "Tunnel MCP target is unavailable.",
+            )),
+        );
+    }
+    (TunnelState::Degraded, Some(control_error))
+}
+
+fn health_from_readiness(evidence: &TunnelReadinessEvidence) -> TunnelHealth {
+    let local_mcp = if evidence.health_check_passed && evidence.mcp_target_reachable {
+        TunnelHealthState::Ready
+    } else {
+        TunnelHealthState::Failed
+    };
+    let control_plane = if evidence.control_plane_connected {
+        TunnelHealthState::Ready
+    } else if evidence
+        .control_plane_error
+        .as_deref()
+        .is_some_and(|message| {
+            message.contains("401") || message.to_ascii_lowercase().contains("unauthorized")
+        })
+    {
+        TunnelHealthState::Failed
+    } else {
+        TunnelHealthState::Degraded
+    };
+    TunnelHealth {
+        process: TunnelHealthState::Ready,
+        local_mcp,
+        control_plane,
+    }
 }
 
 fn unix_timestamp_seconds() -> f64 {
@@ -1156,7 +1860,11 @@ fn validate_health_url(url: &str) -> Result<SocketAddr, TunnelProcessError> {
     Ok(address)
 }
 
-fn spawn_exit_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunnelProcess) {
+fn spawn_exit_watcher(
+    manager: TunnelProcessManager,
+    process: ManagedTunnelProcess,
+    recovery_generation: u64,
+) {
     thread::spawn(move || {
         let exit_code = loop {
             let result = process
@@ -1174,14 +1882,22 @@ fn spawn_exit_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunnelProc
             exited_at: timestamp(),
         };
 
-        if let Ok(mut inner) = inner.lock() {
+        let mut recovery_error = None;
+        let mut should_recover = false;
+        if let Ok(mut inner) = manager.inner.lock() {
             let is_current = inner
                 .process
                 .as_ref()
                 .is_some_and(|active| active.instance.instance_id == process.instance.instance_id);
             if is_current {
                 let stopped_by_manager = inner.status.state == TunnelState::Stopping;
+                let generation = inner.status.generation;
                 inner.process = None;
+                let error = if stopped_by_manager {
+                    None
+                } else {
+                    Some(TunnelProcessError::crashed(exit_code))
+                };
                 inner.status = TunnelStatus {
                     state: if stopped_by_manager {
                         TunnelState::Stopped
@@ -1189,22 +1905,44 @@ fn spawn_exit_watcher(inner: Arc<Mutex<TunnelInner>>, process: ManagedTunnelProc
                         TunnelState::Failed
                     },
                     instance: Some(process.instance.clone()),
+                    generation,
+                    health: if stopped_by_manager {
+                        TunnelHealth::stopped()
+                    } else {
+                        TunnelHealth::failed()
+                    },
                     readiness: None,
                     last_exit: Some(exit),
-                    last_error: if stopped_by_manager {
-                        None
-                    } else {
-                        Some(TunnelProcessError::crashed(exit_code))
-                    },
+                    last_error: error.clone(),
                 };
-                let error = inner.status.last_error.clone();
                 notify_inner(
                     &inner,
                     Some(&process.instance.instance_id),
                     inner.status.state,
                     error.as_ref(),
                 );
+                should_recover = !stopped_by_manager;
+                recovery_error = error;
             }
+        }
+        manager.logger.event(
+            "process_exited",
+            serde_json::json!({
+                "generation": recovery_generation,
+                "instance_id": process.instance.instance_id,
+                "pid": process.instance.pid,
+                "exit_code": exit_code,
+                "recover": should_recover,
+                "error_code": recovery_error.as_ref().map(|error| error.code.as_str()),
+                "error": recovery_error.as_ref().map(|error| error.message.as_str()),
+            }),
+        );
+        if should_recover {
+            manager.schedule_recovery(
+                recovery_generation,
+                RecoveryTrigger::ProcessExit,
+                recovery_error.as_ref(),
+            );
         }
         remove_health_file(&process.health_url_file);
         let (lock, wake) = &*process.exited;
@@ -1222,7 +1960,14 @@ fn notify_inner(
     error: Option<&TunnelProcessError>,
 ) {
     if let Some(observer) = &inner.observer {
-        observer.tunnel_event(instance_id, state, inner.status.readiness.as_ref(), error);
+        observer.tunnel_event(
+            inner.status.generation,
+            instance_id,
+            state,
+            inner.status.health,
+            inner.status.readiness.as_ref(),
+            error,
+        );
     }
 }
 
@@ -1361,6 +2106,20 @@ impl TunnelProcessError {
         }
     }
 
+    fn mcp_unavailable(message: impl Into<String>) -> Self {
+        Self {
+            code: "TUNNEL_MCP_UNAVAILABLE".into(),
+            message: message.into(),
+        }
+    }
+
+    fn recovery_exhausted() -> Self {
+        Self {
+            code: "TUNNEL_RECOVERY_EXHAUSTED".into(),
+            message: "Automatic Tunnel recovery exhausted; manual restart is required.".into(),
+        }
+    }
+
     fn crashed(exit_code: Option<i32>) -> Self {
         Self {
             code: "TUNNEL_PROCESS_EXITED".into(),
@@ -1370,6 +2129,167 @@ impl TunnelProcessError {
             },
         }
     }
+}
+
+fn recovery_is_non_retryable(error: &TunnelProcessError) -> bool {
+    matches!(
+        error.code.as_str(),
+        "CONTROL_PLANE_UNAUTHORIZED"
+            | "TUNNEL_DISTRIBUTION_INVALID"
+            | "TUNNEL_EXECUTABLE_NOT_FOUND"
+            | "TUNNEL_LAUNCH_INVALID"
+    )
+}
+
+fn recovery_delay(attempt: usize, jitter_seed: u64) -> Duration {
+    let exponent = attempt.saturating_sub(1).min(6) as u32;
+    let base_ms = (RECOVERY_BASE_DELAY.as_millis() as u64)
+        .saturating_mul(1_u64 << exponent)
+        .min(RECOVERY_MAX_DELAY.as_millis() as u64);
+    let jitter_ms = jitter_seed % ((base_ms / 4).max(1) + 1);
+    Duration::from_millis((base_ms + jitter_ms).min(RECOVERY_MAX_DELAY.as_millis() as u64))
+}
+
+fn recovery_jitter_seed(generation: u64, attempt: usize) -> u64 {
+    let nanos = Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_default()
+        .unsigned_abs();
+    nanos ^ generation.rotate_left(13) ^ (attempt as u64).rotate_left(29)
+}
+
+fn append_rolled_log(path: &Path, line: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if fs::metadata(path).is_ok_and(|metadata| metadata.len() >= LOG_ROLL_BYTES)
+        && !rotate_log_file(path)
+    {
+        return Err(std::io::Error::other(
+            "Tunnel supervisor log rotation failed.",
+        ));
+    }
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "{line}")
+}
+
+fn spawn_child_output_logger<R: Read + Send + 'static>(
+    reader: R,
+    logger: TunnelLogger,
+    pid: u32,
+    instance_id: String,
+    stream: &'static str,
+) {
+    thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        let mut buffer = Vec::new();
+        loop {
+            buffer.clear();
+            let Ok(count) = reader.read_until(b'\n', &mut buffer) else {
+                return;
+            };
+            if count == 0 {
+                return;
+            }
+            let line = String::from_utf8_lossy(&buffer);
+            let line = line.trim_end_matches(['\r', '\n']);
+            let line: String = line.chars().take(4096).collect();
+            logger.event(
+                "child_output",
+                serde_json::json!({
+                    "instance_id": instance_id,
+                    "pid": pid,
+                    "stream": stream,
+                    "line": line,
+                }),
+            );
+        }
+    });
+}
+
+fn redact_json(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(text) => serde_json::Value::String(redact_sensitive_text(&text)),
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(redact_json).collect())
+        }
+        serde_json::Value::Object(values) => serde_json::Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| {
+                    let value = if sensitive_log_key(&key) {
+                        serde_json::Value::String("<REDACTED>".into())
+                    } else {
+                        redact_json(value)
+                    };
+                    (key, value)
+                })
+                .collect(),
+        ),
+        value => value,
+    }
+}
+
+fn redact_sensitive_text(text: &str) -> String {
+    let lowercase = text.to_ascii_lowercase();
+    let sensitive = [
+        "sk-",
+        "bearer ",
+        "authorization:",
+        "api_key=",
+        "api-key=",
+        "client_secret",
+        "token=",
+    ];
+    let url_with_userinfo = lowercase.contains("://") && lowercase.contains('@');
+    if sensitive.iter().any(|marker| lowercase.contains(marker)) || url_with_userinfo {
+        "<REDACTED>".into()
+    } else {
+        text.to_owned()
+    }
+}
+
+fn sensitive_log_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    [
+        "authorization",
+        "token",
+        "api_key",
+        "apikey",
+        "secret",
+        "password",
+        "cookie",
+        "credential",
+    ]
+    .iter()
+    .any(|marker| key.contains(marker))
+}
+
+fn rotate_log_file(path: &Path) -> bool {
+    let numbered_path = |index: usize| {
+        let mut value = path.as_os_str().to_os_string();
+        value.push(format!(".{index}"));
+        PathBuf::from(value)
+    };
+    let oldest = numbered_path(LOG_ROLL_FILES);
+    if oldest.exists() && fs::remove_file(&oldest).is_err() {
+        return false;
+    }
+    for index in (1..LOG_ROLL_FILES).rev() {
+        let source = numbered_path(index);
+        if source.is_file() {
+            if fs::rename(source, numbered_path(index + 1)).is_err() {
+                return false;
+            }
+        }
+    }
+    if path.is_file() && fs::rename(path, numbered_path(1)).is_err() {
+        return false;
+    }
+    true
 }
 
 #[cfg(windows)]
@@ -1612,6 +2532,7 @@ mod tests {
     use super::*;
     use std::ffi::OsString;
     use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
     fn cmd_path() -> PathBuf {
@@ -1700,6 +2621,56 @@ mod tests {
         format!("http://{address}")
     }
 
+    fn toggle_admin_server() -> (String, Arc<AtomicBool>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let healthy = Arc::new(AtomicBool::new(true));
+        let healthy_for_thread = healthy.clone();
+        thread::spawn(move || loop {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            if !healthy_for_thread.load(Ordering::SeqCst) {
+                continue;
+            }
+            let mut request = [0_u8; 2048];
+            let Ok(count) = stream.read(&mut request) else {
+                continue;
+            };
+            let request = String::from_utf8_lossy(&request[..count]);
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("/");
+            let body = match path {
+                "/readyz" => "ready".to_owned(),
+                "/api/status" => serde_json::json!({
+                    "control_plane_route": {
+                        "route_mode": "proxy",
+                        "proxy_source": "control-plane.http-proxy",
+                        "proxy_url": "http://127.0.0.1:7897"
+                    },
+                    "tunnel_metadata_error": null,
+                    "channels": [{"name": "main", "probe_status": "ok"}]
+                })
+                .to_string(),
+                "/metrics" => format!(
+                    "commands_poll_last_successful_timestamp_seconds{{}} {}\n",
+                    unix_timestamp_seconds()
+                ),
+                _ => String::new(),
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        (format!("http://{address}"), healthy)
+    }
+
     #[test]
     fn start_creates_a_ready_owned_instance_with_readiness_evidence() {
         let manager = sleeping_manager();
@@ -1750,6 +2721,7 @@ mod tests {
         let error = manager.stop_instance(&old_instance_id).unwrap_err();
         assert_eq!(error.code, "TUNNEL_INSTANCE_MISMATCH");
         assert_eq!(manager.status().unwrap().state, TunnelState::Ready);
+        assert!(manager.lock_recovery().desired_running);
         assert_ne!(old_instance_id, new_instance_id);
         assert!(manager.stop().unwrap().accepted);
     }
@@ -1980,8 +2952,12 @@ mod tests {
             last_successful_poll_age_seconds: None,
         };
         let (state, error) = state_from_readiness(&evidence);
-        assert_eq!(state, TunnelState::Degraded);
+        assert_eq!(state, TunnelState::Failed);
         assert_eq!(error.unwrap().code, "CONTROL_PLANE_UNAUTHORIZED");
+        assert_eq!(
+            health_from_readiness(&evidence).control_plane,
+            TunnelHealthState::Failed
+        );
     }
 
     #[test]
@@ -2000,5 +2976,206 @@ mod tests {
         let ready = probe_ready(&admin_server(None, Some(unix_timestamp_seconds() - 1.0))).unwrap();
         assert!(ready.control_plane_connected);
         assert_eq!(state_from_readiness(&ready), (TunnelState::Ready, None));
+    }
+
+    #[test]
+    fn manual_stop_disarms_automatic_recovery() {
+        let manager = sleeping_manager().with_auto_recovery();
+        manager.start(launch()).unwrap();
+        assert!(manager.lock_recovery().desired_running);
+
+        assert!(manager.stop().unwrap().accepted);
+        wait_for_state(&manager, TunnelState::Stopped);
+
+        let recovery = manager.lock_recovery();
+        assert!(!recovery.desired_running);
+        assert!(recovery.launch.is_none());
+    }
+
+    #[test]
+    fn unauthorized_error_blocks_recovery_without_scheduling_restart() {
+        let manager = sleeping_manager().with_auto_recovery();
+        manager.start(launch()).unwrap();
+        let generation = manager.lock_recovery().generation;
+        let error = TunnelProcessError::control_plane("401 Unauthorized");
+
+        manager.schedule_recovery(generation, RecoveryTrigger::ControlPlaneStale, Some(&error));
+
+        let recovery = manager.lock_recovery();
+        assert_eq!(
+            recovery.blocked.as_ref().map(|error| error.code.as_str()),
+            Some("CONTROL_PLANE_UNAUTHORIZED")
+        );
+        assert!(!recovery.recovering);
+        drop(recovery);
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn unauthorized_error_takes_priority_over_local_mcp_failure() {
+        let evidence = TunnelReadinessEvidence {
+            control_plane_connected: false,
+            mcp_target_reachable: false,
+            health_check_passed: true,
+            control_plane_route: None,
+            control_plane_error: Some("401 Unauthorized".into()),
+            last_successful_poll_timestamp: None,
+            last_successful_poll_age_seconds: None,
+        };
+
+        let (state, error) = state_from_readiness(&evidence);
+        assert_eq!(state, TunnelState::Failed);
+        assert_eq!(error.unwrap().code, "CONTROL_PLANE_UNAUTHORIZED");
+        assert_eq!(
+            health_from_readiness(&evidence).local_mcp,
+            TunnelHealthState::Failed
+        );
+    }
+
+    #[test]
+    fn local_mcp_failure_is_degraded_with_mcp_specific_error() {
+        let evidence = TunnelReadinessEvidence {
+            control_plane_connected: true,
+            mcp_target_reachable: false,
+            health_check_passed: true,
+            control_plane_route: None,
+            control_plane_error: None,
+            last_successful_poll_timestamp: Some(unix_timestamp_seconds() - 1.0),
+            last_successful_poll_age_seconds: Some(1.0),
+        };
+
+        let (state, error) = state_from_readiness(&evidence);
+        assert_eq!(state, TunnelState::Degraded);
+        assert_eq!(error.unwrap().code, "TUNNEL_MCP_UNAVAILABLE");
+        assert_eq!(
+            health_from_readiness(&evidence).local_mcp,
+            TunnelHealthState::Failed
+        );
+    }
+
+    #[test]
+    fn lifetime_recovery_budget_blocks_without_manual_restart() {
+        let manager = sleeping_manager().with_auto_recovery();
+        manager.start(launch()).unwrap();
+        let generation = manager.lock_recovery().generation;
+        manager.lock_recovery().total_attempts = RECOVERY_MAX_TOTAL_ATTEMPTS;
+        let error = TunnelProcessError::readiness("temporary network failure");
+
+        manager.schedule_recovery(generation, RecoveryTrigger::HealthProbe, Some(&error));
+
+        assert_eq!(
+            manager
+                .lock_recovery()
+                .blocked
+                .as_ref()
+                .map(|error| error.code.as_str()),
+            Some("TUNNEL_RECOVERY_EXHAUSTED")
+        );
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn recovery_delay_is_exponential_bounded_and_jittered() {
+        assert!(recovery_delay(1, 0) >= RECOVERY_BASE_DELAY);
+        assert!(recovery_delay(1, 1) > recovery_delay(1, 0));
+        assert!(recovery_delay(20, u64::MAX) <= RECOVERY_MAX_DELAY);
+        assert!(recovery_delay(8, 0) >= Duration::from_secs(60));
+    }
+
+    #[test]
+    fn structured_logger_redacts_sensitive_values() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tunnel-supervisor.ndjson");
+        let logger = TunnelLogger::new();
+        logger.set_path(Some(path.clone()));
+        logger.event(
+            "probe",
+            serde_json::json!({
+                "generation": 3,
+                "attempt": 2,
+                "token": "raw-secret-token",
+                "proxy_url": "http://user:password@127.0.0.1:7897",
+                "error": "Authorization: Bearer secret-value"
+            }),
+        );
+
+        let output = fs::read_to_string(path).unwrap();
+        assert!(output.contains("\"event\":\"probe\""));
+        assert!(output.contains("<REDACTED>"));
+        assert!(!output.contains("secret-value"));
+        assert!(!output.contains("raw-secret-token"));
+        assert!(!output.contains("user:password"));
+    }
+
+    #[test]
+    fn readiness_watcher_keeps_running_after_threshold_and_recovers() {
+        let manager = sleeping_manager();
+        manager.start(launch()).unwrap();
+        let process = manager
+            .inner
+            .lock()
+            .unwrap()
+            .process
+            .as_ref()
+            .cloned()
+            .unwrap();
+        let (url, healthy) = toggle_admin_server();
+        fs::write(&process.health_url_file, url).unwrap();
+        let generation = manager.lock_recovery().generation;
+
+        healthy.store(false, Ordering::SeqCst);
+        spawn_readiness_watcher(manager.clone(), process, generation);
+        let failed = wait_for_state(&manager, TunnelState::Failed);
+        assert_eq!(failed.health.process, TunnelHealthState::Ready);
+        assert_eq!(failed.health.control_plane, TunnelHealthState::Unknown);
+
+        healthy.store(true, Ordering::SeqCst);
+        let recovered = wait_for_state(&manager, TunnelState::Ready);
+        assert_eq!(recovered.health.process, TunnelHealthState::Ready);
+        assert_eq!(recovered.health.local_mcp, TunnelHealthState::Ready);
+        assert_eq!(recovered.health.control_plane, TunnelHealthState::Ready);
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn process_exit_triggers_bounded_automatic_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = directory.path().join("started.marker");
+        let script = directory.path().join("restart-once.cmd");
+        fs::write(
+            &script,
+            format!(
+                "@echo off\r\nif exist \"{0}\" (\r\n  ping 127.0.0.1 -n 30 > NUL\r\n) else (\r\n  echo started>\"{0}\"\r\n  exit /b 7\r\n)\r\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        let manager = TunnelProcessManager::with_test_command(TestTunnelCommand {
+            executable_path: cmd_path(),
+            args: vec!["/C".into(), script.display().to_string()],
+        })
+        .with_auto_recovery();
+        let first = manager.start(launch()).unwrap();
+        let first_instance = first.instance.unwrap().instance_id;
+
+        wait_for_state(&manager, TunnelState::Failed);
+        let deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            let status = manager.status().unwrap();
+            if status.state == TunnelState::Ready
+                && status
+                    .instance
+                    .as_ref()
+                    .is_some_and(|instance| instance.instance_id != first_instance)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "automatic restart did not recover"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(manager.stop().unwrap().accepted);
     }
 }

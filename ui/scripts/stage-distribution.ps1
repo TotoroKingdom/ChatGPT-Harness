@@ -26,6 +26,31 @@ function Get-CargoPackageVersion([string]$ManifestPath) {
     return $match.Groups[1].Value
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hash = $sha.ComputeHash($stream)
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    return ([BitConverter]::ToString($hash)).Replace("-", "")
+}
+
+function Get-Sha256Text([string]$Text) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))
+    } finally {
+        $sha.Dispose()
+    }
+    return ([BitConverter]::ToString($hash)).Replace("-", "")
+}
+
 Push-Location $repositoryRoot
 try {
     # Build Runtime first. The Tauri UI build consumes the staged Runtime and
@@ -60,6 +85,16 @@ $protocolContent = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "pro
 $protocolMatch = [regex]::Match($protocolContent, 'PROTOCOL_VERSION\s*:\s*u32\s*=\s*(\d+)')
 if (-not $protocolMatch.Success) { throw "Could not read protocol version." }
 $protocolVersion = [int]$protocolMatch.Groups[1].Value
+$buildSha = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false rev-parse HEAD 2>$null)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildSha)) {
+    throw "Could not determine the build SHA."
+}
+$buildSha = $buildSha.Trim()
+$sourceStatus = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false status --porcelain 2>$null) -join "`n"
+$sourceDiff = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false diff --binary HEAD 2>$null) -join "`n"
+$sourceCachedDiff = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false diff --cached --binary 2>$null) -join "`n"
+$sourceDirty = -not [string]::IsNullOrWhiteSpace($sourceStatus)
+$sourceStateSha = Get-Sha256Text ($buildSha + "`n" + $sourceStatus + "`n" + $sourceDiff + "`n" + $sourceCachedDiff)
 
 $stagingPath = Join-Path (Split-Path -Parent $outputPath) (".distribution-staging-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingPath "runtime") | Out-Null
@@ -72,6 +107,13 @@ try {
         distribution_id = "chatgpt-harness"
         app_version = $appVersion
         runtime_version = $runtimeVersion
+        build_sha = $buildSha
+        source_dirty = $sourceDirty
+        source_state_sha256 = $sourceStateSha
+        ui_sha256 = ""
+        runtime_sha256 = (Get-Sha256 $runtimeExecutable)
+        tunnel_client_sha256 = (Get-Sha256 $tunnelClientSource)
+        cloudflared_sha256 = (Get-Sha256 $cloudflaredSource)
         protocol_version = $protocolVersion
         runtime = [ordered]@{ relative_path = "runtime/chatgpt-harness-runtime.exe" }
         tunnel = [ordered]@{

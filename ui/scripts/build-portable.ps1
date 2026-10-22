@@ -18,6 +18,21 @@ function Get-CargoPackageVersion([string]$ManifestPath) {
     return $match.Groups[1].Value
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hash = $sha.ComputeHash($stream)
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    return ([BitConverter]::ToString($hash)).Replace("-", "")
+}
+
 $appVersion = Get-CargoPackageVersion (Join-Path $repositoryRoot "ui\src-tauri\Cargo.toml")
 $portableName = "ChatGPT-Harness_${appVersion}_x64-portable"
 $destination = [IO.Path]::GetFullPath((Join-Path $portableRoot $portableName))
@@ -43,6 +58,11 @@ if (-not (Test-Path -LiteralPath $releaseExecutable -PathType Leaf)) {
     throw "Portable UI release executable was not produced."
 }
 Copy-Item -LiteralPath $releaseExecutable -Destination (Join-Path $stagingDirectory "chatgpt-harness-ui.exe") -Force
+$manifestPath = Join-Path $stagingDirectory "distribution.json"
+$manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+$manifest.ui_sha256 = Get-Sha256 (Join-Path $stagingDirectory "chatgpt-harness-ui.exe")
+$manifestJson = $manifest | ConvertTo-Json -Depth 8
+[IO.File]::WriteAllText($manifestPath, $manifestJson + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
 
 $temporary = Join-Path $portableRoot (".portable-staging-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
