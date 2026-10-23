@@ -101,7 +101,12 @@ Copy-Item -LiteralPath $releaseExecutable -Destination (Join-Path $stagingDirect
 $manifestPath = Join-Path $stagingDirectory "distribution.json"
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $manifest.ui_sha256 = Get-Sha256 (Join-Path $stagingDirectory "chatgpt-harness-ui.exe")
-$finalProvenance = Get-GitProvenance $repositoryRoot
+$finalProvenance = $null
+for ($attempt = 0; $attempt -lt 10; $attempt++) {
+    $finalProvenance = Get-GitProvenance $repositoryRoot
+    if (-not $finalProvenance.SourceDirty) { break }
+    Start-Sleep -Milliseconds 250
+}
 $manifest.build_sha = $finalProvenance.BuildSha
 $manifest.source_dirty = $finalProvenance.SourceDirty
 $manifest.source_state_sha256 = $finalProvenance.SourceStateSha
