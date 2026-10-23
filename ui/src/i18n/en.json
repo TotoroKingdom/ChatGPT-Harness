@@ -214,6 +214,18 @@
     }
   },
   "overview": {
+    "tunnelRecovery": "Tunnel recovery",
+    "cooldownUntil": "Cooldown ends",
+    "nextRecoveryAttempt": "Next attempt",
+    "recoveryPhase": {
+      "disarmed": "Stopped",
+      "idle": "Monitoring",
+      "backoff": "Waiting to retry",
+      "cooldown": "Cooling down",
+      "half_open": "Trial recovery",
+      "recovering": "Recovering",
+      "blocked": "Blocked - action required"
+    },
     "title": "Overview",
     "harnessStatus": "Harness status",
     "harnessIs": "Harness is {{status}}",

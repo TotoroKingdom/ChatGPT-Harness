@@ -3,7 +3,8 @@ use crate::{
     runtime::{RuntimeEventSink, RuntimeProcessPhase, RuntimeSupervisor, SupervisorError},
     tunnel::{
         resolve_tunnel, TunnelEventSink, TunnelHealth, TunnelLaunch, TunnelProcessError,
-        TunnelProcessManager, TunnelReadinessEvidence, TunnelState, TunnelStatus,
+        TunnelProcessManager, TunnelReadinessEvidence, TunnelRecoveryStatus, TunnelState,
+        TunnelStatus,
     },
 };
 use harness_control_protocol::{AppConfig, SecurityMode, StartEligibility, StartEligibilityStatus};
@@ -53,6 +54,7 @@ pub struct HarnessStatus {
     pub last_error: Option<HarnessErrorSummary>,
     pub tunnel_health: TunnelHealth,
     pub tunnel_readiness: Option<TunnelReadinessEvidence>,
+    pub tunnel_recovery: TunnelRecoveryStatus,
 }
 
 struct HarnessInner {
@@ -279,6 +281,7 @@ impl HarnessController {
                 last_error: None,
                 tunnel_health: TunnelHealth::starting(),
                 tunnel_readiness: None,
+                tunnel_recovery: TunnelRecoveryStatus::default(),
             };
             inner.runtime_generation = None;
             inner.tunnel_generation = None;
@@ -516,6 +519,7 @@ impl HarnessController {
         state: TunnelState,
         health: TunnelHealth,
         readiness: Option<&TunnelReadinessEvidence>,
+        recovery: &TunnelRecoveryStatus,
         error: Option<&TunnelProcessError>,
     ) {
         let mut changed = false;
@@ -527,6 +531,14 @@ impl HarnessController {
                 if let Some(instance_id) = instance_id {
                     inner.tunnel_instance = Some(instance_id.to_owned());
                 }
+            }
+            // A failed spawn has no process instance. Only the current generation's
+            // pending start may relinquish its provisional instance identity.
+            if instance_id.is_none()
+                && state == TunnelState::Failed
+                && inner.status.tunnel == HarnessComponentStatus::Starting
+            {
+                inner.tunnel_instance = None;
             }
             if inner.tunnel_instance.as_deref() != instance_id {
                 return;
@@ -560,6 +572,7 @@ impl HarnessController {
             }
             inner.status.tunnel_readiness = readiness.cloned();
             inner.status.tunnel_health = health;
+            inner.status.tunnel_recovery = recovery.clone();
             changed = harness_status_event_changed(&previous, &inner.status);
         }
         if changed {
@@ -588,9 +601,18 @@ impl TunnelEventSink for HarnessController {
         state: TunnelState,
         health: TunnelHealth,
         readiness: Option<&TunnelReadinessEvidence>,
+        recovery: &TunnelRecoveryStatus,
         error: Option<&TunnelProcessError>,
     ) {
-        self.on_tunnel_event(generation, instance_id, state, health, readiness, error);
+        self.on_tunnel_event(
+            generation,
+            instance_id,
+            state,
+            health,
+            readiness,
+            recovery,
+            error,
+        );
     }
 }
 
@@ -605,6 +627,7 @@ fn stopped_status() -> HarnessStatus {
         last_error: None,
         tunnel_health: TunnelHealth::stopped(),
         tunnel_readiness: None,
+        tunnel_recovery: TunnelRecoveryStatus::default(),
     }
 }
 
@@ -627,6 +650,7 @@ fn apply_tunnel_start_snapshot_if_pending(
     };
     inner.status.tunnel_readiness = tunnel_status.readiness.clone();
     inner.status.tunnel_health = tunnel_status.health;
+    inner.status.tunnel_recovery = tunnel_status.recovery.clone();
     inner.status.last_error = tunnel_status
         .last_error
         .as_ref()
@@ -645,6 +669,7 @@ fn harness_status_event_changed(previous: &HarnessStatus, next: &HarnessStatus) 
         || previous.mcp != next.mcp
         || previous.tunnel != next.tunnel
         || previous.tunnel_health != next.tunnel_health
+        || previous.tunnel_recovery != next.tunnel_recovery
         || previous.active_session_id != next.active_session_id
         || previous.config_revision != next.config_revision
         || !harness_error_event_equivalent(previous.last_error.as_ref(), next.last_error.as_ref())
@@ -842,6 +867,149 @@ mod tests {
     }
 
     #[test]
+    fn failed_recovery_spawn_without_instance_exposes_blocked_status() {
+        use crate::tunnel::TunnelRecoveryPhase;
+        let controller = controller();
+        controller.update(|inner| {
+            inner.tunnel_generation = Some(7);
+            inner.tunnel_instance = Some("old-instance".into());
+        });
+        controller.on_tunnel_event(
+            7,
+            Some("pending-instance"),
+            TunnelState::Starting,
+            TunnelHealth::starting(),
+            None,
+            &TunnelRecoveryStatus::default(),
+            None,
+        );
+        let blocked = TunnelRecoveryStatus {
+            phase: TunnelRecoveryPhase::Blocked,
+            reason: Some(TunnelProcessError {
+                code: "TUNNEL_EXECUTABLE_NOT_FOUND".into(),
+                message: "Executable unavailable".into(),
+            }),
+            next_attempt_at: None,
+            cooldown_until: None,
+        };
+        // A failed spawn must never leave Harness stuck at Starting.
+        controller.on_tunnel_event(
+            7,
+            None,
+            TunnelState::Failed,
+            TunnelHealth::failed(),
+            None,
+            &blocked,
+            blocked.reason.as_ref(),
+        );
+        assert_eq!(controller.status().tunnel, HarnessComponentStatus::Error);
+        assert_eq!(controller.status().tunnel_recovery, blocked);
+        controller.on_tunnel_event(
+            7,
+            Some("old-instance"),
+            TunnelState::Ready,
+            TunnelHealth::starting(),
+            None,
+            &TunnelRecoveryStatus::default(),
+            None,
+        );
+        assert_eq!(controller.status().tunnel_recovery, blocked);
+    }
+
+    #[test]
+    fn recovery_only_events_expose_cooldown_blocked_and_next_attempt() {
+        use crate::tunnel::TunnelRecoveryPhase;
+        let controller = controller();
+        controller.update(|inner| {
+            inner.tunnel_generation = Some(7);
+            inner.tunnel_instance = Some("exited-instance".into());
+            inner.status.lifecycle = HarnessLifecycle::Error;
+            inner.status.tunnel = HarnessComponentStatus::Error;
+            inner.status.tunnel_health = TunnelHealth::failed();
+        });
+        let emitted = Arc::new(AtomicUsize::new(0));
+        let count = emitted.clone();
+        controller.set_status_sink(Arc::new(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+        }));
+        let mut recovery = TunnelRecoveryStatus {
+            phase: TunnelRecoveryPhase::Cooldown,
+            reason: Some(TunnelProcessError {
+                code: "TUNNEL_RECOVERY_COOLDOWN".into(),
+                message: "Cooling down".into(),
+            }),
+            next_attempt_at: Some("2026-10-23T09:10:00Z".into()),
+            cooldown_until: Some("2026-10-23T09:10:00Z".into()),
+        };
+        controller.on_tunnel_event(
+            7,
+            Some("exited-instance"),
+            TunnelState::Failed,
+            TunnelHealth::failed(),
+            None,
+            &recovery,
+            None,
+        );
+        assert_eq!(controller.status().tunnel_recovery, recovery);
+        assert_eq!(emitted.load(Ordering::SeqCst), 1);
+        let json = serde_json::to_value(controller.status()).unwrap();
+        assert_eq!(json["tunnelRecovery"]["phase"], "cooldown");
+        assert_eq!(
+            json["tunnelRecovery"]["nextAttemptAt"],
+            "2026-10-23T09:10:00Z"
+        );
+        recovery.phase = TunnelRecoveryPhase::HalfOpen;
+        controller.on_tunnel_event(
+            7,
+            Some("exited-instance"),
+            TunnelState::Failed,
+            TunnelHealth::failed(),
+            None,
+            &recovery,
+            None,
+        );
+        assert_eq!(emitted.load(Ordering::SeqCst), 2);
+        recovery.phase = TunnelRecoveryPhase::Blocked;
+        recovery.reason = Some(TunnelProcessError {
+            code: "CONTROL_PLANE_UNAUTHORIZED".into(),
+            message: "401 Unauthorized".into(),
+        });
+        recovery.next_attempt_at = None;
+        recovery.cooldown_until = None;
+        controller.on_tunnel_event(
+            7,
+            Some("exited-instance"),
+            TunnelState::Failed,
+            TunnelHealth::failed(),
+            None,
+            &recovery,
+            None,
+        );
+        assert_eq!(controller.status().tunnel_recovery, recovery);
+        assert_eq!(emitted.load(Ordering::SeqCst), 3);
+        controller.on_tunnel_event(
+            6,
+            Some("exited-instance"),
+            TunnelState::Failed,
+            TunnelHealth::failed(),
+            None,
+            &TunnelRecoveryStatus::default(),
+            None,
+        );
+        controller.on_tunnel_event(
+            7,
+            Some("stale-instance"),
+            TunnelState::Failed,
+            TunnelHealth::failed(),
+            None,
+            &TunnelRecoveryStatus::default(),
+            None,
+        );
+        assert_eq!(controller.status().tunnel_recovery, recovery);
+        assert_eq!(emitted.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
     fn stale_tunnel_instance_cannot_change_a_new_session() {
         let controller = controller();
         controller.update(|inner| {
@@ -857,6 +1025,7 @@ mod tests {
             TunnelState::Failed,
             TunnelHealth::starting(),
             None,
+            &TunnelRecoveryStatus::default(),
             None,
         );
 
@@ -882,6 +1051,7 @@ mod tests {
             TunnelState::Starting,
             TunnelHealth::starting(),
             None,
+            &TunnelRecoveryStatus::default(),
             None,
         );
         assert_eq!(controller.status().tunnel, HarnessComponentStatus::Starting);
@@ -907,6 +1077,7 @@ mod tests {
             TunnelState::Ready,
             ready_health,
             None,
+            &TunnelRecoveryStatus::default(),
             None,
         );
         assert_eq!(controller.status().lifecycle, HarnessLifecycle::Ready);
@@ -917,6 +1088,7 @@ mod tests {
             TunnelState::Failed,
             TunnelHealth::failed(),
             None,
+            &TunnelRecoveryStatus::default(),
             None,
         );
         assert_eq!(controller.status().lifecycle, HarnessLifecycle::Ready);
@@ -939,6 +1111,7 @@ mod tests {
             TunnelState::Ready,
             TunnelHealth::starting(),
             None,
+            &TunnelRecoveryStatus::default(),
             None,
         );
 
@@ -977,6 +1150,7 @@ mod tests {
             TunnelState::Degraded,
             degraded_health,
             Some(&stale),
+            &TunnelRecoveryStatus::default(),
             None,
         );
         assert_eq!(controller.status().lifecycle, HarnessLifecycle::Degraded);
@@ -1002,6 +1176,7 @@ mod tests {
             TunnelState::Ready,
             ready_health,
             Some(&fresh),
+            &TunnelRecoveryStatus::default(),
             None,
         );
 
@@ -1044,6 +1219,7 @@ mod tests {
             TunnelState::Ready,
             health,
             Some(&aged),
+            &TunnelRecoveryStatus::default(),
             None,
         );
 
@@ -1108,6 +1284,7 @@ mod tests {
             TunnelState::Degraded,
             health,
             Some(&aged),
+            &TunnelRecoveryStatus::default(),
             Some(&error),
         );
 
@@ -1139,12 +1316,14 @@ mod tests {
                     control_plane: TunnelHealthState::Ready,
                 },
                 tunnel_readiness: Some(readiness(true, 1_800_000_010.0, 1.0, None)),
+                tunnel_recovery: TunnelRecoveryStatus::default(),
             },
             runtime_generation: None,
             tunnel_generation: Some(1),
             tunnel_instance: Some("active-instance".into()),
         };
         let stale_snapshot = TunnelStatus {
+            recovery: TunnelRecoveryStatus::default(),
             state: TunnelState::Degraded,
             instance: None,
             generation: 1,

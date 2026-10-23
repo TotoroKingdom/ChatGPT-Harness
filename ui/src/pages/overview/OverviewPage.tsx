@@ -26,6 +26,7 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
   const canStart = observed && (stopped || data.overall === "error") && Boolean(data.eligibility?.canStart);
   const canStop = observed && !stopped && (Boolean(data.harness?.activeSessionId) || Object.values(data.components).some((state) => state !== "stopped"));
   const tunnelReadiness = data.harness?.tunnelReadiness;
+  const recovery = data.harness?.tunnelRecovery;
   const fix = () => onNavigate?.("settings", { settingsSection: (data.config && !data.config.workspace.rootPath) || data.harness?.lastError?.code === "WORKSPACE_INVALID" ? "workspace" : "connection" });
   const run = async (fn: () => Promise<{ ok: boolean; error?: { message: string; code?: string } }>) => {
     if (inFlight.current) return;
@@ -58,6 +59,12 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
       : tunnelReadiness && !tunnelReadiness.controlPlaneConnected ? <div className="notice notice-warning" role="alert">{t(errorCodeKey("CONTROL_PLANE_UNAVAILABLE"))}</div>
       : (stopped || failed) && data.eligibility && !data.eligibility.canStart ? <div className="notice notice-warning" role="alert"><strong>{t(startEligibilityKey(data.eligibility.status))}</strong><span>{t(`overview.eligibility.${data.eligibility.status}`)}</span></div>
       : data.restartRequired ? <InlineFeedback>{t("overview.restartRequired")} · {t("overview.configChanged")}</InlineFeedback> : null}
+    {recovery && !["disarmed", "idle"].includes(recovery.phase) && <div className="notice notice-warning" role="status">
+      <strong>{t("overview.tunnelRecovery")}: {t(`overview.recoveryPhase.${recovery.phase}`)}</strong>
+      {recovery.reason && <span>{recovery.reason.code}: {recovery.reason.message}</span>}
+      {recovery.cooldownUntil && <span>{t("overview.cooldownUntil")}: <time dateTime={recovery.cooldownUntil}>{recovery.cooldownUntil}</time></span>}
+      {recovery.nextAttemptAt && <span>{t("overview.nextRecoveryAttempt")}: <time dateTime={recovery.nextAttemptAt}>{recovery.nextAttemptAt}</time></span>}
+    </div>}
     <Section title={t("overview.services")}>
       {(["runtime", "tunnel", "mcp"] as const).map((component) => <Row key={component} title={component === "mcp" ? "MCP" : component === "runtime" ? "Runtime" : "Tunnel"} selected={selected === component} onInspect={() => setSelected(component)} controls={<StatusBadge>{observed ? t(componentStatusKey(data.components[component])) : t("m8.unknown")}</StatusBadge>} />)}
     </Section>
@@ -68,6 +75,7 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
     {selected && <Inspector title={selected === "mcp" ? "MCP" : selected === "runtime" ? "Runtime" : "Tunnel"} onClose={() => setSelected(null)}>
       <StatusBadge>{observed ? t(componentStatusKey(data.components[selected])) : t("m8.unknown")}</StatusBadge><p>{t("overview.authority")}</p>
       <Disclosure title={t("m8.advanced")}><ConfigRevisionStatus />
+        {selected === "tunnel" && recovery && <pre>{JSON.stringify({ recovery }, null, 2)}</pre>}
         {selected === "tunnel" && tunnelReadiness && <pre>{JSON.stringify({ health: data.harness?.tunnelHealth, controlPlaneConnected: tunnelReadiness.controlPlaneConnected, mcpTargetReachable: tunnelReadiness.mcpTargetReachable, healthCheckPassed: tunnelReadiness.healthCheckPassed, lastSuccessfulPollTimestamp: tunnelReadiness.lastSuccessfulPollTimestamp, lastSuccessfulPollAgeSeconds: tunnelReadiness.lastSuccessfulPollAgeSeconds, controlPlaneError: tunnelReadiness.controlPlaneError, controlPlaneRoute: tunnelReadiness.controlPlaneRoute }, null, 2)}</pre>}
         {data.harness?.lastError && <code>{data.harness.lastError.code}</code>}
       </Disclosure>

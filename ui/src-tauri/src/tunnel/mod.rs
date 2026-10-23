@@ -31,7 +31,6 @@ const RECOVERY_MAX_DELAY: Duration = Duration::from_secs(60);
 const RECOVERY_WINDOW: Duration = Duration::from_secs(10 * 60);
 const RECOVERY_COOLDOWN: Duration = Duration::from_secs(10 * 60);
 const RECOVERY_MAX_ATTEMPTS: usize = 6;
-const RECOVERY_MAX_TOTAL_ATTEMPTS: u32 = 12;
 const LOG_ROLL_BYTES: u64 = 5 * 1024 * 1024;
 const LOG_ROLL_FILES: usize = 3;
 const CONTROL_PLANE_POLL_METRIC: &str = "commands_poll_last_successful_timestamp_seconds";
@@ -69,6 +68,38 @@ pub struct TunnelExit {
 pub struct TunnelProcessError {
     pub code: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelRecoveryPhase {
+    Disarmed,
+    Idle,
+    Backoff,
+    Cooldown,
+    HalfOpen,
+    Recovering,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelRecoveryStatus {
+    pub phase: TunnelRecoveryPhase,
+    pub reason: Option<TunnelProcessError>,
+    pub next_attempt_at: Option<String>,
+    pub cooldown_until: Option<String>,
+}
+
+impl Default for TunnelRecoveryStatus {
+    fn default() -> Self {
+        Self {
+            phase: TunnelRecoveryPhase::Disarmed,
+            reason: None,
+            next_attempt_at: None,
+            cooldown_until: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -191,6 +222,7 @@ pub struct TunnelStatus {
     pub readiness: Option<TunnelReadinessEvidence>,
     pub last_exit: Option<TunnelExit>,
     pub last_error: Option<TunnelProcessError>,
+    pub recovery: TunnelRecoveryStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -341,9 +373,17 @@ struct RecoveryState {
     launch: Option<TunnelLaunch>,
     recovering: bool,
     token: u64,
-    total_attempts: u32,
     attempts: VecDeque<Instant>,
     blocked: Option<TunnelProcessError>,
+    last_error: Option<TunnelProcessError>,
+    next_attempt_at: Option<Instant>,
+    next_attempt_at_wall: Option<String>,
+    cooldown_until: Option<Instant>,
+    cooldown_until_wall: Option<String>,
+    half_open: bool,
+    active_instance_id: Option<String>,
+    active_instance_token: Option<u64>,
+    stop_in_progress: bool,
 }
 
 impl RecoveryState {
@@ -354,10 +394,92 @@ impl RecoveryState {
             launch: None,
             recovering: false,
             token: 0,
-            total_attempts: 0,
             attempts: VecDeque::new(),
             blocked: None,
+            last_error: None,
+            next_attempt_at: None,
+            next_attempt_at_wall: None,
+            cooldown_until: None,
+            cooldown_until_wall: None,
+            half_open: false,
+            active_instance_id: None,
+            active_instance_token: None,
+            stop_in_progress: false,
         }
+    }
+
+    fn status(&self, now: Instant) -> TunnelRecoveryStatus {
+        let phase = if !self.desired_running {
+            TunnelRecoveryPhase::Disarmed
+        } else if self.blocked.is_some() {
+            TunnelRecoveryPhase::Blocked
+        } else if self.cooldown_until.is_some_and(|until| until > now) {
+            TunnelRecoveryPhase::Cooldown
+        } else if self.cooldown_until.is_some() || self.half_open {
+            TunnelRecoveryPhase::HalfOpen
+        } else if self.next_attempt_at.is_some() {
+            TunnelRecoveryPhase::Backoff
+        } else if self.recovering {
+            TunnelRecoveryPhase::Recovering
+        } else {
+            TunnelRecoveryPhase::Idle
+        };
+        let reason = self
+            .blocked
+            .clone()
+            .or_else(|| self.last_error.clone())
+            .map(|mut error| {
+                error.message = redact_sensitive_text(&error.message);
+                error
+            });
+        let next_attempt_at = match phase {
+            TunnelRecoveryPhase::Backoff | TunnelRecoveryPhase::Cooldown => {
+                self.next_attempt_at_wall.clone()
+            }
+            _ => None,
+        };
+        let cooldown_until = if phase == TunnelRecoveryPhase::Cooldown {
+            self.cooldown_until_wall.clone()
+        } else {
+            None
+        };
+        TunnelRecoveryStatus {
+            phase,
+            reason,
+            next_attempt_at,
+            cooldown_until,
+        }
+    }
+
+    fn reset_backoff(&mut self) {
+        self.last_error = None;
+        self.next_attempt_at = None;
+        self.next_attempt_at_wall = None;
+        self.cooldown_until = None;
+        self.cooldown_until_wall = None;
+        self.half_open = false;
+    }
+
+    fn prepare_attempt(&mut self, now: Instant, generation: u64) -> (Duration, usize, u64) {
+        let mut attempt = self.attempts.len() + 1;
+        let delay = if self.half_open || self.attempts.len() >= RECOVERY_MAX_ATTEMPTS {
+            self.attempts.clear();
+            self.half_open = false;
+            self.cooldown_until = Some(now + RECOVERY_COOLDOWN);
+            attempt = RECOVERY_MAX_ATTEMPTS + 1;
+            RECOVERY_COOLDOWN
+        } else {
+            self.attempts.push_back(now);
+            self.half_open = false;
+            recovery_delay(attempt, recovery_jitter_seed(generation, attempt))
+        };
+        let deadline = timestamp_after(delay);
+        self.next_attempt_at = Some(now + delay);
+        self.next_attempt_at_wall = Some(deadline.clone());
+        self.cooldown_until_wall = self.cooldown_until.map(|_| deadline);
+        self.recovering = true;
+        self.token = self.token.wrapping_add(1);
+        (delay, attempt, self.token)
     }
 }
 
@@ -386,6 +508,7 @@ pub(crate) trait TunnelEventSink: Send + Sync {
         state: TunnelState,
         health: TunnelHealth,
         readiness: Option<&TunnelReadinessEvidence>,
+        recovery: &TunnelRecoveryStatus,
         error: Option<&TunnelProcessError>,
     );
 }
@@ -446,6 +569,7 @@ impl TunnelProcessManager {
                     readiness: None,
                     last_exit: None,
                     last_error: None,
+                    recovery: TunnelRecoveryStatus::default(),
                 },
                 observer: None,
             })),
@@ -473,7 +597,7 @@ impl TunnelProcessManager {
     }
 
     fn start_internal(&self, launch: TunnelLaunch) -> Result<TunnelStatus, TunnelProcessError> {
-        let generation = self.begin_manual_start();
+        let (generation, recovery_token) = self.begin_manual_start();
         self.logger.set_path(launch.log_file.clone());
         self.logger.event(
             "manual_start_requested",
@@ -482,9 +606,19 @@ impl TunnelProcessManager {
                 "tunnel_version": crate::runtime::manifest::TUNNEL_CLIENT_VERSION,
             }),
         );
-        match self.start_instance(launch.clone(), generation) {
-            Ok(status) => {
+        match self.start_instance(launch.clone(), generation, recovery_token) {
+            Ok(mut status) => {
                 self.arm_recovery(generation, launch);
+                status.recovery = self.recovery_status();
+                let current = self.status()?;
+                if current.state == TunnelState::Failed {
+                    self.schedule_recovery(
+                        generation,
+                        RecoveryTrigger::ProcessExit,
+                        current.last_error.as_ref(),
+                    );
+                    status = self.status()?;
+                }
                 self.logger.event(
                     "manual_start_succeeded",
                     serde_json::json!({
@@ -515,6 +649,7 @@ impl TunnelProcessManager {
         &self,
         launch: TunnelLaunch,
         recovery_generation: u64,
+        recovery_token: u64,
     ) -> Result<TunnelStatus, TunnelProcessError> {
         #[cfg(test)]
         let test_mode = self.test_command.is_some();
@@ -560,6 +695,7 @@ impl TunnelProcessManager {
                 readiness: None,
                 last_exit: None,
                 last_error: None,
+                recovery: TunnelRecoveryStatus::default(),
             };
             uuid::Uuid::new_v4().to_string()
         };
@@ -651,7 +787,19 @@ impl TunnelProcessManager {
             inner.process = Some(process.clone());
             inner.status.instance = Some(instance.clone());
         }
-        spawn_exit_watcher(self.clone(), process.clone(), recovery_generation);
+        {
+            let mut recovery = self.lock_recovery();
+            if recovery.generation == recovery_generation {
+                recovery.active_instance_id = Some(instance.instance_id.clone());
+                recovery.active_instance_token = Some(recovery_token);
+            }
+        }
+        spawn_exit_watcher(
+            self.clone(),
+            process.clone(),
+            recovery_generation,
+            recovery_token,
+        );
 
         let readiness = if test_mode {
             Ok(TunnelReadinessEvidence {
@@ -701,21 +849,25 @@ impl TunnelProcessManager {
             status.last_error.as_ref(),
         );
         if !test_mode {
-            spawn_readiness_watcher(self.clone(), process, recovery_generation);
+            spawn_readiness_watcher(self.clone(), process, recovery_generation, recovery_token);
         }
         Ok(status)
     }
 
-    fn begin_manual_start(&self) -> u64 {
+    fn begin_manual_start(&self) -> (u64, u64) {
         let mut recovery = self.lock_recovery();
         recovery.generation = recovery.generation.wrapping_add(1);
         recovery.desired_running = false;
         recovery.launch = None;
         recovery.recovering = false;
-        recovery.total_attempts = 0;
-        recovery.attempts.clear();
         recovery.blocked = None;
-        recovery.generation
+        recovery.reset_backoff();
+        recovery.attempts.clear();
+        recovery.active_instance_id = None;
+        recovery.active_instance_token = None;
+        recovery.stop_in_progress = false;
+        recovery.token = recovery.token.wrapping_add(1);
+        (recovery.generation, recovery.token)
     }
 
     fn arm_recovery(&self, generation: u64, launch: TunnelLaunch) {
@@ -724,6 +876,11 @@ impl TunnelProcessManager {
             recovery.desired_running = true;
             recovery.launch = Some(launch);
             recovery.blocked = None;
+            recovery.recovering = false;
+            recovery.reset_backoff();
+            recovery.attempts.clear();
+            drop(recovery);
+            self.notify_recovery();
         }
     }
 
@@ -733,9 +890,13 @@ impl TunnelProcessManager {
             recovery.desired_running = false;
             recovery.launch = None;
             recovery.recovering = false;
-            recovery.total_attempts = 0;
-            recovery.attempts.clear();
             recovery.blocked = None;
+            recovery.reset_backoff();
+            recovery.attempts.clear();
+            recovery.active_instance_id = None;
+            recovery.active_instance_token = None;
+            recovery.stop_in_progress = false;
+            recovery.token = recovery.token.wrapping_add(1);
             recovery.generation = recovery.generation.wrapping_add(1);
         }
     }
@@ -745,23 +906,66 @@ impl TunnelProcessManager {
         recovery.desired_running = false;
         recovery.launch = None;
         recovery.recovering = false;
-        recovery.total_attempts = 0;
-        recovery.attempts.clear();
         recovery.blocked = None;
+        recovery.reset_backoff();
+        recovery.attempts.clear();
+        recovery.active_instance_id = None;
+        recovery.active_instance_token = None;
+        recovery.stop_in_progress = false;
+        recovery.token = recovery.token.wrapping_add(1);
         recovery.generation = recovery.generation.wrapping_add(1);
         recovery.generation
     }
 
-    fn note_recovered(&self, generation: u64, state: TunnelState) {
+    fn note_recovered(&self, generation: u64, token: u64, instance_id: &str, state: TunnelState) {
+        let current_error = match self.inner.lock() {
+            Ok(inner)
+                if inner
+                    .process
+                    .as_ref()
+                    .is_some_and(|process| process.instance.instance_id == instance_id) =>
+            {
+                inner.status.last_error.clone()
+            }
+            _ => return,
+        };
+        {
+            let recovery = self.lock_recovery();
+            let token_is_valid = recovery.active_instance_token == Some(token)
+                && (recovery.token == token || recovery.next_attempt_at.is_some());
+            if recovery.generation != generation
+                || recovery.active_instance_id.as_deref() != Some(instance_id)
+                || !token_is_valid
+                || !recovery.desired_running
+                || recovery.stop_in_progress
+            {
+                return;
+            }
+        }
         let mut recovery = self.lock_recovery();
-        if recovery.generation != generation {
+        let token_is_valid = recovery.active_instance_token == Some(token)
+            && (recovery.token == token || recovery.next_attempt_at.is_some());
+        if recovery.generation != generation
+            || recovery.active_instance_id.as_deref() != Some(instance_id)
+            || !token_is_valid
+            || !recovery.desired_running
+            || recovery.stop_in_progress
+        {
             return;
         }
         recovery.recovering = false;
+        recovery.stop_in_progress = false;
+        recovery.next_attempt_at = None;
+        recovery.next_attempt_at_wall = None;
         if state == TunnelState::Ready {
-            recovery.token = recovery.token.wrapping_add(1);
             recovery.blocked = None;
+            recovery.reset_backoff();
+            recovery.token = recovery.token.wrapping_add(1);
+        } else {
+            recovery.last_error = current_error;
         }
+        drop(recovery);
+        self.notify_recovery();
     }
 
     fn schedule_recovery(
@@ -776,69 +980,81 @@ impl TunnelProcessManager {
         }
 
         let now = Instant::now();
-        let (delay, attempt, launch, token) = {
+        let (schedule, blocked) = {
             let mut recovery = self.lock_recovery();
             if !recovery.desired_running || recovery.generation != generation || recovery.recovering
             {
                 return;
             }
-            if let Some(error) = error {
-                if recovery_is_non_retryable(error) {
-                    recovery.blocked = Some(error.clone());
-                    self.logger.event(
-                        "recovery_blocked",
-                        serde_json::json!({
-                            "generation": generation,
-                            "trigger": trigger.as_str(),
-                            "error_code": error.code,
-                            "error": error.message,
-                        }),
-                    );
-                    return;
-                }
-            }
-            if recovery.total_attempts >= RECOVERY_MAX_TOTAL_ATTEMPTS {
-                let error = TunnelProcessError::recovery_exhausted();
-                recovery.blocked = Some(error.clone());
-                self.logger.event(
-                    "recovery_exhausted",
-                    serde_json::json!({
-                        "generation": generation,
-                        "trigger": trigger.as_str(),
-                        "attempts": recovery.total_attempts,
-                        "error_code": error.code,
-                    }),
-                );
-                return;
-            }
-            let Some(launch) = recovery.launch.clone() else {
-                return;
-            };
-            recovery.total_attempts = recovery.total_attempts.saturating_add(1);
             recovery
                 .attempts
                 .retain(|attempt| now.duration_since(*attempt) <= RECOVERY_WINDOW);
-            let mut attempt = recovery.attempts.len() + 1;
-            let delay = if recovery.attempts.len() >= RECOVERY_MAX_ATTEMPTS {
-                recovery.attempts.clear();
-                attempt = 1;
-                self.logger.event(
-                    "recovery_budget_cooldown",
-                    serde_json::json!({
-                        "generation": generation,
-                        "trigger": trigger.as_str(),
-                        "cooldown_ms": RECOVERY_COOLDOWN.as_millis(),
-                    }),
-                );
-                RECOVERY_COOLDOWN
+            if let Some(cooldown_until) = recovery.cooldown_until {
+                if cooldown_until > now {
+                    return;
+                }
+                recovery.cooldown_until = None;
+                recovery.cooldown_until_wall = None;
+                recovery.next_attempt_at = None;
+                recovery.next_attempt_at_wall = None;
+                recovery.half_open = true;
+            }
+            if let Some(error) = error {
+                if recovery_is_non_retryable(error) {
+                    recovery.last_error = Some(error.clone());
+                    recovery.blocked = Some(error.clone());
+                    recovery.recovering = false;
+                    recovery.next_attempt_at = None;
+                    recovery.next_attempt_at_wall = None;
+                    recovery.cooldown_until = None;
+                    recovery.cooldown_until_wall = None;
+                    recovery.half_open = false;
+                    (None, Some(error.clone()))
+                } else {
+                    let Some(launch) = recovery.launch.clone() else {
+                        return;
+                    };
+                    let (delay, attempt, token) = recovery.prepare_attempt(now, generation);
+                    recovery.last_error = Some(error.clone());
+                    (Some((delay, attempt, launch, token)), None)
+                }
             } else {
-                recovery.attempts.push_back(now);
-                recovery_delay(attempt, recovery_jitter_seed(generation, attempt))
-            };
-            recovery.recovering = true;
-            recovery.token = recovery.token.wrapping_add(1);
-            (delay, attempt, launch, recovery.token)
+                let Some(launch) = recovery.launch.clone() else {
+                    return;
+                };
+                let (delay, attempt, token) = recovery.prepare_attempt(now, generation);
+                recovery.last_error = error.map(Clone::clone);
+                (Some((delay, attempt, launch, token)), None)
+            }
         };
+
+        if let Some(error) = blocked {
+            self.logger.event(
+                "recovery_blocked",
+                serde_json::json!({
+                    "generation": generation,
+                    "trigger": trigger.as_str(),
+                    "error_code": error.code,
+                    "error": error.message,
+                }),
+            );
+            self.notify_recovery();
+            return;
+        }
+        let Some((delay, attempt, launch, token)) = schedule else {
+            return;
+        };
+        if delay == RECOVERY_COOLDOWN {
+            self.logger.event(
+                "recovery_budget_cooldown",
+                serde_json::json!({
+                    "generation": generation,
+                    "trigger": trigger.as_str(),
+                    "cooldown_ms": RECOVERY_COOLDOWN.as_millis(),
+                }),
+            );
+        }
+        self.notify_recovery();
 
         self.logger.event(
             "recovery_scheduled",
@@ -867,9 +1083,31 @@ impl TunnelProcessManager {
     ) {
         let _operation = self.lock_operation();
         if !self.recovery_is_current(generation, token) {
-            self.lock_recovery().recovering = false;
             return;
         }
+
+        {
+            let mut recovery = self.lock_recovery();
+            if recovery.generation != generation
+                || recovery.token != token
+                || !recovery.desired_running
+                || recovery.blocked.is_some()
+            {
+                return;
+            }
+            if let Some(cooldown_until) = recovery.cooldown_until {
+                if cooldown_until > Instant::now() {
+                    return;
+                }
+                recovery.cooldown_until = None;
+                recovery.cooldown_until_wall = None;
+                recovery.half_open = true;
+            }
+            recovery.stop_in_progress = true;
+            recovery.next_attempt_at = None;
+            recovery.next_attempt_at_wall = None;
+        }
+        self.notify_recovery();
 
         if let Some(process) = self
             .inner
@@ -886,6 +1124,7 @@ impl TunnelProcessManager {
                     "pid": process.instance.pid,
                 }),
             );
+            let recovery = self.recovery_status();
             if let Ok(mut inner) = self.lock_inner() {
                 inner.status.state = TunnelState::Stopping;
                 inner.status.health = TunnelHealth::stopping();
@@ -893,11 +1132,14 @@ impl TunnelProcessManager {
                     &inner,
                     Some(&process.instance.instance_id),
                     TunnelState::Stopping,
+                    &recovery,
                     None,
                 );
             }
             if let Err(error) = self.stop_process(&process) {
-                self.lock_recovery().recovering = false;
+                if !self.finish_recovery_attempt(generation, token, Some(error.clone())) {
+                    return;
+                }
                 self.logger.event(
                     "recovery_stop_failed",
                     serde_json::json!({
@@ -914,8 +1156,18 @@ impl TunnelProcessManager {
         }
 
         if !self.recovery_is_current(generation, token) {
-            self.lock_recovery().recovering = false;
             return;
+        }
+        {
+            let mut recovery = self.lock_recovery();
+            if recovery.generation != generation
+                || recovery.token != token
+                || !recovery.desired_running
+                || recovery.blocked.is_some()
+            {
+                return;
+            }
+            recovery.stop_in_progress = false;
         }
 
         self.logger.event(
@@ -925,9 +1177,15 @@ impl TunnelProcessManager {
                 "trigger": trigger.as_str(),
             }),
         );
-        match self.start_instance(launch, generation) {
+        match self.start_instance(launch, generation, token) {
             Ok(status) => {
-                self.note_recovered(generation, status.state);
+                let instance_id = status
+                    .instance
+                    .as_ref()
+                    .map(|instance| instance.instance_id.as_str());
+                if let Some(instance_id) = instance_id {
+                    self.note_recovered(generation, token, instance_id, status.state);
+                }
                 self.logger.event(
                     "recovery_succeeded",
                     serde_json::json!({
@@ -938,9 +1196,18 @@ impl TunnelProcessManager {
                         "state": status.state,
                     }),
                 );
+                if status.state != TunnelState::Ready {
+                    self.schedule_recovery(
+                        generation,
+                        RecoveryTrigger::HealthProbe,
+                        status.last_error.as_ref(),
+                    );
+                }
             }
             Err(error) => {
-                self.lock_recovery().recovering = false;
+                if !self.finish_recovery_attempt(generation, token, Some(error.clone())) {
+                    return;
+                }
                 self.logger.event(
                     "recovery_failed",
                     serde_json::json!({
@@ -1002,6 +1269,7 @@ impl TunnelProcessManager {
         &self,
         expected_instance_id: &str,
     ) -> Result<TunnelStopResult, TunnelProcessError> {
+        let recovery = self.recovery_status();
         let process = {
             let mut inner = self.lock_inner()?;
             match inner.status.state {
@@ -1034,6 +1302,7 @@ impl TunnelProcessManager {
                 &inner,
                 Some(expected_instance_id),
                 TunnelState::Stopping,
+                &recovery,
                 None,
             );
             process
@@ -1091,7 +1360,9 @@ impl TunnelProcessManager {
     }
 
     pub fn status(&self) -> Result<TunnelStatus, TunnelProcessError> {
-        Ok(self.lock_inner()?.status.clone())
+        let mut status = self.lock_inner()?.status.clone();
+        status.recovery = self.recovery_status();
+        Ok(status)
     }
 
     fn resolve_executable(&self, launch: &TunnelLaunch) -> Result<PathBuf, TunnelProcessError> {
@@ -1188,6 +1459,7 @@ impl TunnelProcessManager {
     }
 
     fn set_failed(&self, instance_id: Option<&str>, error: TunnelProcessError) {
+        let recovery = self.recovery_status();
         if let Ok(mut inner) = self.lock_inner() {
             if instance_id.is_none()
                 || inner.process.as_ref().is_some_and(|process| {
@@ -1198,7 +1470,13 @@ impl TunnelProcessManager {
                 inner.status.health = TunnelHealth::failed();
                 inner.status.last_error = Some(error.clone());
                 inner.status.readiness = None;
-                self.notify_locked(&inner, instance_id, TunnelState::Failed, Some(&error));
+                self.notify_locked(
+                    &inner,
+                    instance_id,
+                    TunnelState::Failed,
+                    &recovery,
+                    Some(&error),
+                );
             }
         }
     }
@@ -1209,8 +1487,9 @@ impl TunnelProcessManager {
         state: TunnelState,
         error: Option<&TunnelProcessError>,
     ) {
+        let recovery = self.recovery_status();
         if let Ok(inner) = self.lock_inner() {
-            self.notify_locked(&inner, instance_id, state, error);
+            self.notify_locked(&inner, instance_id, state, &recovery, error);
         }
     }
 
@@ -1219,9 +1498,34 @@ impl TunnelProcessManager {
         inner: &TunnelInner,
         instance_id: Option<&str>,
         state: TunnelState,
+        recovery: &TunnelRecoveryStatus,
         error: Option<&TunnelProcessError>,
     ) {
-        notify_inner(inner, instance_id, state, error);
+        notify_inner(inner, instance_id, state, recovery, error);
+    }
+
+    fn notify_recovery(&self) {
+        let recovery = self.recovery_status();
+        if let Ok(inner) = self.lock_inner() {
+            let instance_id = inner
+                .process
+                .as_ref()
+                .map(|process| process.instance.instance_id.as_str())
+                .or_else(|| {
+                    inner
+                        .status
+                        .instance
+                        .as_ref()
+                        .map(|instance| instance.instance_id.as_str())
+                });
+            notify_inner(
+                &inner,
+                instance_id,
+                inner.status.state,
+                &recovery,
+                inner.status.last_error.as_ref(),
+            );
+        }
     }
 
     fn lock_inner(&self) -> Result<MutexGuard<'_, TunnelInner>, TunnelProcessError> {
@@ -1234,6 +1538,63 @@ impl TunnelProcessManager {
         self.recovery
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn recovery_status(&self) -> TunnelRecoveryStatus {
+        self.lock_recovery().status(Instant::now())
+    }
+
+    fn finish_recovery_attempt(
+        &self,
+        generation: u64,
+        token: u64,
+        error: Option<TunnelProcessError>,
+    ) -> bool {
+        let mut recovery = self.lock_recovery();
+        if recovery.generation != generation
+            || recovery.token != token
+            || !recovery.desired_running
+            || recovery.blocked.is_some()
+        {
+            return false;
+        }
+        recovery.recovering = false;
+        recovery.stop_in_progress = false;
+        recovery.next_attempt_at = None;
+        recovery.next_attempt_at_wall = None;
+        if let Some(error) = error {
+            recovery.last_error = Some(error);
+        }
+        drop(recovery);
+        self.notify_recovery();
+        true
+    }
+
+    fn finish_process_exit(
+        &self,
+        generation: u64,
+        token: u64,
+        instance_id: &str,
+        error: Option<TunnelProcessError>,
+    ) -> bool {
+        let mut recovery = self.lock_recovery();
+        if recovery.generation != generation
+            || recovery.active_instance_id.as_deref() != Some(instance_id)
+            || recovery.active_instance_token != Some(token)
+            || !recovery.desired_running
+        {
+            return false;
+        }
+        recovery.recovering = false;
+        recovery.next_attempt_at = None;
+        recovery.next_attempt_at_wall = None;
+        if let Some(error) = error {
+            recovery.last_error = Some(error);
+        }
+        recovery.token = recovery.token.wrapping_add(1);
+        drop(recovery);
+        self.notify_recovery();
+        true
     }
 
     fn lock_operation(&self) -> MutexGuard<'_, ()> {
@@ -1255,6 +1616,7 @@ impl TunnelProcessManager {
                     readiness: None,
                     last_exit: None,
                     last_error: None,
+                    recovery: TunnelRecoveryStatus::default(),
                 },
                 observer: None,
             })),
@@ -1263,7 +1625,9 @@ impl TunnelProcessManager {
             logger: TunnelLogger::new(),
             test_command: Some(command),
             auto_recovery_enabled: false,
-            stop_timeout: Duration::from_millis(50),
+            // Allow the exit watcher one polling interval plus process-tree
+            // teardown time when recovery tests run in parallel on Windows.
+            stop_timeout: Duration::from_millis(250),
         }
     }
 
@@ -1418,6 +1782,7 @@ fn spawn_readiness_watcher(
     manager: TunnelProcessManager,
     process: ManagedTunnelProcess,
     recovery_generation: u64,
+    recovery_token: u64,
 ) {
     thread::spawn(move || {
         let mut failures = 0;
@@ -1462,10 +1827,16 @@ fn spawn_readiness_watcher(
                 } else {
                     local_mcp_failures += 1;
                 }
+                let recovery = manager.recovery_status();
+                let mut current_after_probe = false;
                 if let Ok(mut inner) = manager.inner.lock() {
-                    if inner.process.as_ref().is_some_and(|active| {
+                    if !matches!(
+                        inner.status.state,
+                        TunnelState::Stopping | TunnelState::Stopped
+                    ) && inner.process.as_ref().is_some_and(|active| {
                         active.instance.instance_id == process.instance.instance_id
                     }) {
+                        current_after_probe = true;
                         let changed = inner.status.state != next_state
                             || inner.status.last_error != next_error
                             || inner.status.health != next_health
@@ -1479,6 +1850,7 @@ fn spawn_readiness_watcher(
                                 &inner,
                                 Some(&process.instance.instance_id),
                                 next_state,
+                                &recovery,
                                 next_error.as_ref(),
                             );
                             manager.logger.event(
@@ -1495,8 +1867,16 @@ fn spawn_readiness_watcher(
                         }
                     }
                 }
+                if !current_after_probe {
+                    return;
+                }
                 if next_state == TunnelState::Ready {
-                    manager.note_recovered(recovery_generation, next_state);
+                    manager.note_recovered(
+                        recovery_generation,
+                        recovery_token,
+                        &process.instance.instance_id,
+                        next_state,
+                    );
                 }
 
                 let has_valid_poll_age = evidence.last_successful_poll_timestamp.is_some()
@@ -1556,8 +1936,12 @@ fn spawn_readiness_watcher(
                 };
                 let previous_health = manager.inner.lock().ok().map(|inner| inner.status.health);
                 let next_health = TunnelHealth::probe_failed(previous_health.as_ref());
+                let recovery = manager.recovery_status();
                 if let Ok(mut inner) = manager.inner.lock() {
-                    if inner.process.as_ref().is_none_or(|active| {
+                    if matches!(
+                        inner.status.state,
+                        TunnelState::Stopping | TunnelState::Stopped
+                    ) || inner.process.as_ref().is_none_or(|active| {
                         active.instance.instance_id != process.instance.instance_id
                     }) {
                         return;
@@ -1573,6 +1957,7 @@ fn spawn_readiness_watcher(
                             &inner,
                             Some(&process.instance.instance_id),
                             next_state,
+                            &recovery,
                             Some(&error),
                         );
                         manager.logger.event(
@@ -1864,6 +2249,7 @@ fn spawn_exit_watcher(
     manager: TunnelProcessManager,
     process: ManagedTunnelProcess,
     recovery_generation: u64,
+    recovery_token: u64,
 ) {
     thread::spawn(move || {
         let exit_code = loop {
@@ -1884,6 +2270,7 @@ fn spawn_exit_watcher(
 
         let mut recovery_error = None;
         let mut should_recover = false;
+        let recovery = manager.recovery_status();
         if let Ok(mut inner) = manager.inner.lock() {
             let is_current = inner
                 .process
@@ -1914,11 +2301,13 @@ fn spawn_exit_watcher(
                     readiness: None,
                     last_exit: Some(exit),
                     last_error: error.clone(),
+                    recovery: TunnelRecoveryStatus::default(),
                 };
                 notify_inner(
                     &inner,
                     Some(&process.instance.instance_id),
                     inner.status.state,
+                    &recovery,
                     error.as_ref(),
                 );
                 should_recover = !stopped_by_manager;
@@ -1938,11 +2327,18 @@ fn spawn_exit_watcher(
             }),
         );
         if should_recover {
-            manager.schedule_recovery(
+            if manager.finish_process_exit(
                 recovery_generation,
-                RecoveryTrigger::ProcessExit,
-                recovery_error.as_ref(),
-            );
+                recovery_token,
+                &process.instance.instance_id,
+                recovery_error.clone(),
+            ) {
+                manager.schedule_recovery(
+                    recovery_generation,
+                    RecoveryTrigger::ProcessExit,
+                    recovery_error.as_ref(),
+                );
+            }
         }
         remove_health_file(&process.health_url_file);
         let (lock, wake) = &*process.exited;
@@ -1957,6 +2353,7 @@ fn notify_inner(
     inner: &TunnelInner,
     instance_id: Option<&str>,
     state: TunnelState,
+    recovery: &TunnelRecoveryStatus,
     error: Option<&TunnelProcessError>,
 ) {
     if let Some(observer) = &inner.observer {
@@ -1966,6 +2363,7 @@ fn notify_inner(
             state,
             inner.status.health,
             inner.status.readiness.as_ref(),
+            recovery,
             error,
         );
     }
@@ -2110,13 +2508,6 @@ impl TunnelProcessError {
         Self {
             code: "TUNNEL_MCP_UNAVAILABLE".into(),
             message: message.into(),
-        }
-    }
-
-    fn recovery_exhausted() -> Self {
-        Self {
-            code: "TUNNEL_RECOVERY_EXHAUSTED".into(),
-            message: "Automatic Tunnel recovery exhausted; manual restart is required.".into(),
         }
     }
 
@@ -2525,6 +2916,12 @@ fn request_graceful_termination(_process_group_id: u32) -> std::io::Result<()> {
 
 fn timestamp() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+fn timestamp_after(delay: Duration) -> String {
+    let millis = delay.as_millis().min(i64::MAX as u128) as i64;
+    (Utc::now() + chrono::Duration::milliseconds(millis))
+        .to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 #[cfg(test)]
@@ -3054,24 +3451,301 @@ mod tests {
     }
 
     #[test]
-    fn lifetime_recovery_budget_blocks_without_manual_restart() {
+    fn recovery_window_enters_cooldown_without_permanent_block() {
         let manager = sleeping_manager().with_auto_recovery();
         manager.start(launch()).unwrap();
         let generation = manager.lock_recovery().generation;
-        manager.lock_recovery().total_attempts = RECOVERY_MAX_TOTAL_ATTEMPTS;
+        manager.lock_recovery().attempts =
+            (0..RECOVERY_MAX_ATTEMPTS).map(|_| Instant::now()).collect();
         let error = TunnelProcessError::readiness("temporary network failure");
 
         manager.schedule_recovery(generation, RecoveryTrigger::HealthProbe, Some(&error));
 
-        assert_eq!(
-            manager
-                .lock_recovery()
-                .blocked
-                .as_ref()
-                .map(|error| error.code.as_str()),
-            Some("TUNNEL_RECOVERY_EXHAUSTED")
-        );
+        let recovery = manager.recovery_status();
+        assert_eq!(recovery.phase, TunnelRecoveryPhase::Cooldown);
+        assert_eq!(recovery.reason, Some(error));
+        assert!(recovery.cooldown_until.is_some());
+        assert!(manager.lock_recovery().blocked.is_none());
         assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn half_open_failure_reenters_cooldown() {
+        let manager = sleeping_manager().with_auto_recovery();
+        let generation = {
+            let mut recovery = manager.lock_recovery();
+            recovery.desired_running = true;
+            recovery.generation = 1;
+            recovery.launch = Some(launch());
+            recovery.half_open = true;
+            recovery.recovering = false;
+            recovery.generation
+        };
+        {
+            let mut recovery = manager.lock_recovery();
+            recovery.half_open = true;
+            recovery.recovering = false;
+            recovery.attempts.clear();
+        }
+        let error = TunnelProcessError::readiness("half-open probe failed");
+        manager.schedule_recovery(generation, RecoveryTrigger::HealthProbe, Some(&error));
+
+        assert_eq!(
+            manager.recovery_status().phase,
+            TunnelRecoveryPhase::Cooldown
+        );
+        assert!(manager.recovery_status().cooldown_until.is_some());
+        manager.disarm_for_manual_stop();
+    }
+
+    #[test]
+    fn successful_recovery_resets_backoff_state() {
+        let manager = sleeping_manager().with_auto_recovery();
+        let status = manager.start(launch()).unwrap();
+        let instance_id = status.instance.unwrap().instance_id;
+        let (generation, token) = {
+            let mut recovery = manager.lock_recovery();
+            recovery.attempts = (0..3).map(|_| Instant::now()).collect();
+            recovery.recovering = true;
+            (
+                recovery.generation,
+                recovery.active_instance_token.expect("active token"),
+            )
+        };
+
+        manager.note_recovered(generation, token, &instance_id, TunnelState::Ready);
+
+        let recovery = manager.recovery_status();
+        assert_eq!(recovery.phase, TunnelRecoveryPhase::Idle);
+        assert!(recovery.reason.is_none());
+        assert!(recovery.next_attempt_at.is_none());
+        assert!(recovery.cooldown_until.is_none());
+        assert_eq!(manager.lock_recovery().attempts.len(), 3);
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn repeated_ready_flaps_reach_the_window_cooldown() {
+        let manager = sleeping_manager().with_auto_recovery();
+        let status = manager.start(launch()).unwrap();
+        let instance_id = status.instance.unwrap().instance_id;
+        let generation = manager.lock_recovery().generation;
+        let instance_token = manager
+            .lock_recovery()
+            .active_instance_token
+            .expect("active token");
+        let error = TunnelProcessError::readiness("temporary network failure");
+
+        for _ in 0..RECOVERY_MAX_ATTEMPTS {
+            manager.schedule_recovery(generation, RecoveryTrigger::HealthProbe, Some(&error));
+            manager.note_recovered(generation, instance_token, &instance_id, TunnelState::Ready);
+            assert!(manager.lock_recovery().blocked.is_none());
+        }
+        manager.schedule_recovery(generation, RecoveryTrigger::HealthProbe, Some(&error));
+
+        assert_eq!(
+            manager.recovery_status().phase,
+            TunnelRecoveryPhase::Cooldown
+        );
+        assert!(manager.lock_recovery().blocked.is_none());
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn expired_cooldown_runs_a_half_open_recovery_and_returns_idle() {
+        let manager = sleeping_manager().with_auto_recovery();
+        manager.start(launch()).unwrap();
+        let generation = manager.lock_recovery().generation;
+        let recovery_launch = manager.lock_recovery().launch.clone().unwrap();
+        manager.lock_recovery().attempts =
+            (0..RECOVERY_MAX_ATTEMPTS).map(|_| Instant::now()).collect();
+        manager.schedule_recovery(
+            generation,
+            RecoveryTrigger::HealthProbe,
+            Some(&TunnelProcessError::readiness("temporary network failure")),
+        );
+        let token = manager.lock_recovery().token;
+        {
+            let mut recovery = manager.lock_recovery();
+            recovery.cooldown_until = Some(Instant::now() - Duration::from_secs(1));
+            recovery.cooldown_until_wall = Some(timestamp());
+            recovery.next_attempt_at = Some(Instant::now() - Duration::from_secs(1));
+            recovery.next_attempt_at_wall = Some(timestamp());
+        }
+
+        manager.perform_recovery(
+            generation,
+            RecoveryTrigger::HealthProbe,
+            recovery_launch,
+            token,
+        );
+
+        let status = manager.status().unwrap();
+        assert_eq!(status.state, TunnelState::Ready);
+        assert_eq!(status.recovery.phase, TunnelRecoveryPhase::Idle);
+        assert!(status.recovery.reason.is_none());
+        assert!(manager.lock_recovery().attempts.is_empty());
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn stale_recovery_task_cannot_clear_new_generation_state() {
+        let manager = sleeping_manager().with_auto_recovery();
+        manager.start(launch()).unwrap();
+        let generation = manager.lock_recovery().generation;
+        let error = TunnelProcessError::readiness("temporary network failure");
+        manager.schedule_recovery(generation, RecoveryTrigger::HealthProbe, Some(&error));
+        let (token, next_attempt) = {
+            let recovery = manager.lock_recovery();
+            (recovery.token, recovery.next_attempt_at)
+        };
+        assert!(next_attempt.is_some());
+        let new_generation = manager.disarm_for_manual_stop();
+
+        manager.perform_recovery(generation, RecoveryTrigger::HealthProbe, launch(), token);
+
+        let recovery = manager.lock_recovery();
+        assert_eq!(recovery.generation, new_generation);
+        assert!(!recovery.recovering);
+        assert!(!recovery.desired_running);
+        drop(recovery);
+        assert!(manager.stop().is_ok());
+    }
+
+    #[test]
+    fn current_instance_ready_cancels_only_a_pending_recovery() {
+        let manager = sleeping_manager().with_auto_recovery();
+        let status = manager.start(launch()).unwrap();
+        let instance_id = status.instance.unwrap().instance_id;
+        let generation = manager.lock_recovery().generation;
+        let instance_token = manager
+            .lock_recovery()
+            .active_instance_token
+            .expect("active token");
+        manager.schedule_recovery(
+            generation,
+            RecoveryTrigger::HealthProbe,
+            Some(&TunnelProcessError::readiness("temporary network failure")),
+        );
+        assert!(manager.lock_recovery().next_attempt_at.is_some());
+
+        manager.note_recovered(generation, instance_token, &instance_id, TunnelState::Ready);
+
+        let recovery = manager.recovery_status();
+        assert_eq!(recovery.phase, TunnelRecoveryPhase::Idle);
+        assert!(recovery.next_attempt_at.is_none());
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn current_old_instance_ready_cannot_cancel_a_recovery_already_in_progress() {
+        let manager = sleeping_manager().with_auto_recovery();
+        let status = manager.start(launch()).unwrap();
+        let instance_id = status.instance.unwrap().instance_id;
+        let (generation, old_token) = {
+            let recovery = manager.lock_recovery();
+            (
+                recovery.generation,
+                recovery.active_instance_token.expect("active token"),
+            )
+        };
+        {
+            let mut recovery = manager.lock_recovery();
+            recovery.recovering = true;
+            recovery.token = old_token.wrapping_add(1);
+            recovery.next_attempt_at = None;
+            recovery.next_attempt_at_wall = None;
+        }
+
+        manager.note_recovered(generation, old_token, &instance_id, TunnelState::Ready);
+
+        let recovery = manager.lock_recovery();
+        assert!(recovery.recovering);
+        assert_eq!(recovery.token, old_token.wrapping_add(1));
+        drop(recovery);
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn recovery_can_continue_after_more_than_twelve_expired_window_attempts() {
+        let manager = sleeping_manager().with_auto_recovery();
+        let generation = {
+            let mut recovery = manager.lock_recovery();
+            recovery.desired_running = true;
+            recovery.generation = 1;
+            recovery.launch = Some(launch());
+            recovery.generation
+        };
+        let error = TunnelProcessError::readiness("temporary network failure");
+
+        for _ in 0..13 {
+            {
+                let mut recovery = manager.lock_recovery();
+                recovery.recovering = false;
+                recovery.attempts = (0..RECOVERY_MAX_ATTEMPTS)
+                    .map(|_| Instant::now() - RECOVERY_WINDOW - Duration::from_secs(1))
+                    .collect();
+                recovery.next_attempt_at = None;
+                recovery.next_attempt_at_wall = None;
+                recovery.cooldown_until = None;
+                recovery.cooldown_until_wall = None;
+                recovery.half_open = false;
+            }
+            manager.schedule_recovery(generation, RecoveryTrigger::HealthProbe, Some(&error));
+            assert!(manager.lock_recovery().blocked.is_none());
+        }
+
+        manager.disarm_for_manual_stop();
+    }
+
+    #[test]
+    fn restart_invalidates_a_pending_recovery_task_from_the_old_generation() {
+        let manager = sleeping_manager().with_auto_recovery();
+        let first = manager.start(launch()).unwrap();
+        let first_instance = first.instance.unwrap().instance_id;
+        let old_generation = manager.lock_recovery().generation;
+        manager.schedule_recovery(
+            old_generation,
+            RecoveryTrigger::HealthProbe,
+            Some(&TunnelProcessError::readiness("temporary network failure")),
+        );
+
+        let restarted = manager.restart(launch()).unwrap();
+        let restarted_instance = restarted.instance.unwrap().instance_id;
+        assert_ne!(first_instance, restarted_instance);
+        assert_ne!(manager.lock_recovery().generation, old_generation);
+        thread::sleep(Duration::from_secs(2));
+
+        let status = manager.status().unwrap();
+        assert_eq!(status.state, TunnelState::Ready);
+        assert_eq!(
+            status
+                .instance
+                .as_ref()
+                .map(|instance| instance.instance_id.as_str()),
+            Some(restarted_instance.as_str())
+        );
+        assert_eq!(status.recovery.phase, TunnelRecoveryPhase::Idle);
+        assert!(manager.stop().unwrap().accepted);
+    }
+
+    #[test]
+    fn stop_invalidates_a_pending_recovery_task_without_restarting() {
+        let manager = sleeping_manager().with_auto_recovery();
+        manager.start(launch()).unwrap();
+        let generation = manager.lock_recovery().generation;
+        manager.schedule_recovery(
+            generation,
+            RecoveryTrigger::HealthProbe,
+            Some(&TunnelProcessError::readiness("temporary network failure")),
+        );
+
+        assert!(manager.stop().unwrap().accepted);
+        thread::sleep(Duration::from_secs(2));
+        let status = manager.status().unwrap();
+        assert_eq!(status.state, TunnelState::Stopped);
+        assert_eq!(status.recovery.phase, TunnelRecoveryPhase::Disarmed);
+        assert!(!manager.lock_recovery().desired_running);
     }
 
     #[test]
@@ -3121,10 +3795,13 @@ mod tests {
             .unwrap();
         let (url, healthy) = toggle_admin_server();
         fs::write(&process.health_url_file, url).unwrap();
-        let generation = manager.lock_recovery().generation;
+        let (generation, token) = {
+            let recovery = manager.lock_recovery();
+            (recovery.generation, recovery.token)
+        };
 
         healthy.store(false, Ordering::SeqCst);
-        spawn_readiness_watcher(manager.clone(), process, generation);
+        spawn_readiness_watcher(manager.clone(), process, generation, token);
         let failed = wait_for_state(&manager, TunnelState::Failed);
         assert_eq!(failed.health.process, TunnelHealthState::Ready);
         assert_eq!(failed.health.control_plane, TunnelHealthState::Unknown);

@@ -214,6 +214,18 @@
     }
   },
   "overview": {
+    "tunnelRecovery": "Tunnel 自动恢复",
+    "cooldownUntil": "冷却结束时间",
+    "nextRecoveryAttempt": "下次恢复时间",
+    "recoveryPhase": {
+      "disarmed": "已停止",
+      "idle": "监测中",
+      "backoff": "等待重试",
+      "cooldown": "冷却中",
+      "half_open": "半开试探",
+      "recovering": "恢复中",
+      "blocked": "已阻断，需要处理"
+    },
     "title": "概览",
     "harnessStatus": "Harness 状态",
     "harnessIs": "Harness 状态：{{status}}",

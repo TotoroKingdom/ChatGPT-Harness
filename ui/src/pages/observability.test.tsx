@@ -19,7 +19,7 @@ function makeContext() {
   return { client: new TauriHarnessControlClient(), components: { runtime: "ready", tunnel: "stopped", mcp: "ready" },
     runtime: { status: "success", data: { runtimeId: "runtime-1", activeWorkspace: "D:\private\SECRET_PATH" } },
     config, tools: { status: "empty", data: { items: [] } }, mutateConfig: vi.fn(),
-    overall: "degraded", restartRequired: false };
+    overall: "degraded", restartRequired: false, harness: null as import("@/services/harness/client").HarnessStatus | null };
 }
 const sensitive = {
   apiKey: "API_KEY_SENTINEL", secret: "SECRET_SENTINEL", token: "TOKEN_SENTINEL",
@@ -49,6 +49,22 @@ beforeEach(() => { tauri.invoke.mockReset(); context = makeContext(); });
 afterEach(cleanup);
 
 describe("M8-D Control Plane response rendering", () => {
+  it.each(["en", "zh-CN"] as const)("shows recovery cooldown and blocked details without readiness evidence in %s", async (language) => {
+    await i18n.changeLanguage(language);
+    tauri.invoke.mockResolvedValue(diagnostics());
+    context.harness = { lifecycle: "error", runtime: "ready", tunnel: "error", mcp: "ready", tunnelReadiness: null,
+      tunnelRecovery: { phase: "cooldown", reason: { code: "TUNNEL_RECOVERY_COOLDOWN", message: "Retry budget cooling down." },
+        cooldownUntil: "2026-10-23T09:10:00Z", nextAttemptAt: "2026-10-23T09:10:00Z" } };
+    const { rerender } = render(<OverviewPage />);
+    expect(await screen.findByText(i18n.t("overview.tunnelRecovery") + ": " + i18n.t("overview.recoveryPhase.cooldown"))).toBeInTheDocument();
+    expect(screen.getByText(/TUNNEL_RECOVERY_COOLDOWN/)).toBeInTheDocument();
+    expect(screen.getAllByText("2026-10-23T09:10:00Z")).toHaveLength(2);
+    context.harness.tunnelRecovery = { phase: "blocked", reason: { code: "CONTROL_PLANE_UNAUTHORIZED", message: "401 Unauthorized" }, cooldownUntil: null, nextAttemptAt: null };
+    rerender(<OverviewPage />);
+    expect(screen.getByText(/CONTROL_PLANE_UNAUTHORIZED: 401 Unauthorized/)).toBeInTheDocument();
+    expect(screen.queryByText("2026-10-23T09:10:00Z")).not.toBeInTheDocument();
+  });
+
   it.each(["en", "zh-CN"] as const)("renders Overview status and observation boundaries in %s", async (language) => {
     await i18n.changeLanguage(language);
     tauri.invoke.mockResolvedValue(diagnostics());

@@ -94,6 +94,7 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     lastError: null,
     tunnelHealth: null,
     tunnelReadiness: null,
+    tunnelRecovery: null,
   };
   private harnessListener?: Unsubscribe;
   private harnessListenerPromise?: Promise<void>;

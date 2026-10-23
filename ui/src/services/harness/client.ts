@@ -26,6 +26,12 @@ export type TunnelHealth = {
   localMcp: TunnelHealthState;
   controlPlane: TunnelHealthState;
 };
+export type TunnelRecoveryStatus = {
+  phase: "disarmed" | "idle" | "backoff" | "cooldown" | "half_open" | "recovering" | "blocked";
+  reason: { code: string; message: string } | null;
+  nextAttemptAt: string | null;
+  cooldownUntil: string | null;
+};
 export type HarnessStatus = {
   lifecycle: OverallStatus;
   runtime: ComponentStatus;
@@ -35,6 +41,7 @@ export type HarnessStatus = {
   configRevision?: string | null;
   lastError?: { code: string; message: string } | null;
   tunnelHealth?: TunnelHealth | null;
+  tunnelRecovery?: TunnelRecoveryStatus | null;
   tunnelReadiness?: {
     controlPlaneConnected: boolean;
     mcpTargetReachable: boolean;
