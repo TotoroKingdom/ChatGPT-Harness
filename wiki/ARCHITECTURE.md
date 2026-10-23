@@ -1,246 +1,381 @@
 # ChatGPT-Harness Architecture
 
-> 本文描述当前源码中的架构边界与进程关系。V2 已完成真实链路验收并冻结；V3 规划不属于当前架构事实。
+> 本文描述当前 main / HEAD 的架构事实，基于 0.1.3 源码。历史 V2/V3 milestone 状态不是本文的架构边界；V4 规划也不会提前算作现状。
 
-~~~yaml
-V2 — Read-only Harness
-Status: ACCEPTED / FROZEN
-~~~
+## 1. 总体架构
 
-## 1. Architecture Summary
+ChatGPT-Harness 由四个核心运行单元组成：
 
-当前产品由 React UI、Tauri Host、Runtime、Tunnel 和外部 ChatGPT 连接组成，但请求执行与生命周期控制属于两条不同的平面：
+```text
+React UI (WebView)
+        ↕ Tauri IPC
+Tauri Host
+   ├── Runtime child process
+   └── Tunnel child process
 
-~~~text
-Control Plane:
-React UI ↔ Tauri HarnessController ↔ Runtime control RPC
-
-MCP Data Plane:
 ChatGPT ↔ Tunnel ↔ Runtime MCP
-                         ↓
-              Workspace / Policy / Tools
-~~~
+                    ↓
+        Authorization / Execution
+```
 
-Tauri 是本机 lifecycle owner / orchestrator，不是每一次 MCP tool call 的 proxy。
+关键原则：
 
-## 2. Process Boundaries
+- Tauri 是本机 desktop lifecycle owner；
+- Runtime 是工具授权与执行 authority；
+- Tunnel 是 transport，不是 authorization authority；
+- React UI 表达用户意图并展示观测状态，不重算 Runtime Policy。
+
+## 2. 进程与职责边界
 
 ### React UI
 
-React UI 运行在 Tauri WebView 中，负责配置输入、Start / Stop / Restart 操作、状态展示、Tools / Policies / Activity / Diagnostics 页面。它通过 Tauri IPC 调用 Rust Host，不直接启动 Runtime 或 Tunnel。
+位于 `ui/src/`，负责：
+
+- Overview / Tools / Policies / Approvals / Activity / Settings；
+- config draft 与保存；
+- desired/effective 状态展示；
+- i18n；
+- dark/light/system theme；
+- 调用 Tauri command 与消费状态/事件。
+
+UI 不直接启动 Runtime/Tunnel，也不负责工具授权。
 
 ### Tauri Host
 
-Tauri Host 管理：
+位于 `ui/src-tauri/src/`，主要拥有：
 
-~~~text
-ConfigStore
-SecretStore
-RuntimeSupervisor
-TunnelProcessManager
-HarnessController
-Tauri Commands / Event Bridge
-~~~
+- ConfigStore；
+- SecretStore；
+- RuntimeSupervisor；
+- TunnelProcessManager；
+- HarnessController；
+- Tauri command surface；
+- desktop/process cleanup。
 
-HarnessController 是产品级生命周期 owner，负责 eligibility、统一状态、session / generation、rollback、crash convergence 和 cleanup。
+Tauri 与 Runtime 使用 stdin/stdout JSONL control RPC。
 
 ### Runtime
 
-Runtime 是由 RuntimeSupervisor 管理的 Rust child process，拥有：
+位于 `runtime/src/`，拥有安全与执行核心：
 
-~~~text
-Workspace
+```text
 WorkspaceGuard
 ToolRegistry
+EffectiveToolCatalog
 PolicyEngine
+ApprovalManager
+SessionGrantStore
 ExecutionPipeline
+Tools
+Bash analyzer/runtime
 Audit / Activity
 Diagnostics
 MCP Service
-~~~
-
-Tauri 与 Runtime 之间通过 stdin/stdout JSONL control RPC 通信。
+```
 
 ### Runtime MCP
 
-MCP Server 运行在 Runtime process 内，不是独立的 MCP process。Runtime 初始化时绑定 loopback ephemeral endpoint：
+MCP Server 运行在 Runtime process 内，不是独立进程：
 
-~~~text
+```text
 Runtime
-├── Control Server       stdin/stdout JSONL
-└── MCP HTTP Server      127.0.0.1:<ephemeral>/mcp
-~~~
+├── Control Server      stdin/stdout JSONL
+└── MCP HTTP Server     127.0.0.1:<ephemeral>/mcp
+```
 
-Runtime 通过 mcp.endpoint.get 返回当前实例的 endpoint；Tauri 只在内部保存和校验该 URL，并在 Runtime stop/crash 时清除。
+Tauri 通过 `mcp.endpoint.get` 获取 endpoint，并只把它用于当前 Runtime generation 的 Tunnel orchestration。
 
 ### Tunnel
 
-Tunnel Client 是由 Tauri 管理的独立 child process。TunnelProcessManager 负责：
+Tunnel Client 是 Tauri 管理的独立 child process。它负责把远程 ChatGPT 流量转发到 Runtime MCP，并暴露自身权威 readiness/health 信息。
 
-- bundled / development distribution resolution；
-- Tunnel ID、Runtime MCP endpoint 和 secret-reference launch；
-- loopback health URL discovery 与 /readyz readiness；
-- process ownership、instance id、exit watcher；
-- graceful stop、Windows Job Object forced cleanup；
-- readiness loss 与 crash state。
+Tunnel 不执行：
 
-Tunnel Ready 不是 PID、spawn 成功或监听端口的别名；它需要 control-plane connection、configured MCP target reachability 和权威 health check。
+- WorkspaceGuard；
+- Policy；
+- Approval；
+- tool implementation；
+- Activity authorization decision。
 
-## 3. Control Plane
+## 3. Desktop Control Plane
 
-桌面控制链路为：
-
-~~~text
+```text
 React UI
    ↓ invoke / events
-Tauri HarnessController
-   ↓ JSONL RPC
+Tauri commands
+   ↓
+HarnessController / RuntimeSupervisor
+   ↓ JSONL
 Runtime Control Server
-~~~
+```
 
-生命周期命令由 Tauri 统一持有：
+主要 control contracts 位于 `protocol/src/v1/`：
 
-~~~text
-harness_start_eligibility
-harness_start
-harness_status
-harness_stop
-harness_restart
-~~~
+- config；
+- runtime；
+- tools；
+- policies；
+- approvals；
+- activity；
+- diagnostics；
+- control_read；
+- `mcp.endpoint.get`。
 
-Runtime-specific tools、policy、activity、diagnostics 读取仍通过 Runtime control RPC 完成，但 UI 不再自己拼接完整 Harness 生命周期。
+Config 持久化 schema 当前为 **2**；这与产品版本号、Milestone 编号相互独立。
 
-## 4. MCP Data Plane and Tool Execution
+## 4. MCP Data Plane
 
-实际调用路径为：
-
-~~~text
+```text
 ChatGPT
    ↓
 Tunnel
    ↓
 Runtime MCP
    ↓
-McpService / adapter
+McpService
    ↓
-ExecutionPipeline
+argument validation
    ↓
 WorkspaceGuard
    ↓
 PolicyEngine
    ↓
-read_file / glob executor
+Approval / SessionGrant（需要时）
    ↓
-Audit / Activity
-~~~
+ExecutionPermit
+   ↓
+Tool executor / BashRuntime
+   ↓
+AuditEmitter
+   ↓
+Activity projection
+```
 
-Workspace 与 Policy enforcement 位于 Runtime 内部，不依赖 UI 或 Tauri。V2 不包含 write tools、Bash、database tools 或 Git write operations。
+### MCP 暴露规则
 
-## 5. Harness Lifecycle
+Runtime 的 declared tool catalog 固定为：
+
+```text
+read_file
+glob
+write
+edit
+bash
+```
+
+但 `tools/list` 只返回 effective availability 为：
+
+- `Available`
+- `AvailableWithApproval`
+
+的工具。
+
+以下状态不会暴露：
+
+- disabled；
+- security mode 不允许；
+- Runtime/tool readiness 不满足；
+- DENY；
+- invalid policy/context。
+
+## 5. Workspace Boundary
+
+Workspace 是 Runtime 的安全边界，不由 UI 或 Tunnel 代替。
+
+文件工具都必须经过 WorkspaceGuard。写入类工具还会在 mutation path 中进行目标校验/再校验，避免路径逃逸和 TOCTOU 类型的目标变化问题。
+
+当前文件 mutation：
+
+- `write`：UTF-8 full-file create/overwrite，经 shared atomic mutation path；
+- `edit`：UTF-8 文本中 `old_text` 必须唯一精确匹配，再通过 shared atomic mutation path 写回。
+
+`edit` 不会自动选择第一处匹配；零匹配或多匹配都失败。
+
+## 6. Policy Architecture
+
+持久化配置包含：
+
+```text
+ToolPolicyDefaults
+UserPolicyRuleConfig[]
+```
+
+Typed matcher：
+
+- `Tool { tool }`
+- `BashCommand { executable, argvPrefix }`
+
+Runtime 启动一个 generation 时编译 immutable Policy snapshot。Runtime 同时拥有不可编辑的 system rules。
+
+关键不变量：
+
+- Workspace 外访问由 system guardrail DENY；
+- 用户规则不能降低固定系统边界；
+- invalid snapshot/context fail closed；
+- unknown/unavailable capability fail closed；
+- UI 不复制授权算法，只消费 Runtime effective snapshot。
+
+默认 Tool Policy：
+
+```text
+read_file = ALLOW
+glob      = ALLOW
+write     = ALLOW
+edit      = ALLOW
+bash      = ASK
+```
+
+## 7. Approval 与 Session Grant
+
+ASK 不是“返回错误后让用户重试”的简单模型。当前 Runtime 会：
+
+```text
+policy = ASK
+→ 创建 ApprovalRequest
+→ exact invocation 等待
+→ UI 通过 approvals.resolve 给出 decision
+→ exact waiter 被唤醒
+→ 继续执行或拒绝
+```
+
+支持：
+
+- `AllowOnce`
+- `AllowForSession`
+- `Deny`
+
+Approval 默认 TTL：5 分钟。
+
+Session Grant：
+
+- 仅内存；
+- 绑定当前 Runtime generation；
+- 绑定 tool；
+- 绑定 exact normalized scope；
+- Runtime 重启/generation replacement 后不会成为跨代永久权限。
+
+Bash 的 unclassified high-risk 请求不能获得 AllowForSession。
+
+## 8. Bash Architecture
+
+Bash capability = `DeveloperShell`。
+
+### Availability
+
+- 只允许 SecurityMode::DeveloperTest；
+- Tool 默认 disabled；
+- Runtime 每代重新发现/验证 Git Bash executable；
+- readiness 由 Runtime 决定，不信任 UI picker。
+
+### Analyzer
+
+`runtime/src/bash/analyzer.rs` 生成用于 Policy/Approval 的 bounded logical facts，不把 raw command 直接当作 matcher。
+
+高风险特征包括 command substitution、backticks、eval、nested shell、inline interpreter code、redirection、dynamic expansion、malformed quoting、unsupported grammar 等。
+
+无法可靠分类的命令至少获得 ASK floor。
+
+### Runtime hard limits
+
+生产固定限制：
+
+- command：8192 bytes；
+- timeout：30s；
+- stdout + stderr：256 KiB；
+- concurrency：1。
+
+这些限制不是 MCP request 可覆盖的参数。
+
+Bash cwd 固定为 active Workspace，但 Bash 不是 OS 级 filesystem sandbox。
+
+## 9. Audit / Activity
+
+Audit event 是 Runtime-owned 的非 secret 事件模型；Activity 是其面向 UI 的安全投影。
+
+重要边界：
+
+- 不持久化 raw tool arguments；
+- 不持久化凭据、环境变量、原始物理路径、raw process output；
+- Bash 只暴露 sanitized/bounded evidence；
+- Activity capacity 当前为 256；
+- Activity 是 Runtime lifetime 内的 bounded observation，不是 durable audit database。
+
+## 10. Config 与 Secret
+
+AppConfig 包括：
+
+```text
+workspace
+tunnel
+security
+ui
+tools
+bash
+policies
+```
+
+Runtime 启动时得到 non-secret、immutable `RuntimeConfigSnapshot`。
+
+原始 Tunnel API Key 由 SecretStore 管理；AppConfig 只保存 opaque `SecretReference`。Secret 不应进入 Runtime snapshot、IPC response、Activity、diagnostics 或普通日志。
+
+## 11. Harness Lifecycle
 
 ### Start
 
-~~~text
+```text
 validate eligibility
-        ↓
-allocate session / mark starting
-        ↓
-start Runtime
-        ↓
-Runtime Ready
-        ↓
-mcp.endpoint.get + loopback/path validation
-        ↓
-MCP Ready
-        ↓
-SecretStore controlled read
-        ↓
-launch Tunnel
-        ↓
-health discovery + /readyz + target evidence
-        ↓
-Tunnel Ready
-        ↓
-Harness Ready
-~~~
-
-Harness Ready 只有在同一 active session 中 Runtime、MCP、Tunnel 都 Ready 时成立。
+→ allocate active session
+→ start Runtime
+→ Runtime ready
+→ mcp.endpoint.get + endpoint validation
+→ MCP ready
+→ controlled SecretStore read
+→ launch Tunnel
+→ authoritative readiness / target evidence
+→ Harness ready
+```
 
 ### Stop
 
-~~~text
+```text
 mark stopping
-        ↓
-stop Tunnel / cloudflared descendants
-        ↓
-stop Runtime
-        ↓
-clear endpoint / session
-        ↓
-Harness stopped
-~~~
+→ stop Tunnel and owned descendants
+→ stop Runtime
+→ clear endpoint/session
+→ Harness stopped
+```
 
-### Failure convergence
+### Convergence
 
-- Runtime start 或 MCP bind 失败时，Tunnel 不会进入 Ready。
-- Tunnel start / readiness 失败时，Harness 不会进入 Ready，并执行 rollback。
-- Runtime crash 会使 MCP / Harness 离开 Ready，并停止关联 Tunnel。
-- Tunnel crash 会使 Harness 进入 Error；Runtime 可保留用于诊断，但需要显式 Restart Harness。
-- watcher callback 带 session / generation identity；stale callback 不得修改新 session。
+- Runtime crash：MCP/Harness 离开 Ready，关联 Tunnel 被收敛；
+- Tunnel crash/readiness loss：Harness 离开 Ready；
+- callback 带 generation/session/instance identity；
+- stale callback 不得改变新 session。
 
-## 6. Security Boundary
+## 12. Source-of-Truth Locations
 
-- Runtime MCP 只绑定 loopback。
-- WorkspaceGuard 在 Runtime 中执行 canonicalization、escape rejection 和 Windows path boundary 检查。
-- PolicyEngine 在 ExecutionPipeline 中执行 ALLOW / DENY / ASK 决策。
-- API Key 只通过 Tauri SecretStore 和 child-scoped secret reference 进入 Tunnel launch；不进入 AppConfig、Runtime、IPC response、Activity、diagnostics、普通日志或 literal argv。
-- Windows Tunnel child 使用每 session 的 Job Object；强制清理针对 owned descendants，不按进程名杀 unrelated process。
-
-## 7. Current Architecture
-
-~~~text
-┌───────────────────────────────┐
-│       Tauri Desktop App       │
-│ React UI ↔ HarnessController  │
-│ Config / Secrets / Lifecycle  │
-└──────────────┬────────────────┘
-               │
-               ├── RuntimeSupervisor ── JSONL ── Runtime
-               │                              └─ loopback MCP
-               │
-               └── TunnelProcessManager ── Tunnel Client
-                                              └─ MCP target = Runtime
-
-ChatGPT ↔ Tunnel ↔ Runtime MCP
-                    ↓
-             Workspace / Policy / Tools
-                    ↓
-                Audit / Activity → UI
-~~~
-
-这条链路的外部 ChatGPT E2E 已完成 manual acceptance；manual acceptance 不等同于自动化测试声明。
-
-## 8. Source-of-Truth Locations
-
-| Architecture question | Source |
+| 问题 | 代码位置 |
 | --- | --- |
-| Control protocol | protocol/src/** |
-| Runtime control server | runtime/src/server.rs |
-| Runtime core and execution | runtime/src/state.rs, runtime/src/execution/** |
-| Workspace boundary | runtime/src/workspace/** |
-| Policy | runtime/src/policy/** |
-| MCP lifecycle / HTTP | runtime/src/mcp/** |
-| Runtime supervision / endpoint handoff | ui/src-tauri/src/runtime/** |
-| Tunnel launch / readiness / cleanup | ui/src-tauri/src/tunnel/** |
-| Harness lifecycle | ui/src-tauri/src/harness.rs, ui/src-tauri/src/commands/** |
-| React adapter / provider | ui/src/services/harness/**, ui/src/app/providers/** |
-| V2 acceptance | wiki/V2-ACCEPTANCE.md |
-| V3 historical archive | docs/archive/v3-2026-10/README.md |
+| Protocol / config | `protocol/src/v1/**` |
+| Runtime core | `runtime/src/state.rs`, `runtime/src/server.rs` |
+| MCP | `runtime/src/mcp/**` |
+| Workspace | `runtime/src/workspace/**` |
+| Tools | `runtime/src/tools/**` |
+| Policy | `runtime/src/policy/**` |
+| Approval | `runtime/src/approval.rs` |
+| Session Grant | `runtime/src/session_grant.rs` |
+| Bash | `runtime/src/bash/**` |
+| Audit / Activity | `runtime/src/audit/**`, `runtime/src/activity/**` |
+| Runtime supervision | `ui/src-tauri/src/runtime/**` |
+| Tunnel | `ui/src-tauri/src/tunnel/**` |
+| Harness orchestration | `ui/src-tauri/src/harness.rs` |
+| Config / Secret | `ui/src-tauri/src/config/**`, `ui/src-tauri/src/secrets/**` |
+| React pages | `ui/src/pages/**` |
+| Theme | `ui/src/theme/**` |
 
-## 9. Related Documents
+## 13. Related
 
+- [README.md](./README.md)
 - [CODEBASE-MAP.md](./CODEBASE-MAP.md)
 - [IMPLEMENTATION-MATRIX.md](./IMPLEMENTATION-MATRIX.md)
 - [MCP-AND-TUNNEL.md](./MCP-AND-TUNNEL.md)
-- [V2-ACCEPTANCE.md](./V2-ACCEPTANCE.md)
-- [../docs/archive/v3-2026-10/README.md](../docs/archive/v3-2026-10/README.md)

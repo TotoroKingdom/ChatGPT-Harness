@@ -1,200 +1,301 @@
 # MCP and Tunnel Integration
 
-> 本文描述当前 MCP、Tunnel 和 Tauri Harness lifecycle 的真实集成状态。V2 已完成真实链路验收并进入 Frozen；V3 计划不在本文中提前实现。
+> 本文描述当前 main / HEAD（0.1.3）的 MCP、Approval 与 Tunnel 集成。旧 V2 “read-only tools only” 描述已经不适用于当前源码。
 
-~~~yaml
-V2 — Read-only Harness
-Status: ACCEPTED / FROZEN
-~~~
+## 1. 当前真实链路
 
-## 1. Current Product Chain
-
-~~~text
+```text
 ChatGPT
    ↕
 Tunnel
    ↕
 Runtime MCP
    ↓
-ExecutionPipeline
-   ↓
-WorkspaceGuard
-   ↓
-Policy
-   ↓
-read_file / glob
-   ↓
-Audit / Activity
-   ↓
-UI
-~~~
-
-Tauri 是 lifecycle / configuration / Secret orchestration layer，不是 MCP tool-call proxy：
-
-~~~text
-ChatGPT ⇄ Tunnel ⇄ Runtime MCP
-~~~
-
-## 2. Runtime MCP Endpoint
-
-Runtime 初始化时创建 McpRuntimeService，并在 127.0.0.1:<ephemeral>/mcp 启动 Streamable HTTP endpoint。Runtime 持有实际 URL，Tauri 在 Runtime initialize / initialized 完成后调用：
-
-~~~text
-mcp.endpoint.get
-~~~
-
-Tauri 对 endpoint 做 loopback、HTTP 和 /mcp path 校验，将它绑定到当前 Runtime generation，仅供内部 Tunnel orchestration 使用；它不进入 AppConfig、RuntimeState、React state 或 HarnessStatus。Runtime stop、crash 或 generation replacement 时，endpoint 会清除。
-
-## 3. Tunnel Launch
-
-Tauri 的 TunnelProcessManager 使用已验证的 bundled tunnel-client 0.0.13 contract，语义上包含：
-
-~~~text
-run
---control-plane.tunnel-id <id>
---control-plane.api-key env:HARNESS_TUNNEL_API_KEY
---mcp.server-url url=<Runtime endpoint>,channel=main
---cloudflared.path <bundled companion>
---health.listen-addr 127.0.0.1:0
---health.url-file <temporary loopback health artifact>
-~~~
-
-Tunnel ID 与 Runtime MCP endpoint 来自 Harness orchestration；API Key 从 SecretStore 受控读取，只通过 child-scoped secret reference 注入。原始 key 不进入 argv、配置文件、Runtime、IPC response、Activity、diagnostics 或普通日志。
-
-## 4. Tunnel Readiness
-
-Tunnel process state 与 product readiness 分离：
-
-~~~text
-spawn / PID
-    ≠
-process running
-    ≠
-Tunnel Ready
-    ≠
-Harness Ready
-~~~
-
-Tunnel Ready 需要同时具备：
-
-1. managed Tunnel process 仍属于当前 instance；
-2. control-plane connection 已建立；
-3. configured Runtime MCP target 可达；
-4. tunnel-client loopback health / /readyz 权威检查通过。
-
-health URL 必须是 loopback，discovery artifact 不含 secret，并在 startup failure、stop、restart 和可行的 crash cleanup 路径中删除。
-
-## 5. Harness Lifecycle
-
-### Start
-
-~~~text
-harness_start_eligibility
-        ↓
-Runtime start
-        ↓
-Runtime Ready
-        ↓
-mcp.endpoint.get
-        ↓
-MCP Ready
-        ↓
-SecretStore controlled read
-        ↓
-Tunnel launch
-        ↓
-health discovery / target readiness
-        ↓
-Tunnel Ready
-        ↓
-Harness Ready
-~~~
-
-Start 的每一步都由 Tauri HarnessController 串行化。任一阶段失败都会阻止 Harness Ready，并清理本 session 已启动的 Runtime、Tunnel 和临时 health artifact。
-
-### Stop
-
-~~~text
-Harness stopping
-        ↓
-Tunnel / cloudflared descendants stop
-        ↓
-Runtime stop
-        ↓
-MCP endpoint shutdown
-        ↓
-endpoint / session clear
-        ↓
-Harness stopped
-~~~
-
-Windows 使用每 managed Tunnel session 一个 Job Object，graceful timeout 后清理 owned descendants；不按 unrelated process name 终止进程。
-
-### Crash convergence
-
-- Runtime crash：MCP / Harness 离开 Ready，关联 Tunnel 被停止，旧 endpoint 清除。
-- Tunnel crash：Tunnel 与 Harness 进入 Error；Runtime 可保留作诊断，显式 Restart Harness 才重建完整链路。
-- Runtime generation 或 Tunnel instance 不匹配的 watcher callback 会被忽略。
-
-## 6. Tool Execution Path
-
-外部 ChatGPT 的真实工具调用进入 Runtime 后仍使用 V2 原有安全执行链：
-
-~~~text
-MCP request
-   ↓
-McpService / adapter
+McpService
    ↓
 ExecutionPipeline
-   ↓
-argument validation
    ↓
 WorkspaceGuard
    ↓
 PolicyEngine
    ↓
-read_file / glob executor
+Approval / SessionGrant（按需）
+   ↓
+read_file / glob / write / edit / bash
    ↓
 Audit / Activity
-~~~
+```
 
-Tunnel 只负责连接和转发，不负责 Workspace enforcement、Policy evaluation、tool implementation 或 Audit。
+Tauri 是 lifecycle / config / secret orchestration layer，不是 MCP tool-call proxy。
 
-## 7. V2 Acceptance Boundary
+## 2. Runtime MCP Endpoint
 
-V2 核心能力：
+Runtime 初始化后在：
 
-- read_file
-- glob
-- Workspace confinement
-- Policy / Audit
-- Runtime MCP
-- Tunnel
-- Tauri lifecycle
-- Tool exposure
-- External ChatGPT E2E
+```text
+127.0.0.1:<ephemeral>/mcp
+```
 
-External ChatGPT E2E 已完成 **manual acceptance（人工验收）**。这不是自动化测试通过的替代说法；自动化验证仍只声明各自实际覆盖的组件、合同、分发和安全边界。
+启动 Streamable HTTP MCP endpoint。
 
-V2 不包含 write_file、edit_file、Bash / shell、database tools、Git write 或新的 approval/resume workflow；这些属于 V3 Roadmap 的后续规划。
+Tauri 通过：
 
-## 8. Source-of-Truth Locations
+```text
+mcp.endpoint.get
+```
 
-| Question | Source |
+取得当前 Runtime generation 的 endpoint，并进行 loopback/path 等校验。该 endpoint 用于 Tunnel target orchestration，不应被当作持久用户配置。
+
+Runtime stop/crash/generation replacement 时，旧 endpoint 必须失效并被清理。
+
+## 3. MCP Tool Exposure
+
+Runtime declared catalog：
+
+```text
+read_file
+glob
+write
+edit
+bash
+```
+
+MCP `tools/list` 不等于“列出 registry 的全部工具”。它读取 Runtime effective catalog，只保留：
+
+```text
+Available
+AvailableWithApproval
+```
+
+因此：
+
+- disabled tool 不暴露；
+- Policy DENY 不暴露；
+- Developer/Test mode 不满足时 Bash 不暴露；
+- Bash executable unavailable 时 Bash 不暴露；
+- Runtime not ready 不暴露。
+
+这也是为什么 UI 的“已保存配置”与 ChatGPT 实际可发现工具之间可能暂时不同：Runtime generation 尚未 restart/converge 时，effective state 仍以当前运行实例为准。
+
+## 4. Tool Call
+
+文件工具与 Bash 最终都进入 Runtime authority：
+
+```text
+MCP arguments
+→ adapter validation
+→ Workspace / capability checks
+→ Policy
+→ Approval / SessionGrant
+→ ExecutionPermit
+→ executor
+```
+
+已实现工具：
+
+| Tool | Capability | 关键行为 |
+| --- | --- | --- |
+| read_file | WorkspaceRead | bounded workspace file read |
+| glob | WorkspaceRead | workspace path matching |
+| write | WorkspaceWrite | atomic UTF-8 create/overwrite |
+| edit | WorkspaceWrite | unique exact replacement + atomic mutation |
+| bash | DeveloperShell | controlled Git Bash async execution |
+
+## 5. ASK / Approval
+
+当 effective Policy = ASK 时，工具仍可出现在 `tools/list`，但执行必须获得 Approval。
+
+当前模型：
+
+```text
+MCP call
+→ ASK
+→ ApprovalRequest(Pending)
+→ exact invocation waits
+→ Tauri/UI approvals.resolve
+→ AllowOnce / AllowForSession / Deny
+→ exact invocation resumes or rejects
+```
+
+默认 Approval TTL = 5 分钟。
+
+### Allow once
+
+只授权当前 request。
+
+### Allow for session
+
+创建 memory-only Session Grant：
+
+- 当前 Runtime generation；
+- 当前 tool；
+- exact normalized scope。
+
+它不是“以后这个工具都允许”。
+
+### Deny / Expired / Cancelled
+
+调用不会继续执行受保护副作用，并产生对应 Activity/Audit evidence。
+
+## 6. Bash 的 MCP 特性
+
+Bash 是 async MCP execution：
+
+- 仅 Developer/Test mode；
+- 默认 disabled；
+- Policy 默认 ASK；
+- Runtime 校验 Git Bash readiness；
+- command max 8192 bytes；
+- timeout 30s；
+- total captured stdout/stderr 256 KiB；
+- concurrency 1；
+- high-risk/unclassified command 至少 ASK；
+- unclassified high-risk 不允许 Session Grant。
+
+Bash 工作目录固定到 active Workspace，但并非 OS filesystem sandbox。
+
+## 7. Tunnel Launch
+
+TunnelProcessManager 由 Tauri 管理。其 launch 输入来自：
+
+- Tunnel ID；
+- 当前 Runtime MCP endpoint；
+- SecretStore 中受控读取的 API Key；
+- bundled/development Tunnel distribution；
+- health/readiness 配置。
+
+原始 API Key 不应进入：
+
+- AppConfig plaintext；
+- RuntimeConfigSnapshot；
+- Runtime；
+- React state；
+- Activity；
+- diagnostics；
+-普通日志；
+- literal command-line secret argument。
+
+AppConfig 只保存 `SecretReference`。
+
+## 8. Tunnel Readiness
+
+必须区分：
+
+```text
+process spawned
+≠ process alive
+≠ Tunnel Ready
+≠ Harness Ready
+```
+
+Tunnel Ready 需要当前 managed instance 的权威 health/readiness 与 target evidence，而不是只看 PID 或监听端口。
+
+Harness Ready 还要求同一 active session 中 Runtime、MCP、Tunnel 状态已经收敛。
+
+## 9. Harness Start / Stop
+
+### Start
+
+```text
+harness_start_eligibility
+→ Runtime start
+→ Runtime Ready
+→ mcp.endpoint.get
+→ MCP Ready
+→ SecretStore controlled read
+→ Tunnel launch
+→ Tunnel readiness / target evidence
+→ Harness Ready
+```
+
+### Stop
+
+```text
+Harness stopping
+→ Tunnel + owned descendants stop
+→ Runtime stop
+→ MCP endpoint shutdown
+→ session/endpoint clear
+→ Harness stopped
+```
+
+### Failure
+
+- Runtime crash：旧 MCP endpoint 无效，Harness 离开 Ready，关联 Tunnel 需要收敛；
+- Tunnel crash/readiness loss：Harness 离开 Ready；
+- stale generation/session watcher callback 被忽略。
+
+## 10. Activity Evidence
+
+工具调用会产生 Runtime-owned audit lifecycle，再投影成 Activity。
+
+当前 Activity 可表达：
+
+- request received；
+- workspace validation；
+- policy evaluation；
+- request denied；
+- approval required/resolved/expired/cancelled；
+- session grant matched；
+- execution started/completed/failed；
+- bounded duration/result evidence；
+- Bash sanitized evidence。
+
+Activity 不包含原始 Secret，也不应保存 raw Bash output/argv 作为授权证据。
+
+## 11. Troubleshooting 模型
+
+### ChatGPT 看不到某个工具
+
+按顺序检查：
+
+```text
+Tool enabled?
+→ current Runtime generation 已重启/收敛?
+→ security mode eligible?
+→ tool readiness ready?
+→ Policy 是否 DENY?
+→ Harness/Tunnel 是否连接到当前 Runtime?
+```
+
+### 工具能看到但执行停住
+
+通常检查：
+
+- effective Policy 是否 ASK；
+- Approvals 页面是否存在 Pending；
+- Approval 是否过期；
+- Session Grant 是否 scope 不匹配。
+
+### Bash 看不到
+
+检查：
+
+- `bash.enabled`；
+- SecurityMode 是否 Developer/Test；
+- Git Bash executable readiness；
+- Policy；
+- Runtime restart/convergence。
+
+## 12. Source-of-Truth
+
+| 问题 | 代码 |
 | --- | --- |
-| Runtime MCP lifecycle | runtime/src/mcp/**, runtime/src/server.rs |
-| MCP endpoint handoff | protocol/src/v1/methods.rs, ui/src-tauri/src/runtime/mod.rs |
-| Runtime execution | runtime/src/execution/**, runtime/src/workspace/**, runtime/src/policy/** |
-| Tunnel launch / readiness | ui/src-tauri/src/tunnel/** |
-| Harness lifecycle | ui/src-tauri/src/harness.rs, ui/src-tauri/src/commands/** |
-| Real UI adapter | ui/src/services/harness/local-client.ts |
-| V2 acceptance | wiki/V2-ACCEPTANCE.md |
-| V3 historical archive | docs/archive/v3-2026-10/README.md |
+| MCP service | `runtime/src/mcp/service.rs` |
+| MCP HTTP/lifecycle | `runtime/src/mcp/http.rs`, `runtime/src/mcp/runtime.rs` |
+| Tool registry/effective | `runtime/src/tools/registry.rs`, `effective.rs` |
+| Policy | `runtime/src/policy/engine.rs` |
+| Approval | `runtime/src/approval.rs` |
+| Session Grant | `runtime/src/session_grant.rs` |
+| Bash | `runtime/src/bash/**` |
+| Control methods | `protocol/src/v1/methods.rs` |
+| Tauri Runtime | `ui/src-tauri/src/runtime/**` |
+| Tunnel | `ui/src-tauri/src/tunnel/**` |
+| Harness | `ui/src-tauri/src/harness.rs` |
 
-## 9. Related Documents
+## 13. Related
 
 - [README.md](./README.md)
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [CODEBASE-MAP.md](./CODEBASE-MAP.md)
 - [IMPLEMENTATION-MATRIX.md](./IMPLEMENTATION-MATRIX.md)
-- [V2-ACCEPTANCE.md](./V2-ACCEPTANCE.md)

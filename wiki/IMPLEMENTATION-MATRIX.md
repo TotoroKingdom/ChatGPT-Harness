@@ -1,91 +1,171 @@
 # IMPLEMENTATION MATRIX
 
-~~~yaml
-V2 — Read-only Harness
-Status: ACCEPTED / FROZEN
-~~~
+> 当前 main / HEAD（0.1.3）能力矩阵。这里描述“代码当前具备什么”，不使用旧 V2/V3 milestone 状态替代事实，也不把 V4 Roadmap 目标写成已实现。
 
-判定基准是当前源码、Tests、Manifests 和构建脚本。外部 ChatGPT E2E 已完成 **manual acceptance（人工验收）**；它不是自动化测试列的 PASS，也不把 mock、进程存在或本地 Runtime HTTP 测试冒充真实外部调用。
+## 1. Runtime / Tool Capability
 
-| Capability | Core | Protocol | Tauri | UI | Automated evidence | Acceptance status |
-| --- | --- | --- | --- | --- | --- | --- |
-| Runtime lifecycle | Implemented | Implemented | Implemented | Implemented | PASS | V2 accepted |
-| Runtime MCP endpoint handoff | Implemented | Implemented | Implemented | Internal only | PASS | V2 accepted |
-| WorkspaceGuard / Policy / Execution | Implemented | Not Applicable | Not Applicable | Not Applicable | PASS | V2 accepted |
-| SecretStore controlled read | Not Applicable | Reference implemented | Implemented | Transient input only | PASS | V2 accepted |
-| API key boundary | Not Applicable | SecretReference only | Implemented | Implemented | PASS | V2 accepted |
-| Tunnel distribution resolution | Not Applicable | Manifest metadata | Implemented | Dev override only | PASS | V2 accepted |
-| Tunnel launch | Not Applicable | Not Applicable | Implemented | Harness action | PASS | V2 accepted |
-| Tunnel readiness | Not Applicable | Not Applicable | Implemented | Real state consumed | PASS | V2 accepted |
-| Windows process-tree ownership | Not Applicable | Not Applicable | Implemented | Not Applicable | PASS | V2 accepted |
-| Harness eligibility | Not Applicable | Implemented statuses | Implemented | Remediation rendered | PASS | V2 accepted |
-| Harness orchestration | Not Applicable | HarnessStatus payload | Implemented | Start / Stop / Restart | PASS | V2 accepted |
-| Runtime crash convergence | Implemented | Not Applicable | Implemented | Event-driven state | PASS | V2 accepted |
-| Tunnel crash convergence | Not Applicable | Not Applicable | Implemented | Event-driven state | PASS | V2 accepted |
-| Real UI state | Not Applicable | HarnessStatus | Implemented | Implemented | PASS | V2 accepted |
-| read_file / glob execution | Implemented | Not Applicable | Not Applicable | Activity view | PASS locally | External path manually accepted |
-| Distribution staging | Not Applicable | Manifest | Implemented | Build scripts | PASS | V2 accepted |
-| NSIS bundle verification | Not Applicable | Manifest | Implemented | Build script | PASS | V2 accepted |
-| Development external E2E | Implemented | Implemented | Implemented | Implemented | Not an automated test | MANUAL ACCEPTANCE |
-| Installed external E2E | Implemented | Implemented | Implemented | Implemented | Not an automated test | MANUAL ACCEPTANCE |
-| Approval resume workflow | Out of V2 scope | DTOs only | Not applicable | Not applicable | Not implemented | V3 Phase 3 planned |
-| write_file / edit_file / bash | Out of V2 scope | Not applicable | Not applicable | Not applicable | Not implemented | V3 planned |
+| Capability | 当前实现 | 默认状态 | Runtime authority |
+| --- | --- | --- | --- |
+| Tool Registry | 已实现 | 固定 5 个内置工具 | `runtime/src/tools/registry.rs` |
+| `read_file` | 已实现 | enabled + ALLOW | WorkspaceGuard + Policy |
+| `glob` | 已实现 | enabled + ALLOW | WorkspaceGuard + Policy |
+| `write` | 已实现 | enabled + ALLOW | WorkspaceGuard + Policy + atomic mutation |
+| `edit` | 已实现 | enabled + ALLOW | WorkspaceGuard + Policy + atomic mutation |
+| `bash` | 已实现 | disabled + ASK | Developer/Test mode + readiness + Policy/Approval |
+| Effective tools | 已实现 | Runtime 计算 | `runtime/src/tools/effective.rs` |
+| MCP filtering | 已实现 | 仅 Available / AvailableWithApproval | `runtime/src/mcp/service.rs` |
 
-## Automated validation boundary
+## 2. Security / Authorization
 
-自动化验证只声明已实际执行的本地门禁与组件覆盖，例如：
+| Capability | 当前实现 | 关键语义 |
+| --- | --- | --- |
+| Workspace confinement | 已实现 | Runtime 内 canonicalization / escape rejection |
+| System Policy guardrail | 已实现 | 固定、只读、用户不可降级 |
+| Tool default policy | 已实现 | ALLOW / ASK / DENY |
+| User Tool rule | 已实现 | typed tool matcher |
+| User Bash rule | 已实现 | executable + argvPrefix |
+| Invalid policy fail-closed | 已实现 | invalid snapshot/context 不放行 |
+| Approval | 已实现 | exact invocation suspend/resume |
+| Approval TTL | 已实现 | 默认 5 分钟 |
+| Allow once | 已实现 | 只放行该次调用 |
+| Allow for session | 已实现 | generation-local exact-scope grant |
+| Deny | 已实现 | 不执行副作用 |
+| Approval expiry/cancel | 已实现 | waiter 收敛 |
+| Session Grant | 已实现 | memory-only，非 tool-wide permission |
 
-~~~text
-cargo fmt --all -- --check
-cargo check --workspace
-cargo test --workspace
-cd ui
-npm test
-npm run build
-npm run distribution:stage
-npm run bundle:windows
-~~~
+## 3. File Mutation
 
-这些门禁证明代码、contract、Runtime/Tauri/UI 测试和分发校验的相应覆盖；它们不自动证明当前 ChatGPT connector、真实 Tunnel credential 或人工外部连接。
+| Capability | 当前实现 | 行为 |
+| --- | --- | --- |
+| Full-file write | 已实现 | create / overwrite UTF-8 file |
+| Atomic write path | 已实现 | shared atomic mutation |
+| Target revalidation | 已实现 | mutation 前后保护 |
+| Edit | 已实现 | exact single-match replacement |
+| Multi-match edit rejection | 已实现 | 不自动选择 first match |
+| Outside Workspace rejection | 已实现 | no side effect |
+| Target changed detection | 已实现 | fail closed |
 
-## V2 acceptance boundary
+## 4. Bash
 
-人工验收覆盖：
+| Capability | 当前实现 | 当前硬限制/语义 |
+| --- | --- | --- |
+| Git Bash discovery | 已实现 | Runtime 每 generation 验证 |
+| Developer/Test mode gate | 已实现 | Normal mode 不可用 |
+| Analyzer | 已实现 | quote-aware + risk flags |
+| High-risk ASK floor | 已实现 | unclassified high-risk 至少 ASK |
+| Command-specific Policy | 已实现 | executable + argvPrefix |
+| Async execution | 已实现 | Runtime-owned |
+| Command size | 已实现 | 8192 bytes |
+| Timeout | 已实现 | 30s |
+| Output cap | 已实现 | stdout + stderr 256 KiB |
+| Concurrency cap | 已实现 | 1 |
+| Cancellation | 已实现 | request cancellation |
+| Process-tree cleanup | 已实现 | owned tree cleanup |
+| Bash session grant | 已实现 | 仅 classified exact scope |
 
-~~~text
-Configure Workspace / Tunnel ID / API Key
-        ↓
-Start Harness
-        ↓
-Runtime = ready
-MCP = ready
-Tunnel = ready
-Harness = ready
-        ↓
-ChatGPT discovers tools
-        ↓
-ChatGPT calls read_file / glob
-        ↓
-WorkspaceGuard + Policy + Execution
-        ↓
-Activity appears in UI
-        ↓
-Stop Harness
-        ↓
-Tunnel and Runtime exit
-~~~
+## 5. Observability
 
-人工验收仍然标记为 manual acceptance；不要将其改写成 automated PASS。
+| Capability | 当前实现 | 边界 |
+| --- | --- | --- |
+| Audit events | 已实现 | bounded, non-secret metadata |
+| Activity projection | 已实现 | UI-safe projection |
+| Activity capacity | 已实现 | 256 / Runtime lifetime |
+| Approval evidence | 已实现 | approval id / decision / lifecycle |
+| Result evidence | 已实现 | bounded result metadata |
+| Bash evidence | 已实现 | sanitized preview / flags / exit/duration |
+| Runtime diagnostics | 已实现 | local control read |
+| Effective tools read | 已实现 | Runtime authoritative |
+| Policy effective snapshot | 已实现 | Runtime authoritative |
 
-## Source-of-truth locations
+Activity 不是 durable audit database；Runtime restart 后不要把旧 Activity 当成持久历史。
 
-| Question | Source |
+## 6. Desktop / Lifecycle
+
+| Capability | 当前实现 |
 | --- | --- |
-| Runtime / MCP | runtime/src/** |
-| Control protocol | protocol/src/** |
-| Runtime supervision / endpoint handoff | ui/src-tauri/src/runtime/** |
-| Tunnel launch / readiness / cleanup | ui/src-tauri/src/tunnel/** |
-| Harness lifecycle | ui/src-tauri/src/harness.rs, ui/src-tauri/src/commands/** |
-| React state adapter | ui/src/services/harness/**, ui/src/app/providers/** |
-| V2 acceptance record | wiki/V2-ACCEPTANCE.md |
-| V3 historical archive | docs/archive/v3-2026-10/README.md |
+| React + Tauri desktop app | 已实现 |
+| Config persistence | 已实现 |
+| Config migration | 已实现 |
+| Current config schema | 2 |
+| SecretStore | 已实现 |
+| Runtime child lifecycle | 已实现 |
+| Runtime MCP endpoint handoff | 已实现 |
+| Tunnel managed launch | 已实现 |
+| Tunnel readiness | 已实现 |
+| Harness Start / Stop / Restart | 已实现 |
+| Crash/readiness convergence | 已实现 |
+| Session/generation stale callback protection | 已实现 |
+| Portable build | 已实现 |
+| NSIS build | 已实现 |
+
+## 7. UI
+
+| Capability | 当前实现 |
+| --- | --- |
+| Overview | 已实现 |
+| Tools | 已实现 |
+| Policies | 已实现 |
+| Approvals | 已实现 |
+| Activity | 已实现 |
+| Settings | 已实现 |
+| First-run flow | 已实现 |
+| English | 已实现 |
+| 简体中文 | 已实现 |
+| dark | 已实现 |
+| light | 已实现 |
+| system theme | 已实现 |
+
+## 8. 当前不应误写成“已实现”的 V4 目标
+
+V4 正在开发。以下能力是否完成必须看对应 milestone 的源码与验收状态，不能仅因出现在 PRD/Roadmap 就更新为 Implemented：
+
+- 系统托盘 / 关闭窗口后后台运行；
+- 应用启动后自动启动 Harness；
+- 桌面通知；
+- 一键连接诊断；
+- 更高级的结构化调用链追踪；
+- Eval / Agent 工程评测能力；
+- 权限模拟器；
+- 其他 V4 新增能力。
+
+当这些能力真正合入并通过其定义的验证/验收后，再更新本页。
+
+## 9. 默认安全状态
+
+新配置的关键默认值：
+
+```text
+tools:
+  read_file: enabled
+  glob: enabled
+  write: enabled
+  edit: enabled
+  bash: disabled
+
+policy defaults:
+  read_file: ALLOW
+  glob: ALLOW
+  write: ALLOW
+  edit: ALLOW
+  bash: ASK
+
+security:
+  mode: Normal
+```
+
+因此 Bash 即使实现存在，也不会在默认 Normal 模式 + disabled 配置下暴露。
+
+## 10. 判定规则
+
+本矩阵只回答当前实现，不直接宣称“某版本测试 PASS”。
+
+实现证据优先级：
+
+```text
+source
+→ tests
+→ manifest/build scripts
+→ current wiki
+```
+
+历史人工验收记录可说明过去某个发布点发生过什么，但不能覆盖当前 HEAD 的源码事实。

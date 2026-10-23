@@ -1,149 +1,367 @@
 # CODEBASE MAP
 
-> 基准：当前源码、manifest、Tests 与构建脚本。V2 已完成真实链路验收并冻结；V3 文档只描述计划。
-
-~~~yaml
-V2 — Read-only Harness
-Status: ACCEPTED / FROZEN
-~~~
+> 面向当前 main / HEAD（0.1.3）的代码导航。此页按“谁拥有 authority”组织，而不是按旧 Milestone 组织。
 
 ## 1. Repository Structure
 
-| 区域 | 当前职责 | 主要边界 |
+| 区域 | 当前职责 | Authority / 边界 |
 | --- | --- | --- |
-| protocol/ | Tauri/Runtime 共用 control protocol、JSON Schema、TypeScript 生成物 | 只定义 contract，不实现进程或业务 |
-| runtime/ | WorkspaceGuard、工具注册、Policy、ExecutionPipeline、Activity/Audit、Diagnostics、loopback MCP | 只拥有 Runtime 与本地 MCP，不拥有 Tunnel/Secret |
-| ui/src-tauri/src/runtime/ | Runtime 分发解析、child 生命周期、MCP endpoint handoff | endpoint 只在 Tauri 内部保存，停止/崩溃时清除 |
-| ui/src-tauri/src/tunnel/ | Tunnel 分发解析、CLI launch、健康发现、/readyz、进程树清理 | API Key 仅受控注入 child 环境；状态不含 secret 或 endpoint |
-| ui/src-tauri/src/harness.rs | HarnessController、统一 start/stop/restart/status/eligibility、session/generation 收敛 | 是产品生命周期唯一 owner |
-| ui/src-tauri/src/secrets/ | Windows Credential Manager 与测试内存 SecretStore | get 仅供 Tauri 受控 Tunnel launch 使用 |
-| ui/src/ | React 页面、Provider、real/mock client、状态/事件适配 | 产品生命周期调用 Harness commands，不直接组合 Runtime |
-| ui/scripts/ | release staging、NSIS bundle 验证 | 同时校验 UI、Runtime、Tunnel client、cloudflared 与 manifest |
-| tunnel-client-v0.0.13-windows-amd64/ | 已验证的 Tunnel client 0.0.13 包 | staging 原样保留 executable、metadata、license/notice/SBOM |
-| wiki/ | 当前代码事实、实现矩阵和验收边界 | 不记录 V3 未实现能力 |
-| docs-codex/ | 下一版本开发工作区 | 不作为实现证据 |
-| docs/archive/ | V2、V3 和更早资料 | 只提供历史上下文 |
+| `protocol/` | Control/config/tools/policy/approval/activity/diagnostics contracts、schema、TS 生成物 | 定义 contract，不执行授权 |
+| `runtime/` | MCP、Workspace、Tools、Policy、Approval、Bash、Execution、Audit/Activity | 工具授权与执行 authority |
+| `ui/src/` | React UI、路由、页面、Provider、i18n、theme | 展示与用户意图，不是授权 authority |
+| `ui/src-tauri/src/` | Config、Secret、Runtime/Tunnel 生命周期、Harness orchestration | Desktop/process lifecycle authority |
+| `ui/scripts/` | distribution staging、Portable/NSIS packaging/verification | 分发链路 |
+| `tunnel-client-*/` | bundled Tunnel payload | transport payload |
+| `wiki/` | 当前代码地图 | 必须跟随 HEAD |
+| `docs-codex/` | V4 产品与 milestone 开发文档 | intended behavior，不是实现证据 |
+| `docs/archive/` | 历史资料 | 非当前事实来源 |
 
-## 2. Product Process Architecture
+## 2. Runtime 入口
 
-~~~text
-React UI
-  ↕ invoke / harness:status
-Tauri HarnessController
-  ├─ RuntimeSupervisor ── JSONL control ── chatgpt-harness-runtime
-  │                                      └─ 127.0.0.1:<ephemeral>/mcp
-  └─ TunnelProcessManager ── tunnel-client ── OpenAI control plane
-                                      └─ MCP target = Runtime /mcp
-~~~
+### 核心初始化
 
-Runtime MCP 的真实调用链保持为：
+- `runtime/src/main.rs`：binary entry；
+- `runtime/src/server.rs`：control server / initialize wiring；
+- `runtime/src/state.rs`：RuntimeCore、generation 状态与模块组合。
 
-~~~text
-ChatGPT → Tunnel → Runtime MCP → effective tools → MCP adapter
-        → ExecutionPipeline → WorkspaceGuard → Policy → executor
-        → Audit / Activity → UI
-~~~
+Runtime 启动后同时存在：
 
-Runtime 只绑定 loopback。Tauri 通过 mcp.endpoint.get 取回当前 Runtime 实例的 endpoint；该 URL 不进入 AppConfig、RuntimeState、React state 或 HarnessStatus。
+```text
+stdin/stdout JSONL control server
++
+loopback MCP HTTP server
+```
 
-## 3. Harness Lifecycle
+## 3. Tool System
 
-产品级入口位于 ui/src-tauri/src/commands/mod.rs：
+### Registry
 
-~~~text
-harness_start_eligibility
-  → config/workspace/security/runtime distribution
-  → Tunnel ID/API key reference/secret retrieval
-  → Tunnel distribution resolution
+`runtime/src/tools/registry.rs`
 
-harness_start
-  → eligibility re-check
-  → Runtime start
-  → mcp.endpoint.get + loopback validation
-  → SecretStore get
-  → tunnel-client launch
-  → health URL discovery + /readyz
-  → Harness Ready
+稳定内置目录：
 
-harness_stop
-  → Tunnel/cloudflared cleanup
-  → Runtime cleanup
-  → session/endpoint clear
-  → Harness stopped
+```text
+read_file   WorkspaceRead
+glob        WorkspaceRead
+write       WorkspaceWrite
+edit        WorkspaceWrite
+bash        DeveloperShell
+```
 
-harness_restart = complete stop → reload config/secret → full start
-~~~
+### Effective Catalog
 
-HarnessController 用单 operation lock 串行 lifecycle command；Runtime watcher 带 Runtime generation，Tunnel watcher 带 instance id，stale callback 不会修改新 session。Runtime crash 会让 Harness 离开 Ready 并停止关联 Tunnel；Tunnel crash 会让 Harness 进入 Error，Runtime 可保留作诊断。
+`runtime/src/tools/effective.rs`
 
-产品状态来自 HarnessStatus：
+综合判断：
 
-~~~text
-lifecycle: stopped | starting | ready | degraded | error | stopping
-runtime:   stopped | starting | ready | degraded | error | stopping
-mcp:       stopped | starting | ready | degraded | error | stopping
-tunnel:    stopped | starting | ready | degraded | error | stopping
-~~~
+- implemented；
+- enabled；
+- exposure；
+- security mode；
+- Runtime/tool readiness；
+- Policy result。
 
-Harness Ready 只有 Runtime、MCP、Tunnel 同时 Ready 且属于同一 active session 才成立。
+输出 availability：
 
-## 4. Tunnel Launch and Security Boundary
+```text
+available
+available_with_approval
+unavailable_by_mode
+unavailable_by_policy
+unavailable_by_runtime
+unavailable_disabled
+```
 
-实际 0.0.13 CLI contract 在 TunnelProcessManager 中固定为：
+### File Tools
 
-~~~text
-run
---control-plane.tunnel-id <id>
---control-plane.api-key env:HARNESS_TUNNEL_API_KEY
---mcp.server-url url=<Runtime endpoint>,channel=main
---cloudflared.path <bundled companion>
---health.listen-addr 127.0.0.1:0
---health.url-file <temporary loopback health artifact>
-~~~
+- `runtime/src/tools/read_file.rs`
+- `runtime/src/tools/glob.rs`
+- `runtime/src/tools/write.rs`
+- `runtime/src/tools/edit.rs`
+- `runtime/src/tools/atomic_file.rs`
 
-原始 API Key 不进入 argv、AppConfig、Runtime snapshot、IPC response、Activity、diagnostics 或普通日志；只在 child launch 的环境变量中短暂存在。Tunnel stdout/stderr 不透传到用户界面。
+`write` 与 `edit` 共用 atomic mutation 基础设施。
 
-Windows 使用每 managed session 一个 Job Object，并在 graceful timeout 后终止 Job Object，确保 tunnel-client.exe 与 cloudflared.exe descendants 一起退出；不按进程名杀 unrelated process。
+## 4. Workspace
 
-Tunnel Ready 需要 control-plane connection、configured MCP target reachability 和 authoritative /readyz 健康检查。PID、spawn 成功、监听端口都不能单独产生 Ready。
+`runtime/src/workspace/**`
 
-## 5. Distribution
+主要负责：
 
-ui/src-tauri/src/runtime/manifest.rs 当前为 distribution schema 2，声明：
+- active Workspace canonicalization；
+- Windows path 形式与边界校验；
+- path escape rejection；
+- read/write target approval；
+- mutation 目标再验证；
+- 返回逻辑相对路径，而不是把内部物理路径当成对外事实。
 
-~~~text
-runtime/chatgpt-harness-runtime.exe
-tunnel/tunnel-client.exe
-tunnel/cloudflared.exe
-~~~
+WorkspaceGuard 是 Runtime authority。
 
-stage-distribution.ps1 保留 Tunnel 包中的 client、companion、metadata、license、notice、SBOM；tauri.conf.json 将 runtime、tunnel 和 distribution.json 作为资源；verify-nsis-bundle.ps1 验证完整 payload。
+## 5. Policy
 
-## 6. Runtime Execution and Acceptance
+`runtime/src/policy/engine.rs`
 
-read_file 与 glob 仍由 Runtime MCP 进入既有安全执行链。Runtime 的 execution Activity 通过 control-read/API 和 UI Activity 页面展示。
+输入：
 
-V2 外部 ChatGPT E2E 已完成 manual acceptance（人工验收）。这表示真实 ChatGPT → Tunnel → Runtime MCP → tool call → Activity 链路已经验收；该验收不被写成自动化测试 PASS。
+- `ToolPolicyDefaults`
+- typed User Rules
+- Runtime-owned System Rules
+- SecurityMode
+- Tool capability
+- Bash analyzer facts（Bash 请求）
 
-V2 仍不包含 write_file、edit_file、bash / shell 或 Approval resume；这些能力的 V3 历史规划见 [V3 ROADMAP](../docs/archive/v3-2026-10/ChatGPT-Harness_V3_ROADMAP.md)，当前实现仍以源码、Tests、Manifests 和最新 Wiki 为准。
+重要语义：
 
-## 7. Source-of-Truth Locations
+- invalid snapshot/context fail closed；
+- system workspace boundary 不可由用户规则降低；
+- BashCommand matcher 使用 normalized executable + argvPrefix；
+- Runtime 生成 effective snapshot 给 UI 使用。
 
-| Question | Source |
+Protocol：
+
+- `protocol/src/v1/config.rs`
+- `protocol/src/v1/policies.rs`
+
+## 6. Approval
+
+### Runtime Manager
+
+`runtime/src/approval.rs`
+
+职责：
+
+- 注册 pending request；
+- 5 分钟 TTL；
+- list / pending_count；
+- resolve；
+- 唤醒 exact invocation；
+- expiry / cancellation。
+
+Decision：
+
+```text
+allow_once
+allow_for_session
+deny
+```
+
+### Session Grant
+
+`runtime/src/session_grant.rs`
+
+特征：
+
+- memory-only；
+- Runtime-generation-local；
+- exact tool + normalized scope；
+- 不等价于 tool-wide 永久 ALLOW。
+
+### Protocol
+
+`protocol/src/v1/approvals.rs`
+
+包含安全展示用 sanitized arguments、Bash approval details、risk flags、TTL/status/decision。
+
+## 7. Bash
+
+目录：`runtime/src/bash/`
+
+| 文件 | 职责 |
 | --- | --- |
-| Runtime MCP lifecycle | runtime/src/mcp/runtime.rs, runtime/src/mcp/http.rs |
-| MCP service/tool adapter | runtime/src/mcp/service.rs |
-| Runtime initialization | runtime/src/server.rs |
-| Runtime state / execution | runtime/src/state.rs, runtime/src/execution/** |
-| Workspace / policy | runtime/src/workspace/**, runtime/src/policy/** |
-| Tunnel process lifecycle | ui/src-tauri/src/tunnel/mod.rs |
-| Tauri command surface | ui/src-tauri/src/commands/mod.rs |
-| Tauri app registration | ui/src-tauri/src/lib.rs |
-| Harness controller | ui/src-tauri/src/harness.rs |
-| Config persistence | ui/src-tauri/src/config/mod.rs |
-| Secret storage | ui/src-tauri/src/secrets/mod.rs |
-| Real UI adapter | ui/src/services/harness/local-client.ts |
-| Current implementation status | wiki/IMPLEMENTATION-MATRIX.md |
-| V2 acceptance | wiki/V2-ACCEPTANCE.md |
-| V3 historical archive | docs/archive/v3-2026-10/README.md |
-| Next-version documentation entry | docs-codex/README.md |
+| `discovery.rs` | Git Bash executable discovery / validation |
+| `analyzer.rs` | quote-aware command analysis / risk flags / normalized scope |
+| `runtime.rs` | async process execution、timeout、concurrency、cancel |
+| `output.rs` | stdout/stderr 总量限制 |
+| `process_tree.rs` | owned process tree cleanup |
+
+生产 limits：
+
+```text
+max command: 8192 bytes
+timeout: 30s
+stdout + stderr: 256 KiB
+max concurrent bash: 1
+```
+
+Bash 只在 Developer/Test mode 可用。
+
+## 8. MCP
+
+目录：`runtime/src/mcp/`
+
+- `runtime.rs`：MCP runtime lifecycle；
+- `http.rs`：loopback HTTP / Streamable HTTP；
+- `service.rs`：effective tool exposure + call dispatch；
+- `read_file.rs` / `glob.rs` / `write.rs` / `edit.rs` / `bash.rs`：adapter。
+
+关键行为：
+
+```text
+MCP tools/list
+→ Runtime effective tools
+→ 只暴露 Available / AvailableWithApproval
+```
+
+调用：
+
+```text
+MCP adapter
+→ Runtime execution pipeline
+→ Workspace
+→ Policy
+→ Approval/SessionGrant
+→ executor
+```
+
+## 9. Audit / Activity / Diagnostics
+
+### Audit
+
+`runtime/src/audit/**`
+
+只产生 bounded、non-secret evidence；不把 authorization authority 交给 observer。
+
+### Activity
+
+`runtime/src/activity/**`
+
+- safe UI projection；
+- capacity = 256；
+- Runtime lifetime 内存态；
+- category：Request / Workspace / Policy / Execution / Approval。
+
+### Control Reads
+
+- `runtime/src/control_read.rs`
+- `protocol/src/v1/control_read.rs`
+
+包含 diagnostics、activity snapshot、effective tools 等 UI/本机观测面。
+
+## 10. Tauri Host
+
+### Harness
+
+`ui/src-tauri/src/harness.rs`
+
+产品级 Start / Stop / Restart、session/generation、rollback、crash/readiness convergence。
+
+### Commands
+
+`ui/src-tauri/src/commands/mod.rs`
+
+包括：
+
+- config / secret；
+- workspace/tunnel/bash picker；
+- runtime control；
+- tools/policies/activity/approvals/diagnostics；
+- harness lifecycle。
+
+### Runtime Supervisor
+
+`ui/src-tauri/src/runtime/**`
+
+- distribution resolution；
+- child process；
+- JSONL control；
+- endpoint handoff；
+- generation ownership。
+
+### Tunnel Manager
+
+`ui/src-tauri/src/tunnel/**`
+
+- Tunnel distribution；
+- launch；
+- health/readiness；
+- process ownership；
+- cleanup。
+
+### Config / Secrets
+
+- `ui/src-tauri/src/config/**`
+- `ui/src-tauri/src/secrets/**`
+
+当前 persistent schema version = 2。
+
+AppConfig：
+
+```text
+workspace
+tunnel
+security
+ui
+tools
+bash
+policies
+```
+
+## 11. React UI
+
+### Pages
+
+- `ui/src/pages/overview/**`
+- `ui/src/pages/tools/**`
+- `ui/src/pages/policies/**`
+- `ui/src/pages/approvals/**`
+- `ui/src/pages/activity/**`
+- `ui/src/pages/settings/**`
+
+### Harness data/service
+
+`ui/src/services/harness/**` 与 Provider 负责对 Tauri/control data 做前端适配。
+
+### Theme
+
+`ui/src/theme/theme.ts`
+
+Preference：
+
+```text
+system
+light
+dark
+```
+
+### i18n
+
+当前 UI language wire values：
+
+```text
+en
+zh-CN
+```
+
+语言属于 UI preference，不进入 RuntimeConfigSnapshot。
+
+## 12. Distribution
+
+`ui/scripts/`
+
+主要脚本包括 staging、Portable build、NSIS build 与 bundle verification。
+
+产品构建需要同时携带：
+
+- desktop UI；
+- Runtime；
+- Tunnel client；
+- Tunnel companion/resources；
+- distribution metadata。
+
+具体 payload 以当前 distribution manifest 和 scripts 为准，不应在 Wiki 固化旧包版本号。
+
+## 13. 常见修改该看哪里
+
+| 修改目标 | 首选入口 |
+| --- | --- |
+| 新增/修改 MCP 工具 | `runtime/src/tools/**`, `runtime/src/mcp/**`, protocol |
+| 改 Workspace 安全规则 | `runtime/src/workspace/**` |
+| 改 Policy | `protocol/src/v1/policies.rs`, `runtime/src/policy/**`, Policies UI |
+| 改 Approval | `protocol/src/v1/approvals.rs`, `runtime/src/approval.rs`, Approvals UI |
+| 改 Bash | `runtime/src/bash/**`, Tool/Policy/Approval UI |
+| 改 Runtime 生命周期 | `runtime/src/server.rs`, `ui/src-tauri/src/runtime/**` |
+| 改整条 Harness 编排 | `ui/src-tauri/src/harness.rs` |
+| 改 Tunnel | `ui/src-tauri/src/tunnel/**` |
+| 改配置 | protocol config + Tauri ConfigStore + Settings |
+| 改页面/交互 | `ui/src/pages/**`, components, styles |
+| 改语言/主题 | i18n + `ui/src/theme/**` |
