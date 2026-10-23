@@ -102,10 +102,10 @@ $manifestPath = Join-Path $stagingDirectory "distribution.json"
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $manifest.ui_sha256 = Get-Sha256 (Join-Path $stagingDirectory "chatgpt-harness-ui.exe")
 $finalProvenance = $null
-for ($attempt = 0; $attempt -lt 10; $attempt++) {
+for ($attempt = 0; $attempt -lt 60; $attempt++) {
     $finalProvenance = Get-GitProvenance $repositoryRoot
     if (-not $finalProvenance.SourceDirty) { break }
-    Start-Sleep -Milliseconds 250
+    Start-Sleep -Milliseconds 500
 }
 $manifest.build_sha = $finalProvenance.BuildSha
 $manifest.source_dirty = $finalProvenance.SourceDirty
