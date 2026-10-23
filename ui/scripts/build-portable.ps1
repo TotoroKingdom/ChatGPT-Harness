@@ -33,6 +33,40 @@ function Get-Sha256([string]$Path) {
     return ([BitConverter]::ToString($hash)).Replace("-", "")
 }
 
+function Get-Sha256Text([string]$Text) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text))
+    } finally {
+        $sha.Dispose()
+    }
+    return ([BitConverter]::ToString($hash)).Replace("-", "")
+}
+
+function Get-GitProvenance([string]$Root) {
+    $gitArgs = @('-C', $Root, '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', '-c', 'core.trustctime=false')
+    $buildSha = (& git @gitArgs rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildSha)) {
+        throw "Could not determine the build SHA."
+    }
+    $buildSha = $buildSha.Trim()
+    $statusRaw = (& git @gitArgs status --porcelain 2>$null) -join "`n"
+    $diff = (& git @gitArgs diff --binary HEAD 2>$null) -join "`n"
+    $cachedDiff = (& git @gitArgs diff --cached --binary 2>$null) -join "`n"
+    $status = $statusRaw
+    if ([string]::IsNullOrWhiteSpace($diff) -and [string]::IsNullOrWhiteSpace($cachedDiff)) {
+        $status = (($statusRaw -split "`n" | Where-Object { $_.StartsWith("??") }) -join "`n")
+    }
+    [pscustomobject]@{
+        BuildSha = $buildSha
+        SourceStatus = $status
+        SourceDiff = $diff
+        SourceCachedDiff = $cachedDiff
+        SourceDirty = -not [string]::IsNullOrWhiteSpace($status)
+        SourceStateSha = Get-Sha256Text ($buildSha + "`n" + $status + "`n" + $diff + "`n" + $cachedDiff)
+    }
+}
+
 $appVersion = Get-CargoPackageVersion (Join-Path $repositoryRoot "ui\src-tauri\Cargo.toml")
 $portableName = "ChatGPT-Harness_${appVersion}_x64-portable"
 $destination = [IO.Path]::GetFullPath((Join-Path $portableRoot $portableName))
@@ -61,6 +95,10 @@ Copy-Item -LiteralPath $releaseExecutable -Destination (Join-Path $stagingDirect
 $manifestPath = Join-Path $stagingDirectory "distribution.json"
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $manifest.ui_sha256 = Get-Sha256 (Join-Path $stagingDirectory "chatgpt-harness-ui.exe")
+$finalProvenance = Get-GitProvenance $repositoryRoot
+$manifest.build_sha = $finalProvenance.BuildSha
+$manifest.source_dirty = $finalProvenance.SourceDirty
+$manifest.source_state_sha256 = $finalProvenance.SourceStateSha
 $manifestJson = $manifest | ConvertTo-Json -Depth 8
 [IO.File]::WriteAllText($manifestPath, $manifestJson + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
 
