@@ -6,7 +6,7 @@
 
 ## 1. Isolated implementation
 
-Path: `evaluation/m00-poc/` with an explicit empty Cargo workspace. It is not imported by the production Runtime/Tauri crates.
+Path: `runtime/tests/m00/agent-evaluation-poc/` with an explicit empty Cargo workspace. It is not imported by the production Runtime/Tauri crates.
 
 The spike contains:
 
@@ -20,8 +20,8 @@ The spike contains:
 
 ## 2. Versioned smoke case
 
-- Case: `evaluation/m00-poc/cases/read-file-smoke.json`
-- Fixture: `evaluation/m00-poc/fixtures/read-file/README.md`
+- Case: `runtime/tests/m00/agent-evaluation-poc/cases/read-file-smoke.json`
+- Fixture: `runtime/tests/m00/agent-evaluation-poc/fixtures/read-file/README.md`
 - Fixture SHA-256: `8a3367b637c9e3699c4f5576658f76db44c53d1b254656bef4c05cf563293f5b`
 - Expected tool: `read_file`
 - Argument constraint: Workspace-relative `path`, expected `README.md`
@@ -36,7 +36,7 @@ The runner computes a SHA-256 case identity and observed tool-schema identity in
 ## 3. Local verification
 
 ```text
-cargo test --manifest-path evaluation/m00-poc/Cargo.toml
+cargo test --manifest-path runtime/tests/m00/agent-evaluation-poc/Cargo.toml --target-dir target/m00-validation
 ```
 
 Result: **PASS** — 7 library tests passed, 0 failed; binary tests: 0; doc-tests: 0.

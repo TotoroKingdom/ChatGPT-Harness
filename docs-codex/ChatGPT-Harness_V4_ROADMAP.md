@@ -34,10 +34,10 @@ docs-codex/v4/milestones/Mxx-short-name/
 ├── TASKS.md
 ├── INTEGRATION_TEST_PLAN.md
 ├── E2E_TEST_PLAN.md
-├── MANUAL_ACCEPTANCE_CHECKLIST.md
-├── ACCEPTANCE.md
-└── EVIDENCE_INDEX.md
+└── MANUAL_ACCEPTANCE_CHECKLIST.md
 ~~~
+
+文件布局修订（2026-10-24，用户授权）：每个里程碑目录仅允许上述六份文件，不含子目录。报告、ADR、ACCEPTANCE.md、EVIDENCE_INDEX.md 及需保留的脱敏验收日志/截图统一放在 `docs-codex/v4/evidence/Mxx-short-name/`；测试数据放在 `fixtures/v4/<milestone>/`；候选便携包及随包清单、散列和包校验记录放在 `artifacts/V4-Mxx-short-name/<candidate>/`，该目录不存放其他材料；编译缓存和临时验证材料统一放 `target/`。本修订不改变原有功能范围及验收门槛。
 
 此 Roadmap 不预先生成空模板；**启动对应里程碑才创建文件**。流程：
 

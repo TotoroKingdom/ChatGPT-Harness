@@ -15,7 +15,7 @@ use tempfile::tempdir;
 
 const FIXTURE_ROOT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs-codex/v4/milestones/M00-baseline-contract-gate/fixtures/config/"
+    "/../../fixtures/v4/m00/config/"
 );
 
 fn fixture(name: &str) -> Value {

@@ -4,3 +4,4 @@
 /ui/node_modules/
 /target-exe/
 /artifacts/
+/runtime/tests/m00/*/target/

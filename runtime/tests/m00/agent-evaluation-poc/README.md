@@ -5,7 +5,7 @@
 ## Local mechanics
 
 ```powershell
-cargo test --manifest-path evaluation/m00-poc/Cargo.toml
+cargo test --manifest-path runtime/tests/m00/agent-evaluation-poc/Cargo.toml --target-dir target/m00-validation
 ```
 
 本地测试使用 `ScriptedAgentAdapter` + in-memory transport，只验证 runner mechanics、schema validation、step limit、fixture/final-state scorer 和 cleanup。它不能作为 real model acceptance 证据。
@@ -24,8 +24,8 @@ case + tools + prior observations
 `HttpMcpTransport` 使用生产 Runtime 的 loopback Streamable HTTP `/mcp`，执行 `initialize`、`tools/list`、`tools/call`。CLI 示例：
 
 ```powershell
-cargo run --manifest-path evaluation/m00-poc/Cargo.toml -- `
-  --case evaluation/m00-poc/cases/read-file-smoke.json `
+cargo run --manifest-path runtime/tests/m00/agent-evaluation-poc/Cargo.toml --target-dir target/m00-validation -- `
+  --case runtime/tests/m00/agent-evaluation-poc/cases/read-file-smoke.json `
   --mcp-url http://127.0.0.1:PORT/mcp `
   --adapter-url http://127.0.0.1:ADAPTER_PORT/turn `
   --workspace-root C:\path\to\isolated\workspace

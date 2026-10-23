@@ -1,0 +1,53 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^M[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*$')]
+    [string]$Milestone
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot "docs-codex\v4\milestones\$Milestone") -PathType Container)) {
+    throw "Milestone plans do not exist: $Milestone"
+}
+& (Join-Path $PSScriptRoot "check-milestone-layout.ps1")
+& (Join-Path $PSScriptRoot "build-portable.ps1")
+if ($LASTEXITCODE -ne 0) { throw "Portable build failed." }
+$package = Get-Content -LiteralPath (Join-Path $repositoryRoot "ui\package.json") -Raw | ConvertFrom-Json
+$portableName = "ChatGPT-Harness_$($package.version)_x64-portable"
+$source = Join-Path $repositoryRoot "target\release\bundle\portable\$portableName"
+$manifest = Get-Content -LiteralPath (Join-Path $source "distribution.json") -Raw | ConvertFrom-Json
+$candidate = (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + ([guid]::NewGuid().ToString("N").Substring(0, 8))
+$delivery = Join-Path $repositoryRoot "artifacts\V4-$Milestone\$candidate"
+New-Item -ItemType Directory -Path $delivery -ErrorAction Stop | Out-Null
+$destination = Join-Path $delivery $portableName
+Copy-Item -LiteralPath $source -Destination $destination -Recurse
+foreach ($file in Get-ChildItem -LiteralPath $source -Recurse -File) {
+    $relative = $file.FullName.Substring($source.Length + 1)
+    if ((Get-FileHash -LiteralPath $file.FullName).Hash -ne (Get-FileHash -LiteralPath (Join-Path $destination $relative)).Hash) {
+        throw "Copied file hash mismatch: $relative"
+    }
+}
+$verification = & (Join-Path $PSScriptRoot "verify-portable.ps1") -PortableDirectory $destination
+$verification | Set-Content -LiteralPath (Join-Path $delivery "portable-verification.txt") -Encoding UTF8
+$hashes = @(Get-ChildItem -LiteralPath $destination -Recurse -File | ForEach-Object {
+    [ordered]@{ path = $_.FullName.Substring($destination.Length + 1); sha256 = (Get-FileHash -LiteralPath $_.FullName).Hash }
+})
+$record = [ordered]@{
+    milestone = $Milestone
+    candidate = $candidate
+    build_sha = $manifest.build_sha
+    source_dirty = $manifest.source_dirty
+    source_state_sha256 = $manifest.source_state_sha256
+    portable_verification = "PASS"
+    external_e2e = "NOT_VERIFIED_BY_DELIVERY_SCRIPT"
+    manual_acceptance = "NOT_EXECUTED"
+    acceptance_status = "CANDIDATE_ONLY_CHECK_EVIDENCE_INDEX_FOR_BLOCKERS"
+    evidence_index = "docs-codex/v4/evidence/$Milestone/EVIDENCE_INDEX.md"
+    entry = "$portableName/chatgpt-harness-ui.exe"
+    files = $hashes
+}
+$record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $delivery "delivery.json") -Encoding UTF8
+Write-Output "Milestone candidate delivered: $delivery"
+$verification | Write-Output

@@ -204,7 +204,7 @@ fn real_audit_event(tool: &'static str, event: PipelineEvent) -> AuditEvent {
 
 fn fixture(name: &str) -> EvidenceFixture {
     let path = format!(
-        "{}/../docs-codex/v4/milestones/M00-baseline-contract-gate/fixtures/evidence/{name}.json",
+        "{}/../fixtures/v4/m00/evidence/{name}.json",
         env!("CARGO_MANIFEST_DIR")
     );
     let text = std::fs::read_to_string(path).expect("M00 fixture exists");

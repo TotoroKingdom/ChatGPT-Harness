@@ -1,5 +1,7 @@
 # M00 Manual Acceptance Checklist — As-Is Baseline and Architecture Contract Gate
 
+> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+
 > Status: FROZEN / NOT EXECUTED  
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md  

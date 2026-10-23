@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $uiDirectory = (Resolve-Path (Join-Path $scriptDirectory "..")).Path
 $repositoryRoot = (Resolve-Path (Join-Path $uiDirectory "..")).Path
+& (Join-Path $scriptDirectory "check-milestone-layout.ps1")
 $stagingDirectory = Join-Path $repositoryRoot "target-exe\distribution"
 $releaseExecutable = Join-Path $repositoryRoot "target\release\chatgpt-harness-ui.exe"
 $portableRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot "target\release\bundle\portable"))

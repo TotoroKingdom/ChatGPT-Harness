@@ -1,5 +1,7 @@
 # M00 TASKS — As-Is Baseline and Architecture Contract Gate
 
+> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+
 > Status: DEVELOPMENT COMPLETE (Integration/E2E/Manual acceptance pending)
 > Inputs: SPEC.md, PLAN.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md, MANUAL_ACCEPTANCE_CHECKLIST.md  
 > Executor: Codex / Coding Agent  
@@ -46,7 +48,7 @@ T2 + T3 + T4 + T5 → T6
 Create:
 
 ~~~text
-docs-codex/v4/milestones/M00-baseline-contract-gate/AS_IS_BASELINE.md
+docs-codex/v4/evidence/M00-baseline-contract-gate/AS_IS_BASELINE.md
 ~~~
 
 The document must contain a stable Fact ID table covering at least:
@@ -151,7 +153,7 @@ Do not run real ChatGPT E2E in this task. That belongs to M00 E2E execution and 
 Create a versioned M00 fixture contract, recommended path:
 
 ~~~text
-docs-codex/v4/milestones/M00-baseline-contract-gate/fixtures/evidence/
+fixtures/v4/m00/evidence/
 ├── README.md
 ├── success.json
 ├── policy-denied.json
@@ -252,7 +254,7 @@ Use exact filters that exist after implementation and record them.
 Preferred structure:
 
 ~~~text
-poc/v4-m00-evidence-store/
+runtime/tests/m00/evidence-store-poc/
 ├── Cargo.toml
 ├── src/
 └── tests/
@@ -260,7 +262,7 @@ poc/v4-m00-evidence-store/
 
 The POC may use SQLite libraries suitable for the future implementation, but must not be imported by production chatgpt-harness-runtime or chatgpt-harness-ui.
 
-Cargo workspace isolation is mandatory. If this POC is a Rust crate under the repository root, either declare an empty `[workspace]` in its Cargo.toml or add `poc/v4-m00-evidence-store` to root `workspace.exclude`. The chosen mechanism must be documented and verified so the POC is never an implicit production workspace member.
+Cargo workspace isolation is mandatory. If this POC is a Rust crate under the repository root, either declare an empty `[workspace]` in its Cargo.toml or add `runtime/tests/m00/evidence-store-poc` to root `workspace.exclude`. The chosen mechanism must be documented and verified so the POC is never an implicit production workspace member.
 
 Use temporary directories in every automated test.
 
@@ -336,7 +338,7 @@ Persist approval/session-like historical facts and prove POC exposes no API that
 Create:
 
 ~~~text
-docs-codex/v4/milestones/M00-baseline-contract-gate/SQLITE_POC_REPORT.md
+docs-codex/v4/evidence/M00-baseline-contract-gate/SQLITE_POC_REPORT.md
 ~~~
 
 Include library/version, pragmas, lock strategy, test matrix, commands, actual results, limitations and recommendation for M03.
@@ -346,7 +348,7 @@ Include library/version, pragmas, lock strategy, test matrix, commands, actual r
 Primary command:
 
 ~~~text
-cargo test --manifest-path poc/v4-m00-evidence-store/Cargo.toml
+cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation
 ~~~
 
 Also verify root production workspace does not depend on the POC.
@@ -371,7 +373,7 @@ Also verify root production workspace does not depend on the POC.
 Create versioned fixtures, recommended:
 
 ~~~text
-docs-codex/v4/milestones/M00-baseline-contract-gate/fixtures/config/
+fixtures/v4/m00/config/
 ├── v2-representative.json
 ├── v2-non-defaults.json
 ├── v2-secret-reference.json
@@ -456,7 +458,7 @@ Add an assertion/test that CURRENT_SCHEMA_VERSION remains 2 at M00 completion.
 Create an isolated evaluation spike, recommended:
 
 ~~~text
-evaluation/m00-poc/
+runtime/tests/m00/agent-evaluation-poc/
 ├── README.md
 ├── cases/
 ├── fixtures/
@@ -537,7 +539,7 @@ If credentials/access are unavailable:
 Create:
 
 ~~~text
-docs-codex/v4/milestones/M00-baseline-contract-gate/EVAL_FEASIBILITY_REPORT.md
+docs-codex/v4/evidence/M00-baseline-contract-gate/EVAL_FEASIBILITY_REPORT.md
 ~~~
 
 Record:
@@ -588,7 +590,7 @@ The real model smoke execution itself belongs in the formal M00 Integration/E2E 
 Create:
 
 ~~~text
-docs-codex/v4/milestones/M00-baseline-contract-gate/ADR_DECISIONS.md
+docs-codex/v4/evidence/M00-baseline-contract-gate/ADR_DECISIONS.md
 ~~~
 
 Cover at least A01, A04, A05, A06, A07, A08, A10, A15, A17.
@@ -659,7 +661,7 @@ cargo check --workspace
 cargo test -p harness-control-protocol
 cargo test -p chatgpt-harness-runtime <affected suites>
 cargo test -p chatgpt-harness-ui <affected suites>
-cargo test --manifest-path poc/v4-m00-evidence-store/Cargo.toml
+cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation
 ~~~
 
 Run eval local tests with the exact command established in T5.

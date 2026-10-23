@@ -1,6 +1,8 @@
 # M00 E2E Test Plan — Baseline Chain, Controlled Eval and Production-Isolation Proof
 
-> Status: FROZEN / NOT EXECUTED  
+> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+
+> Status: FROZEN / EXECUTION RECORDED BELOW
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md  
 > Owner: QA/Coding Agent for locally automatable steps; explicitly authorized external execution for ChatGPT/networked model steps  
@@ -354,3 +356,9 @@ M00 E2E is PASS only when:
 Only after this may the Human Reviewer execute MANUAL_ACCEPTANCE_CHECKLIST.md.
 
 E2E PASS still does not itself mark M00 ACCEPTED/FROZEN.
+
+---
+
+## 9. Execution evidence location
+
+Execution results are maintained in [M00_E2E_EXECUTION_REPORT.md](../../evidence/M00-baseline-contract-gate/M00_E2E_EXECUTION_REPORT.md) and [EVIDENCE_INDEX.md](../../evidence/M00-baseline-contract-gate/EVIDENCE_INDEX.md). This plan retains the frozen criteria only.

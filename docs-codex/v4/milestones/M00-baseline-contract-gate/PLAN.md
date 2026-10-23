@@ -1,5 +1,7 @@
 # M00 PLAN — As-Is Baseline and Architecture Contract Gate
 
+> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+
 > Status: IMPLEMENTATION READY / VALIDATION FROZEN  
 > Input: SPEC.md  
 > Upstream: V4 PRD / Architecture / Roadmap, FROZEN FOR M00  
@@ -46,9 +48,10 @@ No phase may “solve” a POC failure by silently weakening the upstream Archit
 | live Activity | runtime/src/activity/* + current control/UI projection | do not replace or persist in M00 |
 | config | protocol/src/v1/config.rs + ui/src-tauri/src/config/* | current production schema remains v2 |
 | protocol | protocol/src/v1/* | additive test fixtures only; no protocol/v2 |
-| SQLite POC | isolated poc/v4-m00-evidence-store/ preferred | must not be production dependency |
-| Eval feasibility | isolated evaluation/m00-poc/ or equivalent | must not become production Runtime Agent loop |
-| M00 docs | docs-codex/v4/milestones/M00-baseline-contract-gate/ | authoritative milestone artifacts |
+| SQLite POC | isolated runtime/tests/m00/evidence-store-poc/ preferred | must not be production dependency |
+| Eval feasibility | isolated runtime/tests/m00/agent-evaluation-poc/ or equivalent | must not become production Runtime Agent loop |
+| M00 plans | docs-codex/v4/milestones/M00-baseline-contract-gate/ | six engineering and validation plans only |
+| M00 evidence | docs-codex/v4/evidence/M00-baseline-contract-gate/ | reports, decisions and acceptance evidence |
 
 If implementation needs a different POC path, ADR_DECISIONS.md records the final path and isolation rationale.
 
@@ -144,7 +147,7 @@ Prove the storage topology before M03 designs production DDL and APIs.
 Use a separate test/POC crate, preferably:
 
 ~~~text
-poc/v4-m00-evidence-store/
+runtime/tests/m00/evidence-store-poc/
 ~~~
 
 The root Cargo workspace must not import it as a production dependency. It may be run with its own manifest. If it is a Rust crate under the repository root, either declare an empty `[workspace]` in the POC manifest or add the POC path to root `workspace.exclude`; nested POC execution must never become an implicit production workspace member.
@@ -392,7 +395,7 @@ cargo test -p harness-control-protocol <affected filters>
 cargo test -p chatgpt-harness-runtime <affected filters>
 cargo test -p chatgpt-harness-ui <affected filters>
 
-cargo test --manifest-path poc/v4-m00-evidence-store/Cargo.toml
+cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation
 <config-contract POC command if a separate manifest is used>
 <controlled-eval local/unit command>
 ~~~

@@ -6,7 +6,7 @@
 ## 1. Candidate and isolation
 
 - Repository commit at T3 implementation start: `7f2a482b1babfdb08b5e80cabfa430d3d0227dac`.
-- POC path: `poc/v4-m00-evidence-store/`.
+- POC path: `runtime/tests/m00/evidence-store-poc/`.
 - The POC manifest declares its own empty Cargo `[workspace]`; it is not a member of the root production workspace.
 - Every test creates a `tempfile::TempDir`; the POC never uses AppData, the user Workspace, or a production Runtime launch path.
 - Rust/Cargo: `1.98.0` / `1.98.0`.
@@ -26,7 +26,7 @@ Migration checksums are explicit (`m00-schema-v1`, `m00-schema-v2`). A v1 databa
 ## 3. Verification command and result
 
 ```text
-cargo test --manifest-path poc/v4-m00-evidence-store/Cargo.toml
+cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation
 ```
 
 Result: **PASS** — 7 unit tests passed, 0 failed; doc-tests: 0 tests passed.

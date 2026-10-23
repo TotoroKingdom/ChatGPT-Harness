@@ -262,7 +262,7 @@ flowchart LR
   GRADE --> CMP["Baseline / Candidate Regression"]
 ```
 
-Runner 建议作为仓库独立 `evaluation/` CLI + test fixtures，**不**嵌入生产 Runtime Agent Loop。使用真实 Tool Runtime、隔离 Workspace、可清理测试账号与有界 step/time/spend，不得借开发模式跳过 Workspace/Policy/Approval。Ground truth 包含 prompt/task、允许工具选择集、参数约束、预期最终业务状态、Policy/Approval 预期、fixture hash。
+Runner 作为所属模块内的独立 CLI（命令行程序）及测试数据组织，沿用现有模块布局；最终路径由 M04 SPEC 明确，未经用户授权不得新增顶级 `evaluation/`。M00 可行性原型位于 `runtime/tests/m00/agent-evaluation-poc/`，**不**嵌入生产 Runtime Agent Loop。使用真实 Tool Runtime、隔离 Workspace、可清理测试账号与有界 step/time/spend，不得借开发模式跳过 Workspace/Policy/Approval。Ground truth 包含 prompt/task、允许工具选择集、参数约束、预期最终业务状态、Policy/Approval 预期、fixture hash。
 
 每次 run 锁定 dataset/hash、模型/adapter 版本、Tool schema hash、Policy/config、commit、环境、评分器版本、重复次数与随机性控制。分开打分：Tool selection accuracy（需要 ground truth）、parameter validity、runtime call outcome、最终 task completion、额外无效调用。Transport returned success 不等于任务成功。样本不足或不稳定为 INCONCLUSIVE；SPEC 应在候选开发前冻结回归阈值和阻断条件。
 
@@ -346,7 +346,7 @@ Host-only prefs 不进入 RuntimeConfigSnapshot，也不推进 Runtime configRev
 | SQLite schema/query/migration | new shared `evidence-store/` + Runtime writer adapter + Tauri facade |
 | History / Stats / Trace UI | `ui/src/pages/activity/*`, services + Tauri commands |
 | grep | `runtime/src/tools/*`, `runtime/src/mcp/*`, `protocol/src/v1/*` |
-| Offline Evaluation | new `evaluation/` CLI + fixtures/report |
+| Offline Evaluation | 所属模块内的独立 CLI；路径在 M04 SPEC 冻结，禁止擅自新增顶级目录；M00 原型位于 `runtime/tests/m00/agent-evaluation-poc/` |
 | Simulator | `runtime/src/policy/*`, control DTO + UI |
 | v3 Config | `ui/src-tauri/src/config/*`, `protocol/src/v1/config.rs` |
 

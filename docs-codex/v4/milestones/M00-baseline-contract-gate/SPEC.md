@@ -1,5 +1,7 @@
 # M00 SPEC — As-Is Baseline and Architecture Contract Gate
 
+> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+
 > Status: IMPLEMENTATION READY / VALIDATION FROZEN  
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Upstream baseline: V4 PRD + V4 Architecture + V4 Roadmap, FROZEN FOR M00  
@@ -315,12 +317,12 @@ The POC may use a minimal schema. Production physical DDL, indexes, retention im
 Recommended location:
 
 ~~~text
-poc/v4-m00-evidence-store/
+runtime/tests/m00/evidence-store-poc/
 ~~~
 
 It must not be a dependency of chatgpt-harness-runtime or chatgpt-harness-ui.
 
-If the POC is implemented as a Rust crate below the repository root, Cargo workspace ownership must be explicit: either the POC manifest declares its own empty `[workspace]`, or the root Cargo.toml lists the POC path in `workspace.exclude`. Running `cargo test --manifest-path poc/v4-m00-evidence-store/Cargo.toml` must not implicitly add the POC to the production workspace. The same rule applies to any Rust-based evaluation POC.
+If the POC is implemented as a Rust crate below the repository root, Cargo workspace ownership must be explicit: either the POC manifest declares its own empty `[workspace]`, or the root Cargo.toml lists the POC path in `workspace.exclude`. Running `cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation` must not implicitly add the POC to the production workspace. The same rule applies to any Rust-based evaluation POC.
 
 If another test-only location is chosen, ADR_DECISIONS.md must record why it remains non-production and removable.
 
