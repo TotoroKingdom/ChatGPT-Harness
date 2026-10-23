@@ -84,8 +84,14 @@ $currentBuildSha = $currentBuildSha.Trim()
 $currentStatusRaw = (& git @gitProvenanceArgs status --porcelain 2>$null) -join "`n"
 $currentDiff = (& git @gitProvenanceArgs diff --binary HEAD 2>$null) -join "`n"
 $currentCachedDiff = (& git @gitProvenanceArgs diff --cached --binary 2>$null) -join "`n"
+$worktreeDiff = (& git @gitProvenanceArgs diff --quiet HEAD 2>$null)
+$hasWorktreeDiff = $LASTEXITCODE -ne 0
+$cachedDiff = (& git @gitProvenanceArgs diff --cached --quiet 2>$null)
+$hasCachedDiff = $LASTEXITCODE -ne 0
 $currentStatus = $currentStatusRaw
-if ([string]::IsNullOrWhiteSpace($currentDiff) -and [string]::IsNullOrWhiteSpace($currentCachedDiff)) {
+if (-not $hasWorktreeDiff -and -not $hasCachedDiff) {
+    $currentDiff = ""
+    $currentCachedDiff = ""
     $currentStatus = (($currentStatusRaw -split "`n" | Where-Object { $_.StartsWith("??") }) -join "`n")
 }
 $currentSourceDirty = -not [string]::IsNullOrWhiteSpace($currentStatus)

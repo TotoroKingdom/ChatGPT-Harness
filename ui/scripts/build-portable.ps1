@@ -53,8 +53,14 @@ function Get-GitProvenance([string]$Root) {
     $statusRaw = (& git @gitArgs status --porcelain 2>$null) -join "`n"
     $diff = (& git @gitArgs diff --binary HEAD 2>$null) -join "`n"
     $cachedDiff = (& git @gitArgs diff --cached --binary 2>$null) -join "`n"
+    $worktreeDiff = (& git @gitArgs diff --quiet HEAD 2>$null)
+    $hasWorktreeDiff = $LASTEXITCODE -ne 0
+    $cachedDiffCheck = (& git @gitArgs diff --cached --quiet 2>$null)
+    $hasCachedDiff = $LASTEXITCODE -ne 0
     $status = $statusRaw
-    if ([string]::IsNullOrWhiteSpace($diff) -and [string]::IsNullOrWhiteSpace($cachedDiff)) {
+    if (-not $hasWorktreeDiff -and -not $hasCachedDiff) {
+        $diff = ""
+        $cachedDiff = ""
         $status = (($statusRaw -split "`n" | Where-Object { $_.StartsWith("??") }) -join "`n")
     }
     [pscustomobject]@{
