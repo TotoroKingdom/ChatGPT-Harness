@@ -1,13 +1,13 @@
 # ChatGPT-Harness Wiki
 
-> 本 Wiki 描述 HEAD 的当前系统事实。当前实现状态以源码、Tests、Manifests 与构建脚本为准；V2 已冻结，V3 计划不等于当前实现。
+> 本 Wiki 描述 HEAD 的当前系统事实。当前实现状态以源码、Tests、Manifests 与构建脚本为准；V2 已冻结，V3 文档已归档且不等于当前实现。
 
 ~~~yaml
 V2 — Read-only Harness
 Status: ACCEPTED / FROZEN
 ~~~
 
-V2 的人工验收记录见 [V2-ACCEPTANCE.md](./V2-ACCEPTANCE.md)。V3 的开发入口见 [../docs-codex/v3/ROADMAP.md](../docs-codex/v3/ROADMAP.md)。
+V2 的人工验收记录见 [V2-ACCEPTANCE.md](./V2-ACCEPTANCE.md)。V3 历史资料见 [V3 archive](../docs/archive/v3-2026-10/README.md)；下一版本开发入口见 [docs-codex/README.md](../docs-codex/README.md)。
 
 ## 1. Project Overview
 
@@ -179,7 +179,7 @@ ChatGPT-Harness/
 ├── ui/src-tauri/src/               Tauri host, lifecycle, config, secrets
 ├── tunnel-client-v0.0.13-*/        bundled Tunnel payload
 ├── wiki/                           current implementation facts
-├── docs-codex/v3/                  current V3 development plan
+├── docs-codex/                     next-version documentation workspace
 └── docs/archive/                   historical documentation
 ~~~
 
@@ -190,7 +190,8 @@ ChatGPT-Harness/
 - [IMPLEMENTATION-MATRIX.md](./IMPLEMENTATION-MATRIX.md)：当前实现状态、自动化验证与 manual acceptance 边界。
 - [MCP-AND-TUNNEL.md](./MCP-AND-TUNNEL.md)：Runtime MCP、Tunnel launch/readiness 和安全边界。
 - [V2-ACCEPTANCE.md](./V2-ACCEPTANCE.md)：V2 Accepted / Frozen 及人工验收说明。
-- [../docs-codex/v3/ROADMAP.md](../docs-codex/v3/ROADMAP.md)：V3 计划；不是当前实现证据。
+- [../docs/archive/v3-2026-10/README.md](../docs/archive/v3-2026-10/README.md)：V3 历史归档；不是当前实现证据。
+- [../docs-codex/README.md](../docs-codex/README.md)：下一版本开发入口。
 
 ## 8. Source-of-Truth Rule
 
@@ -199,9 +200,9 @@ ChatGPT-Harness/
         ↓
 wiki/**
         ↓
-docs-codex/v3/**
+docs-codex/**
         ↓
 docs/archive/**
 ~~~
 
-如果文档与代码不一致，优先使用源码、Tests 和 Manifests；Wiki 需要随 HEAD 当前事实更新。docs-codex/v3/** 只说明接下来要做什么，docs/archive/** 只说明过去发生过什么。
+如果文档与代码不一致，优先使用源码、Tests 和 Manifests；Wiki 需要随 HEAD 当前事实更新。docs-codex/** 只作为下一版本规划工作区，docs/archive/** 只说明过去发生过什么。

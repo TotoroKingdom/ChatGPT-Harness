@@ -42,7 +42,7 @@ Runtime request methods are:
 
 ## Canonical artifacts
 
-The Rust source of truth is [protocol](../protocol). Generate client artifacts explicitly:
+The Rust source of truth is [protocol](../../../protocol). Generate client artifacts explicitly:
 
 ```text
 cargo run -p harness-control-protocol --bin protocol-export -- generate-ts

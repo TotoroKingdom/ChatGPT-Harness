@@ -88,4 +88,4 @@ Tunnel and Runtime exit
 | Harness lifecycle | ui/src-tauri/src/harness.rs, ui/src-tauri/src/commands/** |
 | React state adapter | ui/src/services/harness/**, ui/src/app/providers/** |
 | V2 acceptance record | wiki/V2-ACCEPTANCE.md |
-| V3 roadmap | docs-codex/v3/ROADMAP.md |
+| V3 historical archive | docs/archive/v3-2026-10/README.md |

@@ -235,7 +235,7 @@ ChatGPT ↔ Tunnel ↔ Runtime MCP
 | Harness lifecycle | ui/src-tauri/src/harness.rs, ui/src-tauri/src/commands/** |
 | React adapter / provider | ui/src/services/harness/**, ui/src/app/providers/** |
 | V2 acceptance | wiki/V2-ACCEPTANCE.md |
-| V3 plan | docs-codex/v3/ROADMAP.md |
+| V3 historical archive | docs/archive/v3-2026-10/README.md |
 
 ## 9. Related Documents
 
@@ -243,4 +243,4 @@ ChatGPT ↔ Tunnel ↔ Runtime MCP
 - [IMPLEMENTATION-MATRIX.md](./IMPLEMENTATION-MATRIX.md)
 - [MCP-AND-TUNNEL.md](./MCP-AND-TUNNEL.md)
 - [V2-ACCEPTANCE.md](./V2-ACCEPTANCE.md)
-- [../docs-codex/v3/ROADMAP.md](../docs-codex/v3/ROADMAP.md)
+- [../docs/archive/v3-2026-10/README.md](../docs/archive/v3-2026-10/README.md)

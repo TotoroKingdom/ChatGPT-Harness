@@ -189,7 +189,7 @@ V2 不包含 write_file、edit_file、Bash / shell、database tools、Git write 
 | Harness lifecycle | ui/src-tauri/src/harness.rs, ui/src-tauri/src/commands/** |
 | Real UI adapter | ui/src/services/harness/local-client.ts |
 | V2 acceptance | wiki/V2-ACCEPTANCE.md |
-| V3 plan | docs-codex/v3/ROADMAP.md |
+| V3 historical archive | docs/archive/v3-2026-10/README.md |
 
 ## 9. Related Documents
 

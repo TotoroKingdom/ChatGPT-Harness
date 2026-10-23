@@ -7,9 +7,9 @@ The repository combines a Rust workspace with a React/Vite frontend and Tauri de
 - `protocol/` contains shared protocol types, schemas, fixtures, and contract tests.
 - `runtime/` contains the Runtime process, MCP/Control, workspace security, activity, and audit logic; black-box tests live in `runtime/tests/`.
 - `ui/src/` contains React UI and colocated tests. `ui/src-tauri/` contains the Tauri host and backend.
-- `ui/scripts/` contains Windows packaging scripts. `fixtures/`, `assets/`, `wiki/`, and `docs-codex/` contain test data, media, architecture notes, and milestone plans.
+- `ui/scripts/` contains Windows packaging scripts. `fixtures/`, `assets/`, and `wiki/` contain test data, media, and current implementation notes. `docs-codex/` is the next-version documentation workspace; `docs/archive/` contains historical documentation.
 
-Use source code, tests, and manifests as the behavioral source of truth. `wiki/**` documents current design; `docs-codex/**` describes planned work, not implemented behavior.
+Use source code, tests, and manifests as the behavioral source of truth. `wiki/**` documents current design; `docs-codex/**` is future planning material and does not prove implemented behavior; `docs/archive/**` is historical reference only. Start new documentation work from [`docs-codex/README.md`](docs-codex/README.md), and use [`docs/archive/README.md`](docs/archive/README.md) to find archived material.
 
 ## Build, Test, and Development Commands
 

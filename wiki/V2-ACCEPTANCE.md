@@ -21,4 +21,4 @@ External ChatGPT E2E 属于 **manual acceptance（人工验收）**，不是自�
 
 自动化测试只应声明其实际覆盖的 Runtime、Protocol、Tauri、UI、分发和安全边界；不能把 mock、进程存在、loopback HTTP 或本地测试冒充 External ChatGPT E2E。
 
-V3 规划从 [`../docs-codex/v3/ROADMAP.md`](../docs-codex/v3/ROADMAP.md) 进入，所有 V3 能力仍为 `PLANNED / NOT IMPLEMENTED`。
+V3 的开发与测试资料已归档至 [`../docs/archive/v3-2026-10/README.md`](../docs/archive/v3-2026-10/README.md)；各 Milestone 的历史结论以归档原文为准，不能据此判断当前实现状态。

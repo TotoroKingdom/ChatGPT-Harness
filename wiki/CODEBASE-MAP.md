@@ -21,8 +21,8 @@ Status: ACCEPTED / FROZEN
 | ui/scripts/ | release staging、NSIS bundle 验证 | 同时校验 UI、Runtime、Tunnel client、cloudflared 与 manifest |
 | tunnel-client-v0.0.13-windows-amd64/ | 已验证的 Tunnel client 0.0.13 包 | staging 原样保留 executable、metadata、license/notice/SBOM |
 | wiki/ | 当前代码事实、实现矩阵和验收边界 | 不记录 V3 未实现能力 |
-| docs-codex/v3/ | V3 当前开发计划 | 不作为实现证据 |
-| docs/archive/ | V2 和更早资料 | 只提供历史上下文 |
+| docs-codex/ | 下一版本开发工作区 | 不作为实现证据 |
+| docs/archive/ | V2、V3 和更早资料 | 只提供历史上下文 |
 
 ## 2. Product Process Architecture
 
@@ -125,7 +125,7 @@ read_file 与 glob 仍由 Runtime MCP 进入既有安全执行链。Runtime 的 
 
 V2 外部 ChatGPT E2E 已完成 manual acceptance（人工验收）。这表示真实 ChatGPT → Tunnel → Runtime MCP → tool call → Activity 链路已经验收；该验收不被写成自动化测试 PASS。
 
-V2 仍不包含 write_file、edit_file、bash / shell 或 Approval resume；这些能力位于 docs-codex/v3/ROADMAP.md，均为 PLANNED / NOT IMPLEMENTED。
+V2 仍不包含 write_file、edit_file、bash / shell 或 Approval resume；这些能力的 V3 历史规划见 [V3 ROADMAP](../docs/archive/v3-2026-10/ChatGPT-Harness_V3_ROADMAP.md)，当前实现仍以源码、Tests、Manifests 和最新 Wiki 为准。
 
 ## 7. Source-of-Truth Locations
 
@@ -145,4 +145,5 @@ V2 仍不包含 write_file、edit_file、bash / shell 或 Approval resume；这�
 | Real UI adapter | ui/src/services/harness/local-client.ts |
 | Current implementation status | wiki/IMPLEMENTATION-MATRIX.md |
 | V2 acceptance | wiki/V2-ACCEPTANCE.md |
-| V3 development plan | docs-codex/v3/ROADMAP.md |
+| V3 historical archive | docs/archive/v3-2026-10/README.md |
+| Next-version documentation entry | docs-codex/README.md |

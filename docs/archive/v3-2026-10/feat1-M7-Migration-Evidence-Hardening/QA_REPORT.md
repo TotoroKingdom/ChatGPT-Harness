@@ -51,7 +51,7 @@ E2E run header 均为上表 Runtime SHA，artifact 副本也相同。早期不�
 
 全部命令、初次失败、重跑和安全 JSONL evidence 归档于：
 
-[M7 QA evidence](../../artifacts/M7-Migration-Evidence-Hardening/qa/)
+[M7 QA evidence](../../../../artifacts/M7-Migration-Evidence-Hardening/qa/)
 
 主要证据：
 
