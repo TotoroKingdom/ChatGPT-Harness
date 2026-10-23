@@ -1,8 +1,8 @@
 # M00 TASKS — As-Is Baseline and Architecture Contract Gate
 
-> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
 
-> Status: DEVELOPMENT COMPLETE (Integration/E2E/Manual acceptance pending)
+> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
 > Inputs: SPEC.md, PLAN.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md, MANUAL_ACCEPTANCE_CHECKLIST.md  
 > Executor: Codex / Coding Agent  
 > Upstream: V4 planning baseline FROZEN FOR M00  
@@ -48,7 +48,7 @@ T2 + T3 + T4 + T5 → T6
 Create:
 
 ~~~text
-docs-codex/v4/evidence/M00-baseline-contract-gate/AS_IS_BASELINE.md
+基线事实与源码引用（在既有 SPEC 中维护）
 ~~~
 
 The document must contain a stable Fact ID table covering at least:
@@ -129,13 +129,13 @@ cargo check --workspace
 cargo test -p harness-control-protocol
 ~~~
 
-For Runtime/Tauri, run affected/focused suites sufficient to validate the documented lifecycle/config/audit claims; record exact commands and counts in AS_IS_BASELINE.md.
+For Runtime/Tauri, run affected/focused suites sufficient to validate the documented lifecycle/config/audit claims; record exact commands and counts in 基线事实与源码引用（在既有 SPEC 中维护）.
 
 Do not run real ChatGPT E2E in this task. That belongs to M00 E2E execution and requires its own authorization.
 
 ### Done
 
-- AS_IS_BASELINE.md exists and is source-backed.
+- 基线事实与源码引用（在既有 SPEC 中维护） exists and is source-backed.
 - no architecture claim relies only on historical docs.
 - contradictions with V4 Architecture are listed as explicit ADR issues.
 - no production behavior changed.
@@ -251,18 +251,9 @@ Use exact filters that exist after implementation and record them.
 
 ### Implement
 
-Preferred structure:
+Reuse an existing module-owned verification boundary where possible. Do not create an independent crate or choose its location from this task alone. If an independent project is necessary, first obtain explicit user approval for necessity, exact location, file scope and cleanup; record the decision in the existing SPEC/PLAN and manual checklist.
 
-~~~text
-runtime/tests/m00/evidence-store-poc/
-├── Cargo.toml
-├── src/
-└── tests/
-~~~
-
-The POC may use SQLite libraries suitable for the future implementation, but must not be imported by production chatgpt-harness-runtime or chatgpt-harness-ui.
-
-Cargo workspace isolation is mandatory. If this POC is a Rust crate under the repository root, either declare an empty `[workspace]` in its Cargo.toml or add `runtime/tests/m00/evidence-store-poc` to root `workspace.exclude`. The chosen mechanism must be documented and verified so the POC is never an implicit production workspace member.
+Any approved Rust project must have explicit Cargo workspace ownership and must not be imported by production chatgpt-harness-runtime or chatgpt-harness-ui. The legacy prototype and its historical commands remain traceable in SQLite 验证结论（对话交付，不自动新建报告）; its current layout is pending cleanup, not the preferred structure.
 
 Use temporary directories in every automated test.
 
@@ -338,7 +329,7 @@ Persist approval/session-like historical facts and prove POC exposes no API that
 Create:
 
 ~~~text
-docs-codex/v4/evidence/M00-baseline-contract-gate/SQLITE_POC_REPORT.md
+SQLite 验证结论（对话交付，不自动新建报告）
 ~~~
 
 Include library/version, pragmas, lock strategy, test matrix, commands, actual results, limitations and recommendation for M03.
@@ -348,7 +339,7 @@ Include library/version, pragmas, lock strategy, test matrix, commands, actual r
 Primary command:
 
 ~~~text
-cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation
+# Historical SQLite replay commands are in SQLite 验证结论（对话交付，不自动新建报告）; further work requires an approved verification arrangement.
 ~~~
 
 Also verify root production workspace does not depend on the POC.
@@ -357,7 +348,7 @@ Also verify root production workspace does not depend on the POC.
 
 - all required POC cases pass;
 - POC only touches temp directories;
-- SQLITE_POC_REPORT.md has reproducible evidence;
+- SQLite 验证结论（对话交付，不自动新建报告） has reproducible evidence;
 - POC is not a production dependency.
 
 ---
@@ -423,7 +414,7 @@ and must not make ConfigStore write v3 in production.
 
 ### Decision output
 
-Add the v2→v3 migration constraints to ADR_DECISIONS.md input notes for T6, including anything M01/M03/M07 must decide later such as exact defaults.
+Add the v2→v3 migration constraints to 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） input notes for T6, including anything M01/M03/M07 must decide later such as exact defaults.
 
 ### Required task-local verification
 
@@ -455,18 +446,10 @@ Add an assertion/test that CURRENT_SCHEMA_VERSION remains 2 at M00 completion.
 
 ### Implement
 
-Create an isolated evaluation spike, recommended:
+Verify the runner/adapter boundary using the existing project conventions. Do not create a standalone evaluation project or a new source/report tree by default. If necessary, obtain explicit user approval for the exact independent-project arrangement before implementation; report locations continue to follow AGENTS.md.
 
-~~~text
-runtime/tests/m00/agent-evaluation-poc/
-├── README.md
-├── cases/
-├── fixtures/
-├── runner/
-└── reports/
-~~~
+The verification must call the real Harness Runtime MCP rather than reimplementing tool behavior. An approved independent Rust project must follow the same explicit workspace-isolation rule as T3. Existing prototype locations and historical replay commands are evidence only, not permission to create more projects.
 
-Exact language/tooling may follow repository conventions, but the spike must call the real Harness Runtime MCP rather than reimplementing tool behavior. If the spike uses Rust under the repository root, it must use the same explicit Cargo workspace-isolation rule as T3.
 
 ### Adapter
 
@@ -539,7 +522,7 @@ If credentials/access are unavailable:
 Create:
 
 ~~~text
-docs-codex/v4/evidence/M00-baseline-contract-gate/EVAL_FEASIBILITY_REPORT.md
+评测可行性结论（对话交付，不自动新建报告）
 ~~~
 
 Record:
@@ -590,7 +573,7 @@ The real model smoke execution itself belongs in the formal M00 Integration/E2E 
 Create:
 
 ~~~text
-docs-codex/v4/evidence/M00-baseline-contract-gate/ADR_DECISIONS.md
+架构决策及阻塞项（在既有 SPEC/PLAN 中维护）
 ~~~
 
 Cover at least A01, A04, A05, A06, A07, A08, A10, A15, A17.
@@ -642,11 +625,11 @@ Update cross-links among:
 - INTEGRATION_TEST_PLAN.md
 - E2E_TEST_PLAN.md
 - MANUAL_ACCEPTANCE_CHECKLIST.md
-- AS_IS_BASELINE.md
-- SQLITE_POC_REPORT.md
-- EVAL_FEASIBILITY_REPORT.md
-- ADR_DECISIONS.md
-- future ACCEPTANCE.md and EVIDENCE_INDEX.md references.
+- 基线事实与源码引用（在既有 SPEC 中维护）
+- SQLite 验证结论（对话交付，不自动新建报告）
+- 评测可行性结论（对话交付，不自动新建报告）
+- 架构决策及阻塞项（在既有 SPEC/PLAN 中维护）
+- future 人工验收签认（沿用既有验收清单） and 验收证据定位（沿用既有验收清单） references.
 
 The three validation plans are already frozen before implementation. Do not rewrite their acceptance criteria to fit the implementation and do not mark them PASS merely because M00 development is complete.
 
@@ -661,7 +644,7 @@ cargo check --workspace
 cargo test -p harness-control-protocol
 cargo test -p chatgpt-harness-runtime <affected suites>
 cargo test -p chatgpt-harness-ui <affected suites>
-cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation
+# Historical SQLite replay commands are in SQLite 验证结论（对话交付，不自动新建报告）; further work requires an approved verification arrangement.
 ~~~
 
 Run eval local tests with the exact command established in T5.
@@ -672,7 +655,7 @@ Also perform:
 - git diff --check;
 - repository cleanliness/resource cleanup check.
 
-Record exact commands and results in ADR_DECISIONS.md or a development evidence section.
+Record exact commands and results in 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） or a development evidence section.
 
 ### Done
 
@@ -714,7 +697,7 @@ Pre-development: SPEC / PLAN / TASKS / Integration / E2E / Manual plans frozen
 → independent QA executes Integration
 → Local/controlled E2E + explicitly authorized external E2E
 → Manual Acceptance
-→ ACCEPTANCE + EVIDENCE_INDEX
+→ human sign-off in the existing manual checklist + evidence locations
 → M00 ACCEPTED / FROZEN
 → only then unlock M01/M02/M03
 ~~~

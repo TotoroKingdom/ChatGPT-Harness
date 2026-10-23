@@ -1,8 +1,8 @@
 # M00 Integration Test Plan — As-Is Baseline and Architecture Contract Gate
 
-> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
 
-> Status: FROZEN / NOT EXECUTED  
+> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md  
 > Owner: independent Coding/QA Agent after T1–T6 Development Complete  
@@ -48,12 +48,12 @@ This plan is frozen before T1 begins. Implementation may satisfy these cases wit
 Before Integration execution:
 
 - T1–T6 are Development Complete.
-- AS_IS_BASELINE.md exists.
-- ADR_DECISIONS.md exists in development-state form.
+- 基线事实与源码引用（在既有 SPEC 中维护） exists.
+- 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） exists in development-state form.
 - Shared Evidence Contract fixtures exist.
-- SQLITE_POC_REPORT.md exists.
+- SQLite 验证结论（对话交付，不自动新建报告） exists.
 - Config contract fixtures/tests exist.
-- EVAL_FEASIBILITY_REPORT.md exists at least with local runner/adapter preparation evidence.
+- 评测可行性结论（对话交付，不自动新建报告） exists at least with local runner/adapter preparation evidence.
 - task-local Unit/POC tests are PASS.
 - production CURRENT_SCHEMA_VERSION is still 2.
 - no unresolved compile failure exists.
@@ -143,12 +143,12 @@ Integration must not:
 
 ## 5. Required Integration Cases
 
-### M00-INT-01 — Current source/manifests match AS_IS_BASELINE
+### M00-INT-01 — Current source/manifests match the source-backed baseline
 
 **AC:** M00-AC01  
 **Task:** T1
 
-Validate AS_IS_BASELINE.md against the exact candidate commit.
+Validate 基线事实与源码引用（在既有 SPEC 中维护） against the exact candidate commit.
 
 At minimum confirm:
 
@@ -171,7 +171,7 @@ Method:
 
 **PASS:** no material baseline statement contradicts candidate source/test behavior.
 
-**FAIL:** a claimed implemented/verified behavior is unsupported or contradicted and AS_IS_BASELINE.md is not corrected.
+**FAIL:** a claimed implemented/verified behavior is unsupported or contradicted and 基线事实与源码引用（在既有 SPEC 中维护） is not corrected.
 
 ---
 
@@ -456,7 +456,7 @@ Verify:
 - no raw credential exists in tracked fixtures/reports;
 - all test Runtime/Tunnel/child processes are stopped;
 - temp DB/config/Workspace resources are removed;
-- ADR_DECISIONS.md contains ACCEPTED/REVISED/BLOCKED for required ADRs;
+- 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） contains ACCEPTED/REVISED/BLOCKED for required ADRs;
 - any REVISED ADR has already been reconciled through a separately approved upstream PRD/Architecture/Roadmap change; an implementation-agent self-edit is not sufficient evidence.
 
 **PASS:** M00 remains a clean architecture-contract gate.
@@ -519,5 +519,5 @@ Next:
 Integration PASS
 → execute M00 E2E plan
 → Manual Acceptance
-→ ACCEPTANCE / EVIDENCE_INDEX
+→ human sign-off in the existing manual checklist + evidence locations
 ~~~

@@ -37,7 +37,7 @@ docs-codex/v4/milestones/Mxx-short-name/
 └── MANUAL_ACCEPTANCE_CHECKLIST.md
 ~~~
 
-文件布局修订（2026-10-24，用户授权）：每个里程碑目录仅允许上述六份文件，不含子目录。报告、ADR、ACCEPTANCE.md、EVIDENCE_INDEX.md 及需保留的脱敏验收日志/截图统一放在 `docs-codex/v4/evidence/Mxx-short-name/`；测试数据放在 `fixtures/v4/<milestone>/`；候选便携包及随包清单、散列和包校验记录放在 `artifacts/V4-Mxx-short-name/<candidate>/`，该目录不存放其他材料；编译缓存和临时验证材料统一放 `target/`。本修订不改变原有功能范围及验收门槛。
+文件布局修订（2026-10-24，用户授权）：每个里程碑目录仅允许上述六份计划文件，不含子目录。不得自动新增报告、证据汇总或独立 ADR 文档；本次清理已移除 M00 的六份独立报告。执行结果在对话中交付，人工签认沿用既有验收清单；证据被删除或验证未执行时保留 BLOCKED/NOT_VERIFIED，不降低验收条件。正式测试随模块，固定测试数据复用既有位置，测试临时文件使用系统临时目录并清理，构建输出沿用原脚本；artifacts 仅保留 Portable 交付包及随包清单、散列、校验记录。独立工程、仓库副本、工作树及新顶级目录必须先获得用户明确同意。
 
 此 Roadmap 不预先生成空模板；**启动对应里程碑才创建文件**。流程：
 
@@ -51,7 +51,7 @@ Frozen upstream planning baseline: PRD + Architecture + Roadmap
      → Integration (真实组件边界)
      → E2E (真实端到端入口与结果)
      → Manual Acceptance (实际用户操作)
-     → ACCEPTANCE + EVIDENCE_INDEX
+     → human sign-off in the existing manual checklist + evidence locations
      → ACCEPTED / FROZEN，或明确 BLOCKED/FAIL/NOT_VERIFIED
 ~~~
 
@@ -97,7 +97,7 @@ M01/M02/M03 可在 M00 验收后由不同模块 owner 并行；M04 必须在 M03
 
 **Scope:** Core prerequisite；确认当前源码真实状态、ADR、Shared Evidence Contract v1、SQLite Writer/Reader 原型和受控 Eval Runner 可用性。  
 **Depends on:** 当前 main 代码/Tests/Manifests 与 V4 PRD/Architecture 草案。  
-**Deliverable:** AS_IS_BASELINE.md、ADR_DECISIONS.md、可运行的 evidence/SQLite ownership POC、Data Contract fixtures、带来源的设计冻结结论；不是只写架构评论。
+**Deliverable:** 基线事实与源码引用（在既有 SPEC 中维护）、架构决策及阻塞项（在既有 SPEC/PLAN 中维护）、可运行的 evidence/SQLite ownership POC、Data Contract fixtures、带来源的设计冻结结论；不是只写架构评论。
 
 - **SPEC/PLAN/TASKS：** 核验现有 Runtime/Tauri/Tunnel/Approval/Audit ownership；制定 request/event/session IDs、Outcome/UNKNOWN、脱敏 allowlist；证明 Runtime 单写+Tauri 停机离线读+独占维护及 crash 恢复的可行性；演练 Config v2→v3 兼容 fixture；明确能真实运行 F12 的 controllable Agent/Model Adapter、ground truth 及合规测试成本。POC 只做必要隔离，禁止大规模重构。
 - **Integration：** 真实 Runtime AuditSink → typed safe evidence projection；同请求事件关联/脱敏、请求间隔离；SQLite 双连接 WAL/只读/锁/迁移故障 POC；Config 迁移不丢 SecretReference 或现有 Policy。
@@ -277,7 +277,7 @@ M01/M02/M03 可在 M00 验收后由不同模块 owner 并行；M04 必须在 M03
 
 # 5. Acceptance Records and Verdicts
 
-每个 ACCEPTANCE.md 与 EVIDENCE_INDEX.md 至少记录：
+每个 人工验收签认（沿用既有验收清单） 与 验收证据定位（沿用既有验收清单） 至少记录：
 
 | Evidence field | Required contents |
 | --- | --- |

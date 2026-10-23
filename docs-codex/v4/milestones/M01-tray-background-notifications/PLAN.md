@@ -1,5 +1,7 @@
 # M01 PLAN — Tray, Background Lifecycle and Notifications
 
+> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。当前仅有 SPEC / PLAN / TASKS 三份草案，缺少 Integration / E2E / Manual 三份计划，未达到六文件冻结门槛；M00 未验收，禁止开始实现。报告更新既有证据记录，不逐次新建总结报告。
+
 > Input: SPEC.md  
 > Status: DRAFT / DESIGN READY — IMPLEMENTATION BLOCKED BY M00 ACCEPTANCE  
 > Goal: implement F01/F03/F04 as one Tauri-owned desktop continuity subsystem without duplicating Harness or Runtime authority.  
@@ -41,7 +43,7 @@ Principles:
 
 Before coding:
 
-1. read M00 ADR_DECISIONS.md;
+1. read M00 架构决策及阻塞项（在既有 SPEC/PLAN 中维护）;
 2. confirm A02/A03/A15 accepted;
 3. import the M00-frozen v3 migration fixture/identity rules;
 4. update this milestone if M00 changed IDs or config ownership;
@@ -346,7 +348,7 @@ Verify:
 
 ### Development complete
 
-Create/update development evidence required for later test plans.
+Update the existing milestone evidence index with development results required for later validation. Keep plans in this directory; do not create per-run reports or a separate verification project. Reuse module-owned tests and system temporary directories with cleanup as required by AGENTS.md.
 
 Do not mark M01 accepted.
 

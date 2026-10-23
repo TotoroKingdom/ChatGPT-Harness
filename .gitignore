@@ -5,3 +5,5 @@
 /target-exe/
 /artifacts/
 /runtime/tests/m00/*/target/
+/ui/vite-exe.stderr.log
+/ui/vite-exe.stdout.log

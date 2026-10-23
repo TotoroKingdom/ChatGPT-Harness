@@ -1,5 +1,7 @@
 # M01 SPEC — Tray, Background Lifecycle and Notifications
 
+> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。当前仅有 SPEC / PLAN / TASKS 三份草案，缺少 Integration / E2E / Manual 三份计划，未达到六文件冻结门槛；M00 未验收，禁止开始实现。报告更新既有证据记录，不逐次新建总结报告。
+
 > Status: DRAFT / DESIGN READY — IMPLEMENTATION BLOCKED BY M00 ACCEPTANCE  
 > Milestone: M01 — Tray, Background Lifecycle and Notifications  
 > Scope: P0 F01 System Tray + F03 Approval Notifications + F04 Disconnect / Recovery Notifications  

@@ -43,8 +43,8 @@ $record = [ordered]@{
     portable_verification = "PASS"
     external_e2e = "NOT_VERIFIED_BY_DELIVERY_SCRIPT"
     manual_acceptance = "NOT_EXECUTED"
-    acceptance_status = "CANDIDATE_ONLY_CHECK_EVIDENCE_INDEX_FOR_BLOCKERS"
-    evidence_index = "docs-codex/v4/evidence/$Milestone/EVIDENCE_INDEX.md"
+    acceptance_status = "CANDIDATE_ONLY_MANUAL_ACCEPTANCE_NOT_EXECUTED"
+    acceptance_plan = "docs-codex/v4/milestones/$Milestone/MANUAL_ACCEPTANCE_CHECKLIST.md"
     entry = "$portableName/chatgpt-harness-ui.exe"
     files = $hashes
 }

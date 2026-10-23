@@ -1,8 +1,8 @@
 # M00 PLAN — As-Is Baseline and Architecture Contract Gate
 
-> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
 
-> Status: IMPLEMENTATION READY / VALIDATION FROZEN  
+> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
 > Input: SPEC.md  
 > Upstream: V4 PRD / Architecture / Roadmap, FROZEN FOR M00  
 > Goal: turn architectural assumptions into executable evidence and a frozen implementation contract for M01+  
@@ -48,12 +48,12 @@ No phase may “solve” a POC failure by silently weakening the upstream Archit
 | live Activity | runtime/src/activity/* + current control/UI projection | do not replace or persist in M00 |
 | config | protocol/src/v1/config.rs + ui/src-tauri/src/config/* | current production schema remains v2 |
 | protocol | protocol/src/v1/* | additive test fixtures only; no protocol/v2 |
-| SQLite POC | isolated runtime/tests/m00/evidence-store-poc/ preferred | must not be production dependency |
-| Eval feasibility | isolated runtime/tests/m00/agent-evaluation-poc/ or equivalent | must not become production Runtime Agent loop |
+| SQLite verification | reuse existing module-owned verification; independent project requires explicit approval | no production dependency; legacy layout remediation pending |
+| Eval feasibility | reuse existing verification boundaries; independent project requires explicit approval | no production Runtime Agent loop; legacy layout remediation pending |
 | M00 plans | docs-codex/v4/milestones/M00-baseline-contract-gate/ | six engineering and validation plans only |
 | M00 evidence | docs-codex/v4/evidence/M00-baseline-contract-gate/ | reports, decisions and acceptance evidence |
 
-If implementation needs a different POC path, ADR_DECISIONS.md records the final path and isolation rationale.
+Changing an experiment location requires explicit user approval first; record the agreed location and cleanup plan in the existing SPEC/PLAN and manual checklist. A planning note alone is not authorization.
 
 ---
 
@@ -85,7 +85,7 @@ Inspect and record:
 
 ### Output
 
-Create AS_IS_BASELINE.md with:
+Create 基线事实与源码引用（在既有 SPEC 中维护） with:
 
 - fact ID;
 - source/test evidence path;
@@ -144,13 +144,7 @@ Prove the storage topology before M03 designs production DDL and APIs.
 
 ### Isolation
 
-Use a separate test/POC crate, preferably:
-
-~~~text
-runtime/tests/m00/evidence-store-poc/
-~~~
-
-The root Cargo workspace must not import it as a production dependency. It may be run with its own manifest. If it is a Rust crate under the repository root, either declare an empty `[workspace]` in the POC manifest or add the POC path to root `workspace.exclude`; nested POC execution must never become an implicit production workspace member.
+Reuse existing module-owned tests where suitable. Do not create a separate crate by default. An independent verification project needs explicit user approval of its necessity, exact location, file scope and cleanup plan. Any approved crate must remain outside production dependencies and have explicit Cargo workspace ownership. Current legacy locations are documented only in the existing manual checklist and remain pending cleanup.
 
 ### POC layers
 
@@ -315,7 +309,7 @@ M00-AC10 has executable evidence and the M04 team has a concrete feasible adapte
 
 ### Work
 
-Create ADR_DECISIONS.md.
+Create 架构决策及阻塞项（在既有 SPEC/PLAN 中维护）.
 
 For each relevant ADR record:
 
@@ -354,12 +348,12 @@ All M00 local development work is complete and ready for execution of the alread
 
 | Task | Primary ownership | Depends on | Principal output |
 | --- | --- | --- | --- |
-| T1 | docs + existing source/test inspection | upstream baseline | AS_IS_BASELINE.md |
+| T1 | docs + existing source/test inspection | upstream baseline | 基线事实与源码引用（在既有 SPEC 中维护） |
 | T2 | runtime audit/test fixtures | T1 | Shared Evidence Contract proof |
 | T3 | isolated SQLite POC | T2 | ownership/durability proof |
 | T4 | protocol/config fixture POC | T1 | v2→v3 migration contract |
 | T5 | isolated evaluation spike | T1, T2 | real controlled Agent feasibility |
-| T6 | docs/architecture freeze | T2–T5 | ADR_DECISIONS.md + development-complete evidence |
+| T6 | docs/architecture freeze | T2–T5 | 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） + development-complete evidence |
 
 T3 and T4 may run in parallel. T5 may be prepared in parallel but cannot be accepted before T2 identity/evidence semantics are stable.
 
@@ -395,7 +389,7 @@ cargo test -p harness-control-protocol <affected filters>
 cargo test -p chatgpt-harness-runtime <affected filters>
 cargo test -p chatgpt-harness-ui <affected filters>
 
-cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation
+# Historical SQLite replay commands are in SQLite 验证结论（对话交付，不自动新建报告）; further work requires an approved verification arrangement.
 <config-contract POC command if a separate manifest is used>
 <controlled-eval local/unit command>
 ~~~
@@ -415,8 +409,8 @@ Before M00 can enter Integration testing:
 - no production V4 feature has accidentally been enabled;
 - production CURRENT_SCHEMA_VERSION is still 2;
 - POC dependencies do not leak into production Runtime/Tauri;
-- AS_IS_BASELINE.md is internally consistent;
-- ADR_DECISIONS.md has no unhandled REVISED decision;
+- 基线事实与源码引用（在既有 SPEC 中维护） is internally consistent;
+- 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） has no unhandled REVISED decision;
 - eval feasibility has a runnable concrete adapter path, even though formal external execution may still await explicit authorization in E2E;
 - git diff/checks show only intended files;
 - cleanup has removed temporary DBs, test processes and fixture mutations.

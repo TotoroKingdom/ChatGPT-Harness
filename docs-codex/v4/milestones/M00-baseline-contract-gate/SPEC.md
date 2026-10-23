@@ -1,8 +1,8 @@
 # M00 SPEC — As-Is Baseline and Architecture Contract Gate
 
-> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
 
-> Status: IMPLEMENTATION READY / VALIDATION FROZEN  
+> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Upstream baseline: V4 PRD + V4 Architecture + V4 Roadmap, FROZEN FOR M00  
 > Target: validate current code facts, prove critical V4 architecture assumptions, and freeze the implementation contract consumed by M01+  
@@ -111,7 +111,7 @@ M00 includes:
 10. controlled Agent/Model evaluation feasibility spike against an isolated real Runtime/MCP;
 11. versioned ground-truth case and final-state grader for the spike;
 12. current-baseline real ChatGPT → Tunnel → Runtime MCP E2E using a non-destructive existing tool;
-13. AS_IS_BASELINE.md and ADR_DECISIONS.md outputs;
+13. 基线事实与源码引用（在既有 SPEC 中维护） and 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） outputs;
 14. decision whether each architecture assumption is ACCEPTED, REVISED or BLOCKED.
 
 ### 4.2 Explicit non-goals
@@ -147,8 +147,8 @@ Any POC code that could be mistaken for product functionality must be isolated a
 Required outputs:
 
 1. SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md and MANUAL_ACCEPTANCE_CHECKLIST.md — the six pre-development contract documents for M00.
-2. AS_IS_BASELINE.md — current source/test/runtime truth with status and evidence path.
-3. ADR_DECISIONS.md — M00 verdict for each relevant ADR and unresolved risks.
+2. 基线事实与源码引用（在既有 SPEC 中维护） — current source/test/runtime truth with status and evidence path.
+3. 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） — M00 verdict for each relevant ADR and unresolved risks.
 4. Shared Evidence Contract v1 fixture(s), including valid and invalid/redaction cases.
 5. SQLite ownership POC source and automated tests.
 6. SQLite POC evidence/report containing commands, environment and actual results.
@@ -314,17 +314,11 @@ The POC may use a minimal schema. Production physical DDL, indexes, retention im
 
 ### 7.4 POC isolation rule
 
-Recommended location:
+Follow the existing development/test layout in root AGENTS.md. POC describes the verification purpose; it does not authorize creating a separate Cargo project, adding a top-level directory, or putting an independent experiment in a core module's tests directory.
 
-~~~text
-runtime/tests/m00/evidence-store-poc/
-~~~
+If verification cannot fit an existing module-owned test, obtain explicit user approval for the necessity, exact location, file scope and cleanup plan before creating or relocating an independent project. If approved as a Rust crate, keep its Cargo workspace ownership explicit and exclude it from production dependencies. Do not silently change production workspace membership.
 
-It must not be a dependency of chatgpt-harness-runtime or chatgpt-harness-ui.
-
-If the POC is implemented as a Rust crate below the repository root, Cargo workspace ownership must be explicit: either the POC manifest declares its own empty `[workspace]`, or the root Cargo.toml lists the POC path in `workspace.exclude`. Running `cargo test --manifest-path runtime/tests/m00/evidence-store-poc/Cargo.toml --target-dir target/m00-validation` must not implicitly add the POC to the production workspace. The same rule applies to any Rust-based evaluation POC.
-
-If another test-only location is chosen, ADR_DECISIONS.md must record why it remains non-production and removable.
+The removed prototypes' historical locations and commands are recorded in the existing plans and manual checklist for traceability only. Cache cleanup remains blocked; neither this SPEC nor an ADR entry authorizes reuse of the mistaken layout. Record any approved disposition in the existing SPEC/PLAN and manual checklist.
 
 ---
 
@@ -457,7 +451,7 @@ Requirements:
 
 | M00 AC | Requirement |
 | --- | --- |
-| M00-AC01 | AS_IS_BASELINE.md maps current Runtime/Tauri/Tunnel/Protocol/Config/Approval/Audit behavior to source/tests and uses explicit implementation/verification statuses. |
+| M00-AC01 | 基线事实与源码引用（在既有 SPEC 中维护） maps current Runtime/Tauri/Tunnel/Protocol/Config/Approval/Audit behavior to source/tests and uses explicit implementation/verification statuses. |
 | M00-AC02 | Ownership map confirms Tauri lifecycle authority, Runtime authorization authority, Tunnel bridge-only role and React presentation role, with no new second authority. |
 | M00-AC03 | Shared Evidence Contract defines stable identity, lifecycle semantics, COMPLETE/INCOMPLETE/UNKNOWN and explicitly forbids time-based primary correlation. |
 | M00-AC04 | Real current AuditEvent/AuditSink observations can be projected into typed bounded safe evidence; redaction fixtures prove prohibited raw data is not emitted. |
@@ -468,7 +462,7 @@ Requirements:
 | M00-AC09 | M00 confirms config-schema evolution remains independent from additive control protocol v1 and records any actual incompatibility as a blocker rather than silently creating protocol/v2. |
 | M00-AC10 | A real controllable Agent/Model adapter completes at least one isolated Runtime MCP ground-truth case and the scorer validates final state independently of tool transport success. |
 | M00-AC11 | Real ChatGPT→Tunnel→Runtime current-baseline E2E succeeds for a controlled existing tool, with build/config evidence and without claiming unimplemented V4 features. |
-| M00-AC12 | ADR_DECISIONS.md records ACCEPTED / REVISED / BLOCKED for relevant ADRs; any REVISED upstream decision is committed to PRD/Architecture/Roadmap before M00 can pass. |
+| M00-AC12 | 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） records ACCEPTED / REVISED / BLOCKED for relevant ADRs; any REVISED upstream decision is committed to PRD/Architecture/Roadmap before M00 can pass. |
 | M00-AC13 | M00 introduces no production V4 feature path: POC/eval spike code is isolated and not imported by production Runtime/Tauri. |
 | M00-AC14 | Required local/POC verification is reproducible from documented commands and leaves no persistent test DB, processes, secrets, Workspace mutations or config changes. |
 
@@ -513,7 +507,7 @@ The validation documents are frozen as targets before implementation. T1–T6 ma
 M00 may be marked ACCEPTED / FROZEN only when all of the following are true:
 
 - M00-AC01 through M00-AC14 pass;
-- AS_IS_BASELINE.md and ADR_DECISIONS.md are complete;
+- 基线事实与源码引用（在既有 SPEC 中维护） and 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） are complete;
 - Shared Evidence Contract fixtures and sanitization tests pass;
 - SQLite ownership/migration/crash POC passes;
 - future Config v2→v3 compatibility fixtures pass while production schema remains v2;

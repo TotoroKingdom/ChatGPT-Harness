@@ -1,8 +1,8 @@
 # M00 E2E Test Plan — Baseline Chain, Controlled Eval and Production-Isolation Proof
 
-> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
 
-> Status: FROZEN / EXECUTION RECORDED BELOW
+> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md  
 > Owner: QA/Coding Agent for locally automatable steps; explicitly authorized external execution for ChatGPT/networked model steps  
@@ -285,7 +285,7 @@ At the production boundary:
 - production shutdown leaves no M00 test process;
 - after E2E cleanup, no temp DB/config/Workspace residue remains.
 
-Also compare ADR_DECISIONS.md with the candidate:
+Also compare 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） with the candidate:
 
 - any REVISED ADR must already be reflected upstream;
 - BLOCKED ADR means M00 cannot pass.
@@ -361,4 +361,4 @@ E2E PASS still does not itself mark M00 ACCEPTED/FROZEN.
 
 ## 9. Execution evidence location
 
-Execution results are maintained in [M00_E2E_EXECUTION_REPORT.md](../../evidence/M00-baseline-contract-gate/M00_E2E_EXECUTION_REPORT.md) and [EVIDENCE_INDEX.md](../../evidence/M00-baseline-contract-gate/EVIDENCE_INDEX.md). This plan retains the frozen criteria only.
+Execution results are maintained in E2E 执行结论（对话交付，不自动新建报告） and 验收证据定位（沿用既有验收清单）. This plan retains the frozen criteria only.

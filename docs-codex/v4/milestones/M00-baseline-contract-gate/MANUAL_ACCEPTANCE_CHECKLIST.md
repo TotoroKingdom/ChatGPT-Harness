@@ -1,8 +1,8 @@
 # M00 Manual Acceptance Checklist — As-Is Baseline and Architecture Contract Gate
 
-> 文件布局修订（2026-10-24，用户授权）：本目录仅保留六份开发及验收计划。本文中的报告、ADR、EVIDENCE_INDEX 和 ACCEPTANCE 均位于 `../../evidence/M00-baseline-contract-gate/`；测试数据位于仓库根目录 `fixtures/v4/m00/`。只调整存放位置，不改变验收条件。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
 
-> Status: FROZEN / NOT EXECUTED  
+> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md  
 > Owner: Human Reviewer  
@@ -50,10 +50,10 @@ Manual Acceptance starts only when:
 - M00 Development Complete.
 - M00 Integration = PASS.
 - M00 E2E = PASS.
-- AS_IS_BASELINE.md is complete.
-- ADR_DECISIONS.md is complete.
-- SQLITE_POC_REPORT.md is complete.
-- EVAL_FEASIBILITY_REPORT.md contains the real-model smoke evidence.
+- 基线事实与源码引用（在既有 SPEC 中维护） is complete.
+- 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） is complete.
+- SQLite 验证结论（对话交付，不自动新建报告） is complete.
+- 评测可行性结论（对话交付，不自动新建报告） contains the real-model smoke evidence.
 - no required E2E is BLOCKED/INCONCLUSIVE.
 - candidate build/commit is fixed.
 - cleanup report is available.
@@ -100,7 +100,7 @@ Confirm:
 **AC:** M00-AC01, M00-AC02; supports M00-AC11  
 **Task:** T1
 
-### 4.1 Review AS_IS_BASELINE.md
+### 4.1 Review 基线事实与源码引用（在既有 SPEC 中维护）
 
 Check that the baseline explicitly covers:
 
@@ -177,7 +177,7 @@ Notes:
 
 ### 6.1 SQLite POC review
 
-From SQLITE_POC_REPORT.md confirm:
+From SQLite 验证结论（对话交付，不自动新建报告） confirm:
 
 - [ ] Normal-running ownership is one Runtime writer.
 - [ ] Tauri-like connection is read-only while writer is running.
@@ -217,7 +217,7 @@ Notes:
 **AC:** M00-AC10  
 **Task:** T5
 
-Review EVAL_FEASIBILITY_REPORT.md and M00-E2E-02.
+Review 评测可行性结论（对话交付，不自动新建报告） and M00-E2E-02.
 
 Confirm:
 
@@ -254,7 +254,7 @@ Notes:
 **AC:** M00-AC12, M00-AC13, M00-AC14  
 **Task:** T6
 
-Review ADR_DECISIONS.md.
+Review 架构决策及阻塞项（在既有 SPEC/PLAN 中维护）.
 
 Required ADRs:
 
@@ -352,4 +352,4 @@ M01 / M02 / M03 are unlocked.
 M04 remains dependent on M03.
 ~~~
 
-Acceptance itself must be recorded in ACCEPTANCE.md and evidence locations in EVIDENCE_INDEX.md. This checklist is the human sign-off source, not a substitute for those final records.
+Acceptance itself must be recorded in 人工验收签认（沿用既有验收清单） and evidence locations in 验收证据定位（沿用既有验收清单）. This checklist is the human sign-off source, not a substitute for those final records.

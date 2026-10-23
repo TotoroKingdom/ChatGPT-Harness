@@ -9,10 +9,12 @@ $milestonesRoot = Join-Path $repositoryRoot "docs-codex\v4\milestones"
 $allowed = @("SPEC.md", "PLAN.md", "TASKS.md", "INTEGRATION_TEST_PLAN.md", "E2E_TEST_PLAN.md", "MANUAL_ACCEPTANCE_CHECKLIST.md")
 foreach ($milestone in Get-ChildItem -LiteralPath $milestonesRoot -Directory) {
     $entries = @(Get-ChildItem -LiteralPath $milestone.FullName -Force)
+    $entryNames = @($entries | ForEach-Object { $_.Name })
     $unexpected = @($entries | Where-Object { $_.PSIsContainer -or $_.Name -cnotin $allowed })
-    $missing = @($allowed | Where-Object { $_ -cnotin $entries.Name })
+    $missing = @($allowed | Where-Object { $_ -cnotin $entryNames })
     if ($unexpected.Count -gt 0 -or $missing.Count -gt 0) {
-        throw "Invalid milestone layout: $($milestone.Name); unexpected: $($unexpected.Name -join ', '); missing: $($missing -join ', ')"
+        $unexpectedNames = @($unexpected | ForEach-Object { $_.Name })
+        throw "Invalid milestone layout: $($milestone.Name); unexpected: $($unexpectedNames -join ', '); missing: $($missing -join ', ')"
     }
 }
 Write-Output "Milestone layout: PASS (six plan files per milestone)"

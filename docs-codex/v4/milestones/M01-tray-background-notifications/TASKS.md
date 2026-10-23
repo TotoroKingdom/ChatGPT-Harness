@@ -1,5 +1,7 @@
 # M01 TASKS — Tray, Background Lifecycle and Notifications
 
+> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。当前仅有 SPEC / PLAN / TASKS 三份草案，缺少 Integration / E2E / Manual 三份计划，未达到六文件冻结门槛；M00 未验收，禁止开始实现。报告更新既有证据记录，不逐次新建总结报告。
+
 > Inputs: SPEC.md, PLAN.md  
 > Executor: Codex / Coding Agent  
 > Status: DRAFT / IMPLEMENTATION BLOCKED UNTIL M00 ACCEPTED / FROZEN  
@@ -41,7 +43,7 @@ T3 and T4 may be developed in parallel after T2 if they do not edit the same coo
 
 #### Rebase first
 
-Read M00 ADR_DECISIONS.md and final v3 migration fixture/contract.
+Read M00 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） and final v3 migration fixture/contract.
 
 If it differs from this M01 draft, update SPEC/PLAN/TASKS before coding.
 
@@ -632,9 +634,9 @@ Stop package smoke instances.
 
 Verify no owned Runtime/Tunnel orphan.
 
-Clean temporary profile/config test data.
+Use a unique system temporary directory for disposable profile/config test data and clean it on success, failure and resource release. Do not use real user configuration or archive disposable test data in the repository.
 
-#### Development report
+#### Development evidence handoff (update existing records)
 
 Record:
 
@@ -681,7 +683,7 @@ M01 Development Complete
 → execute frozen Integration plan
 → execute packaged Windows E2E including real ChatGPT + ASK + disconnect
 → Human Manual Acceptance
-→ ACCEPTANCE / EVIDENCE_INDEX
+→ human sign-off in the existing manual checklist + evidence locations
 → M01 ACCEPTED / FROZEN
 ~~~
 
