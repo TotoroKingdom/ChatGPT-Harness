@@ -1,117 +1,71 @@
 # Repository Guidelines
 
-## Current Development State
+This file contains **long-lived repository rules** for Coding Agents. It must remain useful across product versions and milestones. Do not put active milestone names, release numbers, temporary acceptance states, or phase-specific implementation instructions here; those belong in the relevant milestone documents.
 
-ChatGPT-Harness is currently on the **V4 development track**. The production code/manifests are version **0.1.3**, while V4 features are being developed milestone-by-milestone.
+## Sources of Truth
 
-The active milestone is:
+- For **implemented behavior**, inspect source code, tests, manifests, and build scripts. Do not infer shipped features from requirements or archived reports.
+- For **intended behavior**, read the active PRD, Architecture, Roadmap, and the current milestone's SPEC / PLAN / TASKS / verification plans under `docs-codex/`.
+- `wiki/` may help navigate the codebase, but verify its statements against code because it can lag behind.
+- `docs/archive/` is historical. Do not consult or treat it as authoritative for current work unless a task explicitly requires historical comparison or migration.
+- When an implementation contradicts an approved requirement, surface the discrepancy instead of silently changing either side.
 
-```text
-M00 — As-Is Baseline and Architecture Contract Gate
-```
+## Repository Structure and Ownership
 
-M00 is an implementation/feasibility gate, not a shipped V4 feature milestone. Its pre-development contract is:
+- `protocol/`: shared control contracts, schema, fixtures, and contract tests.
+- `runtime/`: MCP endpoints, Workspace enforcement, Tool execution, Policy, Approval, Activity, and Audit.
+- `ui/src/`: React application and frontend tests.
+- `ui/src-tauri/`: Tauri Host, desktop lifecycle, configuration, secrets, and managed Runtime/Tunnel processes.
+- `ui/scripts/`: distribution and packaging automation.
+- `fixtures/`, `assets/`, `wiki/`: test fixtures, media, and implementation references.
+- `docs-codex/`: active product and milestone documentation.
+- `docs/archive/`: archived historical documents.
 
-- `docs-codex/v4/milestones/M00-baseline-contract-gate/SPEC.md`
-- `docs-codex/v4/milestones/M00-baseline-contract-gate/PLAN.md`
-- `docs-codex/v4/milestones/M00-baseline-contract-gate/TASKS.md`
-- `docs-codex/v4/milestones/M00-baseline-contract-gate/INTEGRATION_TEST_PLAN.md`
-- `docs-codex/v4/milestones/M00-baseline-contract-gate/E2E_TEST_PLAN.md`
-- `docs-codex/v4/milestones/M00-baseline-contract-gate/MANUAL_ACCEPTANCE_CHECKLIST.md`
+Respect process and authority boundaries: UI expresses intent and displays observed state; Tauri manages desktop processes, configuration, and secrets; Runtime authorizes and executes tools. Tunnel transports traffic and must not become an authorization authority. Verify the exact ownership in code before altering a boundary.
 
-These six documents are frozen as the implementation target before T1 starts. M00 is not ACCEPTED/FROZEN until its actual Integration, E2E and Manual Acceptance evidence passes.
+## Milestone Development Process
 
-## Authority and Documentation Order
-
-Use the following authority order:
-
-1. **Source code, tests and manifests** — truth for what the current product actually implements.
-2. **V4 PRD / Architecture / Roadmap** — frozen upstream product and architecture baseline for the current V4 milestone.
-3. **Current milestone SPEC / PLAN / TASKS + validation plans** — executable implementation and acceptance contract.
-4. **`wiki/**`** — current implementation notes only when consistent with source/tests.
-5. **`docs/archive/**`** — historical reference only; never use archived acceptance as proof for the current candidate.
-
-Key upstream V4 documents:
-
-- `docs-codex/ChatGPT-Harness_V4_PRD.md`
-- `docs-codex/ChatGPT-Harness_V4_ARCHITECTURE.md`
-- `docs-codex/ChatGPT-Harness_V4_ROADMAP.md`
-
-Do not treat future V4 documentation as proof that a feature is already implemented.
-
-## V4 Development Workflow
-
-The required milestone flow is:
+For milestone work, follow the active project's delivery contract:
 
 ```text
 PRD / Architecture / Roadmap
 → SPEC / PLAN / TASKS
-→ Integration / E2E / Manual Acceptance plans frozen
-→ Coding Agent executes Tasks + task-local Unit/POC tests
-→ independent QA executes Integration
-→ controlled/authorized E2E
-→ Human Manual Acceptance
-→ ACCEPTANCE + EVIDENCE_INDEX
-→ Milestone ACCEPTED / FROZEN
-→ next milestone
+→ Integration / E2E / Manual Acceptance plans
+→ Task implementation + Unit/contract tests
+→ independent Integration and E2E verification
+→ human Manual Acceptance
+→ evidence and explicit milestone acceptance/freeze
 ```
 
-Rules:
+- Read the *current* milestone documents and their entry/exit criteria before changing production code.
+- Define and review test/acceptance criteria **before** implementing against them. Do not weaken them to fit an implementation.
+- Keep tasks scoped, verify each task locally, and separate development-complete from verified and accepted.
+- Follow the milestone's definitions of automated E2E, external-system E2E, and manual checks. Do not replace a required real boundary with mocks or call an unexecuted check PASS.
+- Record actual commands, versions, evidence, skipped checks, and failures. Use PASS, FAIL, BLOCKED, or NOT_EXECUTED accurately.
+- Only human reviewers can attest to manual acceptance; the Coding Agent must not self-certify it.
+- If an upstream product or architecture decision must change, record the affected requirement, evidence, and blocker; do not edit an approved upstream baseline just to make a task pass. Obtain explicit direction and re-verify affected contracts.
 
-- Do not start milestone implementation before its engineering and validation documents are frozen.
-- Coding Agents own Task implementation and task-local automated verification only.
-- Do not mark Integration/E2E/Manual cases PASS from development-task results.
-- Unexecuted, blocked or unavailable external checks remain BLOCKED/INCONCLUSIVE; never convert them to PASS.
-- Paid/networked model execution or real external ChatGPT execution must follow the explicit authorization rules in the milestone documents.
-- A milestone may unlock downstream work only after its defined acceptance gate is satisfied.
+## Security and Runtime Invariants
 
-## Upstream Change Control
+- Never bypass Workspace confinement, path normalization, Policy, Approval, or Tool authorization to make a test succeed.
+- Fail closed on invalid, missing, or inconsistent security state. Preserve cancellation, timeout, process cleanup, and generation/session isolation.
+- Keep API keys and credentials in the established secret store/secret-reference flow; do not commit secrets or expose them in logs, argv, IPC responses, error messages, fixtures, or evidence.
+- Treat external inputs, MCP tool arguments, persisted configuration, and diagnostic payloads as untrusted.
+- Preserve compatibility and migration behavior unless a separately approved contract change explicitly revises it.
+- Use disposable directories and synthetic credentials for tests/POCs. Keep experiments separate from production dependencies and persistent user data.
+- Avoid unrelated refactors, destructive cleanup, or global process termination. Protect unrelated local changes.
 
-A Coding Agent must not edit the V4 PRD, Architecture or Roadmap merely to make an implementation or test pass.
+## Development and Verification Commands
 
-If implementation evidence invalidates an upstream decision:
+From repository root:
 
-1. record the evidence and affected ADR/requirement;
-2. mark `UPSTREAM_DECISION_REQUIRED` and REVISED/BLOCKED as appropriate;
-3. stop the affected acceptance path;
-4. perform any PRD/Architecture/Roadmap revision as a separate explicitly approved architecture/product change;
-5. re-freeze the affected milestone documents and re-run impacted verification.
+```powershell
+cargo fmt --all -- --check
+cargo check --workspace
+cargo test --workspace
+```
 
-Never weaken acceptance criteria after observing a failing result.
-
-## M00-Specific Guardrails
-
-During M00:
-
-- do not ship production SQLite History, Trace, Metrics, Tray, notifications, grep or the full Agent Evaluation system;
-- production `CURRENT_SCHEMA_VERSION` remains **2**;
-- do not introduce `protocol/v2`; current control protocol remains v1 unless a separately approved incompatibility requires otherwise;
-- M00 evidence/history objects are observational only and must never restore or create `Pending Approval`, `Session Grant` or `ExecutionPermit`;
-- SQLite and evaluation POCs must be isolated from production Runtime/Tauri dependencies;
-- if a Rust POC lives below the repository root, it must either declare its own empty `[workspace]` or be listed in root `workspace.exclude`; do not let it become an implicit production workspace member;
-- POC databases/config/workspaces must use disposable paths, never the real user AppData/config;
-- do not add a new user-facing Tool or weaken Workspace/Policy/Approval semantics to satisfy a POC;
-- a mocked model/provider may test runner mechanics but cannot satisfy the real controlled-evaluation acceptance gate;
-- never commit API keys, raw SecretStore values, machine-specific credentials or sensitive raw payloads.
-
-## Project Structure
-
-The repository combines a Rust workspace with a React/Vite frontend and Tauri desktop shell:
-
-- `protocol/` — shared control protocol types, schemas, fixtures and contract tests.
-- `runtime/` — Runtime process, MCP server, tools, Workspace security, Policy, Approval, Session Grants, Activity and Audit.
-- `runtime/tests/` — Runtime black-box/integration tests.
-- `ui/src/` — React UI and colocated frontend tests.
-- `ui/src-tauri/` — Tauri Host, `HarnessController`, Runtime/Tunnel supervision, config and SecretStore integration.
-- `ui/scripts/` — Windows packaging/distribution scripts.
-- `fixtures/`, `assets/`, `wiki/` — test data, media and current implementation notes.
-- `docs-codex/` — active V4 product/milestone documentation.
-- `docs/archive/` — historical version documentation.
-- `poc/` / `evaluation/` — only when explicitly introduced by a milestone; keep isolated from production dependency graphs.
-
-## Build and Test Commands
-
-Run frontend commands from `ui/`:
+From `ui/`:
 
 ```powershell
 npm install
@@ -122,43 +76,19 @@ npm test
 npm run build
 ```
 
-At repository root:
+Windows packaging (from `ui/`):
 
 ```powershell
-cargo fmt --all -- --check
-cargo check --workspace
-cargo test --workspace
-```
-
-Packaging:
-
-```powershell
-cd ui
 npm run portable:windows
 npm run tauri:build
 ```
 
-Run the narrowest relevant test first, then the applicable suite. Protocol contracts belong in `protocol/tests/`; Runtime integration/black-box tests belong in `runtime/tests/`; frontend tests use `*.test.ts` / `*.test.tsx`.
+Run focused tests first and then all relevant regression suites. Rust protocol contract tests belong with `protocol/`; Runtime black-box/integration tests live under `runtime/tests/`; frontend tests use the established `*.test.ts` / `*.test.tsx` conventions. Packaging or native behavior must be verified on an appropriate Windows environment; do not claim success without running it.
 
-## Coding and Evidence Conventions
+## Changes, Documentation, and Evidence
 
-Use rustfmt-compatible Rust, the repository's existing TypeScript/JSON formatting, `PascalCase` for React components/types, `camelCase` for TypeScript values and `snake_case` for Rust modules/functions.
-
-Synchronize protocol changes with schemas, fixtures and tests. Store credentials through `SecretStore`.
-
-Every milestone report must separate:
-
-- implementation completed;
-- local/task-level tests passed;
-- Integration results;
-- E2E results;
-- Manual Acceptance results;
-- skipped/BLOCKED/INCONCLUSIVE checks.
-
-Do not reuse an old milestone's ACCEPTED label as current evidence without proving the exact candidate is covered.
-
-## Commit and Pull Request Guidelines
-
-Use the existing commit prefixes such as `feat(scope):`, `fix(scope):`, `docs:`, `test:` and `release:`.
-
-Keep commits behavior-focused. PRs should reference the relevant SPEC/TASKS, list verification commands and outcomes, and clearly call out unexecuted external/manual checks. Packaging changes should include artifact path/version and verification result.
+- Follow existing Rust formatting and TypeScript conventions. Keep changes narrow and update schemas, protocol fixtures, generated types, and tests when contracts change.
+- Keep `README.md` **Chinese-first and reader-facing**: what the product does, the currently available features, how to get started, and concise development links. Avoid internal milestone task lists and lengthy acceptance reports in README.
+- Keep milestone-specific rules, thresholds, proofs, and blockers in their own `docs-codex/` files, not in this AGENTS.md.
+- Explain assumptions, risks, and verification gaps in handoffs. Separate implemented, tested, externally verified, and manually accepted states.
+- Use existing commit conventions such as `feat(scope):`, `fix(scope):`, `docs:`, `test:`, and `release:`. Do not force-push, rewrite history, or discard unrelated changes without explicit authorization.

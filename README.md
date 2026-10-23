@@ -1,162 +1,107 @@
 # ChatGPT-Harness
 
-> Current code version: **0.1.3**  
-> Active development track: **V4**  
-> Current milestone: **M00 — As-Is Baseline and Architecture Contract Gate**  
-> M00 status: **implementation ready / validation plans frozen / not yet ACCEPTED**
+**让 ChatGPT 安全、可控地使用你的本地工作区。**
 
-ChatGPT-Harness is a Windows local Workspace Agent Runtime and desktop control plane. It connects external ChatGPT tool calls to a local MCP Runtime through the Tunnel, while keeping Workspace boundaries, Policy, Approval and execution authority inside the Runtime.
+ChatGPT-Harness 是一款面向 Windows 的桌面应用。它通过 MCP（Model Context Protocol）和 Tunnel 将 ChatGPT 的工具调用连接到本机，让 ChatGPT 在你指定的工作区内读取文件、编辑内容或执行受控命令，同时由本地 Runtime 负责权限校验、操作审批和活动记录。
 
-## Architecture at a Glance
+> **当前源码版本：0.1.3** · **支持平台：Windows** · **V4 正在开发中**（下方的功能介绍以当前代码已经具备的能力为准，并非 V4 全部功能已发布）
 
-```text
-React UI
-   ↕ Tauri IPC
-Tauri Host / HarnessController
-   ├── supervises Runtime process
-   └── supervises Tunnel process
+## 主要功能
 
-External ChatGPT
-      ↕
-    Tunnel
-      ↕
- Runtime MCP
-      ↓
-WorkspaceGuard
-      ↓
-Policy / Approval / Session Grant
-      ↓
- Tool Execution
-      ↓
-Audit / Activity
-```
+| 功能 | 你可以做什么 |
+| --- | --- |
+| 本地文件操作 | 使用 `read_file`、`glob`、`write`、`edit` 在指定工作区内读取、查找和修改文件 |
+| 命令执行 | 通过受控的 `bash` 工具运行命令 |
+| 工具管理 | 按需启用或停用工具，查看当前生效状态 |
+| 权限策略 | 使用 Policy 规则控制工具行为，按规则允许、拒绝或要求审批 |
+| 人工审批 | 在 Approvals 页面处理需要确认的操作 |
+| 活动记录 | 在 Activity 页面查看执行结果和相关事件，辅助排查问题 |
+| 连接管理 | 在桌面应用中启动、停止 Harness，查看 Runtime、MCP、Tunnel 的状态 |
+| 界面体验 | 提供中文/英文界面及深色、浅色外观设置 |
 
-Ownership is intentionally split:
+**安全边界：** 工具调用必须经过 Runtime 的工作区约束和权限检查；Tunnel 负责通信转发，不代替 Runtime 做授权。涉及文件修改和命令执行时，请先检查工具及 Policy 配置，并对重要文件做好备份。
 
-- **React UI** presents state and user controls.
-- **Tauri Host** owns desktop lifecycle and Runtime/Tunnel supervision.
-- **Runtime** is the authority for Tool availability, Workspace validation, Policy, Approval, Session Grants and execution.
-- **Tunnel** bridges external ChatGPT traffic to the local Runtime; it is not an authorization authority.
-
-## Current Implemented Baseline
-
-The current 0.1.3 codebase already contains the V3-derived local Harness foundation, including:
-
-- Workspace-scoped `read_file`, `glob`, `write` and `edit`;
-- controlled `bash` execution;
-- Tool enable/disable configuration;
-- Policy rules and security modes;
-- Human Approval and Session Grants;
-- Runtime MCP and Tauri-managed Runtime/Tunnel lifecycle;
-- Activity/Audit evidence;
-- SecretStore/SecretReference credential handling;
-- bilingual UI and appearance/theme support;
-- Windows portable and NSIS packaging flows.
-
-The behavioral source of truth remains the current source code, tests and manifests. Historical acceptance documents do not automatically prove the current candidate.
-
-## V4 Development Status
-
-V4 is being developed through explicit milestone gates. M00 is the current gate and exists to verify the architecture assumptions required by later milestones before production V4 features are added.
-
-M00 specifically validates:
-
-- current ownership/lifecycle facts;
-- stable Runtime evidence identity and a safe evidence contract;
-- Runtime-single-writer / Tauri-read-only SQLite feasibility;
-- future AppConfig v2 → v3 migration compatibility while production remains schema v2;
-- a real controllable Agent/Model evaluation path through the real Runtime MCP;
-- current real ChatGPT → Tunnel → Runtime baseline connectivity;
-- POC isolation so M00 does not accidentally ship future V4 features.
-
-M00 does **not** yet ship production SQLite History, Tray/notifications, grep, Metrics/Trace or the full Agent Evaluation system.
-
-## V4 Document Entry Points
-
-Upstream V4 baseline:
-
-- [V4 PRD](docs-codex/ChatGPT-Harness_V4_PRD.md)
-- [V4 Architecture](docs-codex/ChatGPT-Harness_V4_ARCHITECTURE.md)
-- [V4 Roadmap](docs-codex/ChatGPT-Harness_V4_ROADMAP.md)
-
-Current M00 implementation contract:
-
-- [M00 SPEC](docs-codex/v4/milestones/M00-baseline-contract-gate/SPEC.md)
-- [M00 PLAN](docs-codex/v4/milestones/M00-baseline-contract-gate/PLAN.md)
-- [M00 TASKS](docs-codex/v4/milestones/M00-baseline-contract-gate/TASKS.md)
-- [M00 Integration Test Plan](docs-codex/v4/milestones/M00-baseline-contract-gate/INTEGRATION_TEST_PLAN.md)
-- [M00 E2E Test Plan](docs-codex/v4/milestones/M00-baseline-contract-gate/E2E_TEST_PLAN.md)
-- [M00 Manual Acceptance Checklist](docs-codex/v4/milestones/M00-baseline-contract-gate/MANUAL_ACCEPTANCE_CHECKLIST.md)
-
-Other references:
-
-- [Current implementation wiki](wiki/README.md)
-- [Historical documentation index](docs/archive/README.md)
-- [V3 archive](docs/archive/v3-2026-10/README.md)
-- [Coding Agent repository rules](AGENTS.md)
-
-## Documentation Authority
-
-Use this order when documents disagree:
+## 工作原理
 
 ```text
-Current source / tests / manifests
-→ V4 PRD / Architecture / Roadmap
-→ current milestone SPEC / PLAN / TASKS + validation plans
-→ wiki implementation notes
-→ archived historical documents
+ChatGPT
+   ↕
+Tunnel（远程连接）
+   ↕
+本机 Runtime MCP
+   ↓
+工作区校验 → 权限策略 / 人工审批
+   ↓
+文件工具 / 命令执行
+   ↓
+Activity / Audit 记录
 ```
 
-`docs-codex/**` describes active V4 work and may contain future contracts that are not implemented yet.  
-`docs/archive/**` is historical reference only.
+Windows 桌面应用由 React UI 和 Tauri Host 组成，负责配置管理、状态展示以及 Runtime / Tunnel 进程的启动和停止。实际的工具执行与安全校验发生在 Runtime 中。
 
-## Development and Acceptance Flow
+## 快速开始
 
-Each V4 milestone follows:
+1. **准备应用。** 使用项目构建的 Windows Portable 便携版或 NSIS 安装包，也可以按照下文自行从源码运行。
+2. **配置工作区。** 打开应用，在 **Settings（设置）** 中选择允许访问的本地 Workspace 目录。
+3. **配置连接。** 在 Settings 中填写所需的 Tunnel ID、API Key；网络环境需要时配置 Control Plane HTTP Proxy。请勿把密钥粘贴到日志或公开 Issue。
+4. **检查权限。** 在 **Tools（工具）** 中选择开放的工具，在 **Policies（策略）** 中设置允许、拒绝和审批规则。
+5. **启动 Harness。** 前往 **Overview（概览）**，点击 Start，检查 Runtime、MCP 与 Tunnel 的实际就绪状态。
+6. **连接 ChatGPT 并验证。** 按所用 ChatGPT 连接方式配置对应的 Tunnel/MCP 入口，先尝试工作区内的只读 `read_file` 或 `glob`；需要授权的操作在 **Approvals（审批）** 中处理，结果可在 **Activity（活动）** 中查看。
 
-```text
-PRD / Architecture / Roadmap
-→ SPEC / PLAN / TASKS
-→ Integration / E2E / Manual plans frozen
-→ Coding Agent development + Unit/task-local verification
-→ independent Integration QA
-→ controlled/authorized E2E
-→ Human Manual Acceptance
-→ ACCEPTED / FROZEN
-→ next milestone
-```
+> 仅启动本地 Runtime 并不等于外部 ChatGPT 已连接成功。若连接失败，请分别检查 Workspace、Tunnel 配置、凭据、代理以及界面显示的就绪状态。
 
-A failed architecture assumption is not fixed by weakening tests or silently rewriting upstream requirements. It becomes an explicit `UPSTREAM_DECISION_REQUIRED` decision and must be resolved separately.
+## 界面导览
 
-## Build and Test
+- **Overview（概览）**：启动或停止 Harness，查看组件运行与连接状态。
+- **Tools（工具）**：管理哪些工具能够被使用。
+- **Policies（策略）**：配置不同工具和场景的权限规则。
+- **Approvals（审批）**：查看、处理需要人工确认的请求。
+- **Activity（活动）**：查看最近的操作及执行证据。
+- **Settings（设置）**：工作区、连接凭据、代理、语言、外观及其他配置。
 
-Rust workspace:
+## 从源码运行
+
+开发环境为 Windows，需要 Node.js / npm、Rust 工具链，以及 Tauri 2 所需的 Windows 构建依赖。
 
 ```powershell
-cargo fmt --all -- --check
+# 在仓库根目录
 cargo check --workspace
 cargo test --workspace
-```
 
-Frontend/Desktop:
-
-```powershell
+# 启动桌面应用
 cd ui
 npm install
-npm run typecheck
-npm test
-npm run build
 npm run tauri:dev
 ```
 
-Windows packaging:
+前端检查与构建：
 
 ```powershell
 cd ui
-npm run portable:windows
-npm run tauri:build
+npm run typecheck
+npm test
+npm run build
 ```
 
-## Version Boundary
+Windows 打包（在 `ui/` 目录运行）：
 
-The repository is currently **developing V4 on top of the 0.1.3 implementation baseline**. A document saying a V4 feature is planned, specified or tested does not mean it is shipped. Only milestone evidence and final acceptance can move a capability from planned to accepted.
+```powershell
+npm run portable:windows  # 便携版
+npm run tauri:build       # NSIS 安装包
+```
+
+打包需要相关 Runtime/Tunnel 分发资源和 Windows 构建环境，具体以仓库构建脚本为准。
+
+## 版本进展与开发文档
+
+当前 0.1.3 代码提供了本地 Harness 的基础能力；**V4 仍处于迭代开发阶段**。托盘与后台运行、通知、自动启动、连接诊断、结构化追踪、评测能力等新功能以实际里程碑验收结果为准，不能因为列入规划就视为已经发布。
+
+想了解后续规划或参与开发，可以查阅：
+
+- [V4 产品需求（PRD）](docs-codex/ChatGPT-Harness_V4_PRD.md)
+- [V4 架构设计](docs-codex/ChatGPT-Harness_V4_ARCHITECTURE.md)
+- [V4 开发路线图](docs-codex/ChatGPT-Harness_V4_ROADMAP.md)
+- [开发 Agent 规则](AGENTS.md)
+- [代码与历史技术说明（Wiki）](wiki/README.md)（部分历史描述可能滞后，以当前源码为准）
+
+**说明：** 开发文档中的计划、测试用例和验收状态不等同于用户可用的已发布功能。
