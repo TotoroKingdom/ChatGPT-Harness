@@ -1,11 +1,11 @@
 # M00 Manual Acceptance Checklist — As-Is Baseline and Architecture Contract Gate
 
-> Status: PLANNED / NOT EXECUTED  
+> Status: FROZEN / NOT EXECUTED  
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md  
 > Owner: Human Reviewer  
 > Purpose: final human sign-off that M00 has produced a truthful, usable implementation contract for M01/M02/M03.  
-> Manual Acceptance does not replace failed or blocked automated evidence.
+> Manual Acceptance does not replace failed or blocked automated evidence. This checklist is frozen before implementation and may not be relaxed merely to convert a development result into acceptance.
 
 ---
 
@@ -276,7 +276,7 @@ For every ADR:
 Change control:
 
 - [ ] No REVISED ADR remains only inside M00 docs.
-- [ ] Any REVISED decision has already updated/re-frozen affected V4 PRD/Architecture/Roadmap.
+- [ ] Any REVISED decision was handled through a separate explicitly approved upstream change and the affected V4 PRD/Architecture/Roadmap plus M00 contract were re-frozen.
 - [ ] No BLOCKED ADR is being treated as accepted.
 
 Production isolation:

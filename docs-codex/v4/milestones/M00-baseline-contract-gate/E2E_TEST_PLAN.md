@@ -1,6 +1,6 @@
 # M00 E2E Test Plan — Baseline Chain, Controlled Eval and Production-Isolation Proof
 
-> Status: PLANNED / READY FOR REVIEW  
+> Status: FROZEN / NOT EXECUTED  
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md  
 > Owner: QA/Coding Agent for locally automatable steps; explicitly authorized external execution for ChatGPT/networked model steps  
@@ -19,6 +19,8 @@ M00 E2E proves three end-to-end facts:
 3. the M00 candidate still behaves like the current product at production boundaries — POCs did not secretly become production features or change config/tool/security semantics.
 
 The E2E layer must not substitute mocks for the real boundary it is meant to prove.
+
+This plan is frozen before implementation starts. A failed or blocked E2E boundary is an engineering/availability result, not permission to weaken the case after coding.
 
 ---
 

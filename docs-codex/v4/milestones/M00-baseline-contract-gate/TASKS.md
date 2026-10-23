@@ -1,9 +1,10 @@
 # M00 TASKS — As-Is Baseline and Architecture Contract Gate
 
-> Inputs: SPEC.md, PLAN.md  
+> Status: IMPLEMENTATION READY / VALIDATION FROZEN  
+> Inputs: SPEC.md, PLAN.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md, MANUAL_ACCEPTANCE_CHECKLIST.md  
 > Executor: Codex / Coding Agent  
 > Upstream: V4 planning baseline FROZEN FOR M00  
-> Rule: every Task includes implementation + task-local automated verification. Integration/E2E/Manual acceptance are separate documents and must not be marked PASS here.
+> Rule: every Task includes implementation + task-local automated verification. Integration/E2E/Manual acceptance are separate frozen documents and must not be marked PASS here. Do not start T1 unless all six M00 contract documents are present.
 
 ---
 
@@ -259,6 +260,8 @@ poc/v4-m00-evidence-store/
 
 The POC may use SQLite libraries suitable for the future implementation, but must not be imported by production chatgpt-harness-runtime or chatgpt-harness-ui.
 
+Cargo workspace isolation is mandatory. If this POC is a Rust crate under the repository root, either declare an empty `[workspace]` in its Cargo.toml or add `poc/v4-m00-evidence-store` to root `workspace.exclude`. The chosen mechanism must be documented and verified so the POC is never an implicit production workspace member.
+
 Use temporary directories in every automated test.
 
 ### POC cases
@@ -461,7 +464,7 @@ evaluation/m00-poc/
 └── reports/
 ~~~
 
-Exact language/tooling may follow repository conventions, but the spike must call the real Harness Runtime MCP rather than reimplementing tool behavior.
+Exact language/tooling may follow repository conventions, but the spike must call the real Harness Runtime MCP rather than reimplementing tool behavior. If the spike uses Rust under the repository root, it must use the same explicit Cargo workspace-isolation rule as T3.
 
 ### Adapter
 
@@ -606,10 +609,11 @@ downstream owner
 
 If any verdict is REVISED:
 
-- edit V4 PRD/Architecture/Roadmap as required;
-- explain the reason and evidence;
-- re-run the affected M00 task verification;
-- do not leave SPEC/PLAN/TASKS contradicting the upstream baseline.
+- record `UPSTREAM_DECISION_REQUIRED` with the reason, evidence and affected PRD/Architecture/Roadmap decision;
+- stop the affected T6 acceptance path;
+- do not edit V4 PRD/Architecture/Roadmap from this implementation task merely to make M00 pass;
+- wait for a separate explicitly approved upstream revision, then re-freeze the affected M00 contract documents and re-run the impacted verification;
+- do not leave SPEC/PLAN/TASKS contradicting the approved upstream baseline.
 
 If BLOCKED, do not relabel it ACCEPTED to let M01 proceed.
 
@@ -633,20 +637,16 @@ Update cross-links among:
 - SPEC.md
 - PLAN.md
 - TASKS.md
+- INTEGRATION_TEST_PLAN.md
+- E2E_TEST_PLAN.md
+- MANUAL_ACCEPTANCE_CHECKLIST.md
 - AS_IS_BASELINE.md
 - SQLITE_POC_REPORT.md
 - EVAL_FEASIBILITY_REPORT.md
 - ADR_DECISIONS.md
+- future ACCEPTANCE.md and EVIDENCE_INDEX.md references.
 
-Prepare stable references for future:
-
-- INTEGRATION_TEST_PLAN.md
-- E2E_TEST_PLAN.md
-- MANUAL_ACCEPTANCE_CHECKLIST.md
-- ACCEPTANCE.md
-- EVIDENCE_INDEX.md
-
-Do not mark those future documents PASS merely because M00 development is complete.
+The three validation plans are already frozen before implementation. Do not rewrite their acceptance criteria to fit the implementation and do not mark them PASS merely because M00 development is complete.
 
 ### Required task-local verification
 
@@ -707,10 +707,8 @@ After T6, the next action is not M01 implementation.
 The required sequence is:
 
 ~~~text
-M00 Development Complete
-→ generate/freeze INTEGRATION_TEST_PLAN
-→ generate/freeze E2E_TEST_PLAN
-→ generate/freeze MANUAL_ACCEPTANCE_CHECKLIST
+Pre-development: SPEC / PLAN / TASKS / Integration / E2E / Manual plans frozen
+→ T1–T6 M00 Development Complete
 → independent QA executes Integration
 → Local/controlled E2E + explicitly authorized external E2E
 → Manual Acceptance

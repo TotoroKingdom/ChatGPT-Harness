@@ -1,6 +1,6 @@
 # M00 SPEC — As-Is Baseline and Architecture Contract Gate
 
-> Status: DRAFT / READY FOR REVIEW  
+> Status: IMPLEMENTATION READY / VALIDATION FROZEN  
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Upstream baseline: V4 PRD + V4 Architecture + V4 Roadmap, FROZEN FOR M00  
 > Target: validate current code facts, prove critical V4 architecture assumptions, and freeze the implementation contract consumed by M01+  
@@ -144,7 +144,7 @@ Any POC code that could be mistaken for product functionality must be isolated a
 
 Required outputs:
 
-1. SPEC.md, PLAN.md, TASKS.md.
+1. SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md and MANUAL_ACCEPTANCE_CHECKLIST.md — the six pre-development contract documents for M00.
 2. AS_IS_BASELINE.md — current source/test/runtime truth with status and evidence path.
 3. ADR_DECISIONS.md — M00 verdict for each relevant ADR and unresolved risks.
 4. Shared Evidence Contract v1 fixture(s), including valid and invalid/redaction cases.
@@ -152,9 +152,9 @@ Required outputs:
 6. SQLite POC evidence/report containing commands, environment and actual results.
 7. Config v2 → v3 compatibility fixtures and migration-contract tests.
 8. Controlled Eval feasibility POC, one or more ground-truth cases, and a reproducible smoke report.
-9. Evidence index references that later M00 test plans can consume.
+9. Evidence index references consumed by the frozen M00 validation plans.
 
-INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md and MANUAL_ACCEPTANCE_CHECKLIST.md are generated and frozen after these three engineering documents are reviewed; they are not replaced by this SPEC.
+INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md and MANUAL_ACCEPTANCE_CHECKLIST.md are part of the M00 implementation baseline and must be reviewed/frozen before T1 begins. Implementation may add evidence and executable fixtures, but it must not silently weaken test cases, acceptance criteria, or blocker semantics. Any required validation-contract change follows §15 Change Control.
 
 ---
 
@@ -320,6 +320,8 @@ poc/v4-m00-evidence-store/
 
 It must not be a dependency of chatgpt-harness-runtime or chatgpt-harness-ui.
 
+If the POC is implemented as a Rust crate below the repository root, Cargo workspace ownership must be explicit: either the POC manifest declares its own empty `[workspace]`, or the root Cargo.toml lists the POC path in `workspace.exclude`. Running `cargo test --manifest-path poc/v4-m00-evidence-store/Cargo.toml` must not implicitly add the POC to the production workspace. The same rule applies to any Rust-based evaluation POC.
+
 If another test-only location is chosen, ADR_DECISIONS.md must record why it remains non-production and removable.
 
 ---
@@ -472,7 +474,7 @@ Requirements:
 
 ## 12. Traceability
 
-Reserved test IDs below define the contract for the later M00 validation documents.
+The test IDs below are frozen in the pre-development M00 validation documents and define the implementation-to-validation traceability contract.
 
 | Upstream | M00 AC | Implementation Task | Integration | E2E | Manual |
 | --- | --- | --- | --- | --- | --- |
@@ -489,7 +491,22 @@ A dash means the AC is not independently proven by that layer; it is still cover
 
 ---
 
-## 13. Exit Gate
+## 13. Implementation Entry Gate
+
+Codex / the Coding Agent may start T1 only when all six M00 contract documents are present and reviewed:
+
+- SPEC.md;
+- PLAN.md;
+- TASKS.md;
+- INTEGRATION_TEST_PLAN.md;
+- E2E_TEST_PLAN.md;
+- MANUAL_ACCEPTANCE_CHECKLIST.md.
+
+The validation documents are frozen as targets before implementation. T1–T6 may satisfy them with code, fixtures and evidence, but may not rewrite them merely because an implementation result is inconvenient. If implementation evidence invalidates an upstream product/architecture assumption, follow §15 Change Control instead of weakening the validation target.
+
+---
+
+## 14. Exit Gate
 
 M00 may be marked ACCEPTED / FROZEN only when all of the following are true:
 
@@ -509,13 +526,15 @@ If real external ChatGPT access or the controlled Agent/Model adapter cannot be 
 
 ---
 
-## 14. Change Control
+## 15. Change Control
 
 During M00:
 
 - implementation detail may change inside POC/test-only code;
 - module names may be refined if ownership semantics remain unchanged;
 - any change to PRD canonical AC, security semantics, authority, release gates, AppConfig migration direction, or M00 dependency graph requires an explicit upstream document revision;
+- the M00 implementation agent must not edit V4 PRD/Architecture/Roadmap merely to make a failed POC or test pass; when evidence invalidates an upstream decision, record `UPSTREAM_DECISION_REQUIRED`, mark the affected ADR REVISED/BLOCKED as appropriate, and stop the affected acceptance path;
+- upstream revision is a separate architecture/product decision. After it is explicitly approved and committed, re-freeze the affected M00 contract documents and re-run the impacted verification;
 - downstream M01/M02/M03 implementation must not begin from a silently revised M00 contract.
 
 M00 ends by freezing facts and contracts, not by maximizing code output.

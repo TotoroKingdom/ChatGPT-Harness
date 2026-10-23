@@ -1,5 +1,6 @@
 # M00 PLAN — As-Is Baseline and Architecture Contract Gate
 
+> Status: IMPLEMENTATION READY / VALIDATION FROZEN  
 > Input: SPEC.md  
 > Upstream: V4 PRD / Architecture / Roadmap, FROZEN FOR M00  
 > Goal: turn architectural assumptions into executable evidence and a frozen implementation contract for M01+  
@@ -8,6 +9,8 @@
 ---
 
 ## 1. Delivery Strategy
+
+M00 starts only after SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md and MANUAL_ACCEPTANCE_CHECKLIST.md are present and frozen. The six implementation phases then execute against those validation targets.
 
 M00 is executed in six ordered phases:
 
@@ -144,7 +147,7 @@ Use a separate test/POC crate, preferably:
 poc/v4-m00-evidence-store/
 ~~~
 
-The root Cargo workspace must not import it as a production dependency. It may be run with its own manifest.
+The root Cargo workspace must not import it as a production dependency. It may be run with its own manifest. If it is a Rust crate under the repository root, either declare an empty `[workspace]` in the POC manifest or add the POC path to root `workspace.exclude`; nested POC execution must never become an implicit production workspace member.
 
 ### POC layers
 
@@ -297,7 +300,7 @@ Pin model/adapter identity and execution settings. Record unavoidable nondetermi
 
 ### Authorization / blocker
 
-Do not execute paid/networked calls without explicit user authorization at execution time. If no valid controllable adapter can be executed, record M00 BLOCKED rather than replacing it with mock-only success.
+Do not execute paid/networked calls without explicit user authorization at execution time. If no valid controllable adapter can be executed, record M00 BLOCKED rather than replacing it with mock-only success. If the evaluation spike is implemented as a Rust crate, apply the same explicit workspace-isolation rule as the SQLite POC.
 
 ### Exit
 
@@ -332,13 +335,15 @@ Also close:
 
 If any ADR is REVISED:
 
-1. update the affected V4 PRD/Architecture/Roadmap first;
-2. re-run affected M00 verification;
-3. only then mark that ADR accepted.
+1. record `UPSTREAM_DECISION_REQUIRED` with the exact evidence and affected upstream decision;
+2. stop the affected T6 acceptance path; the Coding Agent must not self-edit PRD/Architecture/Roadmap to make M00 pass;
+3. perform the upstream revision as a separate explicitly approved architecture/product change;
+4. re-freeze the affected M00 contract documents and re-run impacted verification;
+5. only then may the ADR move to ACCEPTED.
 
 ### Exit
 
-All M00 local development work is complete and ready for the separately authored Integration/E2E/Manual plans.
+All M00 local development work is complete and ready for execution of the already-frozen Integration/E2E/Manual plans.
 
 ---
 
@@ -375,9 +380,9 @@ A failed architecture assumption is a design result, not a test nuisance.
 
 ---
 
-## 11. Verification Strategy Before Formal Test Plans
+## 11. Verification Strategy Against Frozen Validation Plans
 
-TASKS include code-level/unit/POC verification only.
+The Integration/E2E/Manual plans are authored and frozen before T1. TASKS still include only code-level/unit/POC verification; formal Integration/E2E/Manual execution occurs after T1–T6 Development Complete.
 
 Expected command families:
 
@@ -394,7 +399,7 @@ cargo test --manifest-path poc/v4-m00-evidence-store/Cargo.toml
 
 Exact commands created by implementation are recorded in TASKS completion/evidence.
 
-Formal component Integration, real ChatGPT E2E and Manual acceptance are defined in their own M00 documents after SPEC/PLAN/TASKS review.
+Formal component Integration, real ChatGPT E2E and Manual acceptance are defined in the already-frozen M00 validation documents. Implementation must satisfy those documents rather than regenerate them after coding.
 
 ---
 

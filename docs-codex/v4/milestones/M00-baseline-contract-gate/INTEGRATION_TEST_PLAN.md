@@ -1,6 +1,6 @@
 # M00 Integration Test Plan — As-Is Baseline and Architecture Contract Gate
 
-> Status: PLANNED / READY FOR REVIEW  
+> Status: FROZEN / NOT EXECUTED  
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md  
 > Owner: independent Coding/QA Agent after T1–T6 Development Complete  
@@ -36,6 +36,8 @@ Integration must answer:
 - Are all POCs isolated from production Runtime/Tauri and removable?
 
 Integration does not prove the external ChatGPT chain or a real networked Agent/Model run; those are E2E responsibilities.
+
+This plan is frozen before T1 begins. Implementation may satisfy these cases with concrete code/fixtures/evidence, but may not weaken or delete a case after observing an inconvenient result without the M00 Change Control process.
 
 ---
 
@@ -453,7 +455,7 @@ Verify:
 - all test Runtime/Tunnel/child processes are stopped;
 - temp DB/config/Workspace resources are removed;
 - ADR_DECISIONS.md contains ACCEPTED/REVISED/BLOCKED for required ADRs;
-- any REVISED ADR has already been reconciled into upstream PRD/Architecture/Roadmap.
+- any REVISED ADR has already been reconciled through a separately approved upstream PRD/Architecture/Roadmap change; an implementation-agent self-edit is not sufficient evidence.
 
 **PASS:** M00 remains a clean architecture-contract gate.
 
