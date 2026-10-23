@@ -1,11 +1,11 @@
 # ChatGPT-Harness V4 Product Requirements Document
 
-> Status: DRAFT / PRODUCT REQUIREMENTS  
+> Status: REVISED DRAFT / PRODUCT REQUIREMENTS (2026-10-23)  
 > Baseline: current main after V3 documentation archive  
 > Product input: V4 feature set F01–F15  
 > Architecture: TBD — defined separately in ChatGPT-Harness_V4_ARCHITECTURE.md  
 > Roadmap: TBD — defined separately in ChatGPT-Harness_V4_ROADMAP.md  
-> Scope: V4 product behavior, quality targets, boundaries, and acceptance intent only
+> Scope: V4 product behavior, quality targets, delivery boundaries, and testable acceptance; architecture remains separate
 
 ---
 
@@ -29,11 +29,17 @@ V4 共包含 15 项功能需求，优先级分为：
 
 | Priority | Meaning |
 | --- | --- |
-| P0 | V4 核心需求，优先保证完成 |
-| P1 | 重要增强，应在 V4 范围内完成 |
-| P2 | 可延后实现，但设计必须与 V4 基础能力兼容 |
+| P0 | V4 Core Release 必达，缺失则阻断核心版验收 |
+| P1 | V4 Full Scope 必达；不阻断独立的 Core Release |
+| P2 | 可选增强；未实现须标 DEFERRED，不阻断 Core 或 Full 的交付 |
 
 ---
+
+## 1.1 User jobs and baseline
+
+V4 首要服务单机 Windows ChatGPT-Harness 用户的四类任务：后台持续使用 Agent Tools；收到准确、可返回原请求的审批/断连提醒；不阅读内部日志就能定位启动或连接故障；跨重启审计工具请求与使用受控评测证明工具扩展质量。
+
+本 PRD 是未来产品契约，不是 V3 已全部实现的证明。开始 Architecture / Roadmap 前，必须依据当前源码、Tests、Manifests、最新 Wiki 和 V3 各 Milestone 的实际验收记录建立 **As-Is baseline**，分别标明 IMPLEMENTED、LOCAL_TESTED、EXTERNALLY_ACCEPTED、NOT_VERIFIED、KNOWN_ISSUE。V3 单个 Milestone 的 ACCEPTED 不等于整个 V3 的 ACCEPTED。
 
 # 2. Product Principles
 
@@ -253,7 +259,9 @@ Harness 应能够建立稳定的 Evaluation baseline，并回答：
 
 ---
 
-## 3.5 Safe policy exploration
+## 3.5 Safe policy exploration (Optional / F15 P2)
+
+这是非阻断的可选增强；若交付则全部安全语义必须验收通过。
 
 用户能够输入一个候选 Tool request，在不执行真实操作的情况下看到：
 
@@ -267,6 +275,26 @@ Harness 应能够建立稳定的 Evaluation baseline，并回答：
 模拟结果必须来自真实 Runtime Policy semantics，而不是 UI 推测。
 
 ---
+
+## 3.6 Version release gates
+
+必须区分功能优先级与对外声称完成的版本范围：
+
+| Gate | Mandatory scope | Verdict |
+| --- | --- | --- |
+| **V4 Core Release** | P0：F01、F03、F04、F05、F06、F07、F10、F12；Shared Evidence Contract；V3 已有 Workspace / Policy / Approval / Bash / SecretStore / lifecycle 回归；真实 ChatGPT MCP E2E | 满足全部后可标 **V4 Core — ACCEPTED** |
+| **V4 Full Scope** | Core Gate + P1：F02、F08、F11、F13、F14。F11 必须完成候选准入/拒绝/延期评审，不承诺全部候选工具实现 | 全部通过后才可标 **V4 — ACCEPTED / FROZEN** |
+| **Optional Feature Gate** | P2：F09、F15；可延期或单独交付 | 延期时标 **DEFERRED**；已交付则每项必须独立 PASS；不阻断 Core / Full |
+
+任何未做的外部 E2E、缺少环境的兼容性测试、未达到已冻结性能阈值或统计样本不足，都不得记为 PASS；使用 BLOCKED、NOT_VERIFIED、INCONCLUSIVE 等如实表达。发布记录必须公开区分已交付、延期、未验证和已知问题。
+
+## 3.7 Milestone acceptance threshold contract
+
+PRD 在没有真实测量之前不虚构毫秒或准确率目标，但 **F05 启动性能与 F12 Agent Evaluation 的阈值必须在对应 Milestone SPEC 开发前确定**。必须事先冻结指标定义、baseline 样本、运行配置、判定阈值 / 允许退化、失败场景与证据形式。若未完成该前置工作，对应 Gate 为 BLOCKED；仅建成面板、采集日志或观察到 Tool 返回成功都不足以验收。
+
+## 3.8 Shared evidence dependency
+
+F07 / F08 / F12 / F14 须共用的请求身份、事件结果、授权状态边界、脱敏和关联契约是 **Core Gate 基础前置条件**；可以并行开发托盘/连接功能，但不得分别建设彼此不可关联的持久化、统计与 Trace 管道。具体表结构、协议和存储 Owner 属于 Architecture。
 
 # 4. V4 Feature Inventory
 
@@ -285,7 +313,7 @@ Harness 应能够建立稳定的 Evaluation baseline，并回答：
 | F11 | 扩展工具能力 | 评估目录管理、复制、移动、重命名、删除等候选工具并按准入结果扩展 | P1 |
 | F12 | Agent Tool Evaluation | Tool selection、参数合法、调用成功、任务完成及回归对比 | P0 |
 | F13 | MCP 协议兼容性测试 | 验证工具发现、调用、错误语义及客户端兼容性 | P1 |
-| F14 | 结构化调用链追踪 | Trace / Span 关联 MCP、Workspace、Policy、Approval、Execution、Activity | P1 |
+| F14 | MCP Tool Request Trace | Trace / Span 关联 Runtime 可观测的单次 MCP Tool Request，不承诺模型隐藏推理或完整 Agent Loop | P1 |
 | F15 | Policy Simulator | 使用真实 Policy semantics 模拟判定，不执行真实操作 | P2 |
 
 ---
@@ -311,6 +339,7 @@ Harness 应能够建立稳定的 Evaluation baseline，并回答：
 
 关闭主窗口时：
 
+- 新安装默认关闭窗口时隐藏到托盘而非 Quit；首次应提示用户后台驻留和显式退出入口
 - 默认不等价于 Quit
 - Harness 处于 Running 时继续后台运行
 - Pending Approvals 和连接状态继续维护
@@ -344,7 +373,7 @@ Settings 提供独立开关：
 
 - Auto Start Harness on app launch
 
-默认值由最终 UX 决定，但必须允许用户关闭。
+新安装默认关闭；用户可开启，升级不得覆盖已有明确设置。
 
 当开启时：
 
@@ -400,6 +429,10 @@ V4 的要求仅为：
 
 同一个 approval request 不应重复发送相同通知。
 
+### Delivery failure and acceptance
+
+Windows 通知被禁用、权限不足或投递失败时，不得因此丢失 Pending Approval；Tray 计数与主窗口仍以 Runtime 真实请求为准。至少覆盖：窗口显示/隐藏、新 ASK/重复状态轮询、点击时请求已完成/已过期、系统通知不可用、点击跳转对应 request。通知只是提示通道，不是授权状态源。
+
 ---
 
 ## 5.4 F04 — Disconnect / Recovery Notifications
@@ -428,7 +461,7 @@ Harness 在后台时，连接故障不能静默发生。
 - 恢复后可发送一次恢复提示
 - 再次独立故障可以再次通知
 
-通知内容应提供可行动入口，例如打开 Overview / Diagnostics。
+通知内容应提供可行动入口，例如打开 Overview / Diagnostics。连续故障使用同一次 incident/episode 去重，恢复后再次独立断连可形成新通知；通知发送成功不能被误记为连接恢复。
 
 ---
 
@@ -460,6 +493,8 @@ V4 不能只测一个总耗时。
 ### Optimization Rule
 
 任何“优化成功”必须基于可比较数据，而不是主观感觉。
+
+F05 开发前应测冷启动、热启动、Start→Ready 总耗时、阶段耗时、P50/P95、失败率和 readiness 正确性；明确样本量、硬件、配置与网络条件，在 SPEC 冻结改善阈值。**只增加埋点而没有达到已冻结目标，不算性能优化通过。**
 
 至少需要支持：
 
@@ -507,7 +542,7 @@ V4 不能只测一个总耗时。
 每个检查项至少提供：
 
 - check name
-- PASS / WARNING / FAIL
+- PASS / WARNING / FAIL / UNKNOWN（不能安全确认或未执行时不得当作 PASS）
 - user-readable explanation
 - safe technical evidence
 - remediation when applicable
@@ -522,6 +557,8 @@ V4 不能只测一个总耗时。
 - unrestricted command output
 
 ### UX
+
+一键诊断默认只读；任何会修改配置、重启 Runtime、触碰密钥或改变文件的修复动作必须另行显式授权。诊断结果需包含可验证的故障夹具覆盖，不应只在“全部正常”场景通过。
 
 用户可以从明显入口执行一次诊断，并看到：
 
@@ -582,6 +619,8 @@ V4 必须定义合理的：
 - manual clear
 - size / age management
 
+新安装默认不能在用户不知情下无限期积累历史。SPEC 开发前必须冻结并测试：保留时长、容量上限、超限处理顺序、手动清理范围与数据库错误时的降级说明；UI 应展示有效配置。History 删除和失败不能改变实时权限，也不能从旧记录恢复 Pending/Grant。
+
 具体数据库 schema、indexes 和 migration 由 Architecture / SPEC 冻结。
 
 ---
@@ -620,6 +659,8 @@ V4 必须定义合理的：
 - total request wall time
 
 不能把审批等待混入执行耗时后仍称为 “Tool execution time”。
+
+须区分 received tool calls、execution attempts、executed success、DENY、cancel、timeout 与 system error。成功率分母、P95 样本量和小样本处理必须由 SPEC 明确；拒绝与取消不可悄悄混同执行失败。
 
 ---
 
@@ -660,11 +701,13 @@ V4 必须定义合理的：
 
 ---
 
-## 7.4 F14 — Agent Trace
+## 7.4 F14 — MCP Tool Request Trace
 
 ### Objective
 
 让一次 MCP request 的关键阶段能够在一条结构化调用链中查看。
+
+**可观测边界**：仅承诺 Harness 实际处理的单次 MCP request，以及可关联的 Runtime 事件；不承诺 ChatGPT 的隐藏模型推理、模型未发出的候选工具、完整 Agent Loop 或供应商真实 Token Usage。无法观测的阶段不得伪造 Span，必要时标记 UNKNOWN。
 
 ### Trace Coverage
 
@@ -833,6 +876,15 @@ Agent Evaluation 的任务完成率不能只依据 “tool returned success”�
 
 如果任务要求的最终目标未达成，应计为 task failure。
 
+### Evaluation vs passive telemetry
+
+Harness 作为 MCP Server，通常只能观察真实发起的 tools/call，不能由此推断模型“本应调用的工具”、未执行的候选、隐藏推理或用户最终目标是否完成。
+
+- **Offline / controlled Agent Evaluation** 才能报告 Tool selection accuracy 与 task completion rate：使用标注的 ground truth、可重复任务集、受控 Agent runner、预期工具/参数、最终状态断言和回归对比。
+- **Online / passive telemetry** 只能报告真实可观测的请求、参数合法性、Policy/Execution outcome、耗时等；不能将已被调用工具的成功率冒充工具选择准确率或任务完成率。
+- 记录 dataset 版本/hash、fixtures、模型/Agent/工具 schema/Policy 配置、运行环境、样本量、随机性/重复运行策略、评测器版本。样本不足或结果不稳定时报告 INCONCLUSIVE。
+- 在候选评测前冻结核心指标阈值、允许退化与阻断准则；写入型评测使用隔离 Workspace 和可清理 fixtures，不得越过真实 Policy/Approval。
+
 ---
 
 ## 9.2 F13 — MCP Protocol Compatibility
@@ -865,6 +917,8 @@ Agent Evaluation 的任务完成率不能只依据 “tool returned success”�
 - Harness-specific behavior
 
 不得将内部测试全部命名为 MCP conformance。
+
+SPEC 必须固定被测 MCP 协议版本、客户端/SDK 组合、官方工具可用性与可接受的兼容性缺陷。没有实际执行官方 conformance 的项目必须如实标为 NOT_VERIFIED。
 
 ---
 
@@ -908,6 +962,8 @@ Simulator 必须复用 Runtime 的真实 Policy evaluation semantics。
 - 建立第二个只用于 Simulator 的简化 Policy Engine
 
 ### No Side Effect
+
+模拟针对给定的有效配置快照及候选请求，不能创建能够被真实执行复用的 Permit；执行时配置改变必须重新使用权威 Runtime 检查。模拟不等同于未来操作一定被允许。
 
 Simulation 必须保证：
 
@@ -979,6 +1035,18 @@ V4 不以“记录一切”为原则。
 
 ---
 
+## 11.4 Shared Evidence Contract Gate
+
+在 F07/F14 具体 schema/Span 定型前，须明确并验证：
+
+- stable request identity、Runtime generation/session、retry、Approval 的关联与边界；
+- 请求阶段、时间口径、结果分类、执行与审批分别计时；
+- 字段级的安全 evidence projection、secret/redaction、有界预览与禁存数据；
+- immutable 历史证据与 live authority 独立；
+- telemetry/database 失败、阶段缺失和无法判断时的 UNKNOWN/DEGRADED 语义。
+
+这是 P0 产品契约，不在 PRD 中指定具体 SQLite 表或 Trace 库。
+
 # 12. UI Product Requirements
 
 V4 不要求重做 V3 已完成的信息架构和视觉系统。
@@ -1023,6 +1091,8 @@ Overview 应能够进入：
 
 ## 12.5 Evaluation
 
+Evaluation UI 必须区分有 ground truth 的离线评测与无完整 ground truth 的线上调用统计。没有可观测证据的选择准确率和任务完成率不能显示为确定值。
+
 Evaluation UI / output 应以回归判断为核心，而不是只显示一堆原始日志。
 
 至少能区分：
@@ -1050,7 +1120,7 @@ Windows notifications 至少需要满足：
 - 不包含 secret
 - 支持 Approval 与 Disconnect 两类不同语义
 
-是否允许用户分别关闭各类通知，由后续 UX / Config 设计决定。
+用户可以分别开启/关闭审批通知与断连通知；新安装默认启用应用通知偏好，但遵守 Windows 系统权限。关闭通知不改变 Runtime Pending Approval、Tray 数量或实时连接状态。
 
 ---
 
@@ -1058,9 +1128,9 @@ Windows notifications 至少需要满足：
 
 V4 新增设置可能包括：
 
-- auto start Harness on app launch
-- notification preferences
-- history retention / cleanup preferences
+- auto start Harness on app launch（新安装默认关闭）
+- notification preferences（审批/断连分别配置）
+- history retention / cleanup preferences（有限保留与手工清理）
 - observability / estimation preferences where needed
 
 具体 config schema 由 Architecture 决定。
@@ -1128,7 +1198,7 @@ V4 必须继续满足：
 
 # 17. Performance Requirements
 
-V4 不冻结绝对毫秒目标，直到建立真实 baseline。
+V4 不凭空冻结绝对毫秒目标；但 F05/F12 的样本方案、目标阈值和质量阻断条件必须在对应 Milestone SPEC 开发前冻结，最终验收不得临时豁免。
 
 但产品必须支持以下评估方式：
 
@@ -1180,6 +1250,8 @@ V4 应保持当前真实 ChatGPT MCP 链路可用，并通过 F13 增加协议�
 - generic plugin marketplace
 - arbitrary user-defined MCP tool scripting
 - full IDE replacement
+- ChatGPT 模型内部推理链、未发出的 Tool 选择或完整跨模型 Agent Loop tracing
+- 以被动 MCP telemetry 冒充受控 Agent Tool Evaluation
 - exact model-provider billed-token accounting without authoritative usage data
 - restoring old Pending Approval after Runtime restart
 - automatically implementing every candidate file operation in F11
@@ -1189,29 +1261,34 @@ V4 应保持当前真实 ChatGPT MCP 链路可用，并通过 F13 增加协议�
 
 # 20. Product Acceptance Matrix
 
-V4 最终 acceptance 至少需要覆盖以下能力。
+以下 Gate 与第 3.6 / 3.7 节共同构成验收契约。所有阈值、样本、失败场景和证据链接必须在对应 Milestone SPEC / Acceptance 冻结；不使用未执行的自动化、mock UI 或进程存在冒充真实 E2E。
 
-| Area | Required acceptance intent |
-| --- | --- |
-| Tray | 关闭窗口后真实 Harness / MCP 继续工作；可重新打开；Quit 能 cleanup |
-| Auto Start | 打开应用后按设置自动 Start；关闭设置后不自动 Start |
-| Approval Notification | 新 ASK 请求产生通知；点击到正确详情；stale request 显示真实状态 |
-| Disconnect Notification | 独立故障通知一次；持续故障不刷屏；恢复可提示 |
-| Startup Performance | 有可重复 baseline；能定位阶段耗时；优化不降低 readiness correctness |
-| Diagnostics | 能区分关键故障阶段并给 remediation |
-| SQLite History | 重启后可查询历史；筛选、分页、清理有效；不会恢复旧权限 |
-| Metrics | calls / success / avg / P95 / approval wait 语义正确 |
-| Token Estimates | 明确标记 estimated；记录截断；不冒充真实模型 usage |
-| grep | Workspace search / regex / filter / line number / limits 正确 |
-| Tool Expansion | 候选 Tool 经过准入评估，新增 Tool 有安全和 Evaluation evidence |
-| Agent Evaluation | baseline / candidate 可比较；四项核心指标可测 |
-| MCP Compatibility | 关键 MCP discover / call / error cases 通过兼容性验证 |
-| Agent Trace | 单 request 可关联关键阶段并定位失败 / 延迟 |
-| Policy Simulator | 与真实 Policy semantics 一致；无执行副作用 |
+| Scope | Feature | Minimum verifiable acceptance |
+| --- | --- | --- |
+| Core/P0 | F01 Tray | 窗口关闭后真实 ChatGPT MCP 调用继续；Tray/恢复窗口/Start/Stop/Quit 状态正确，Quit 不留 owned orphan |
+| Core/P0 | F03 Approval Notification | 新 ASK 通知、去重、正确 deep link、stale 显示真实终态；OS 通知不可用不丢 Pending |
+| Core/P0 | F04 Disconnect Notification | 故障 episode 首次通知、持续去重、恢复与新故障区分，状态以 Runtime 为准 |
+| Core/P0 | F05 Startup Performance | 冷/热 baseline、分阶段 P50/P95 与失败率可复测，满足 SPEC 预冻结目标且 Ready 语义不退化 |
+| Core/P0 | F06 Diagnostics | 常见配置/Runtime/MCP/Tunnel/Proxy/Credential 故障夹具能定位与建议修复；UNKNOWN 不伪称 PASS，诊断无默认副作用 |
+| Core/P0 | F07 SQLite History | 重启后可查询/分页/筛选/清理；retention/容量上限有效；数据库失败可诊断；历史不恢复 Pending/Grant |
+| Core/P0 | Shared Evidence Contract | 单请求 identity、事件分类、脱敏、重试/重启、历史与实时权限边界有可验证契约 |
+| Core/P0 | F10 grep | Workspace 边界、regex、路径过滤、行号、结果限制、截断与异常处理通过，Agent Evaluation 无阻断回归 |
+| Core/P0 | F12 Agent Evaluation | 受控 dataset + ground truth；选择、参数、执行、任务完成独立测量；baseline/candidate 依冻结阈值判断 |
+| Full/P1 | F02 Auto Start | 新安装默认关闭；开启/关闭动作可验证；不绕过 eligibility / SecretStore / security |
+| Full/P1 | F08 Metrics | 调用次数、明确 success denominator、avg/P95、审批等待/执行耗时、拒绝/取消分类一致 |
+| Full/P1 | F11 Tool Expansion | 候选工具有正式准入/拒绝/延期决定和安全/重叠/质量证据；已接纳实现的工具独立验收 |
+| Full/P1 | F13 MCP Compatibility | 已锁定协议版本和客户端组合，协议 conformance 与产品专属语义分别有实际测试结果 |
+| Full/P1 | F14 MCP Tool Request Trace | MCP 请求各 Runtime 可见阶段可关联且定位失败/延迟，未知外部阶段不虚构 |
+| Optional/P2 | F09 Token Estimates | 若交付，estimated 明示、estimator version 与 truncation 可核验；否则 DEFERRED |
+| Optional/P2 | F15 Policy Simulator | 若交付，真实 Policy semantics 一致且不执行、不产生 Permit/Approval；否则 DEFERRED |
+
+**Cross-feature Real E2E**：验证实际 ChatGPT → Tunnel → Runtime MCP → Workspace / Policy / Approval → Execution → History / Trace / Statistics（后两项按实际交付范围）；并验证 Windows Hidden Window → Tray → Running Harness → Notification / Navigation。对于未覆盖阶段必须标 NOT_VERIFIED。
 
 ---
 
 # 21. Final V4 Acceptance Boundary
+
+最终验收先分别报告 V4 Core、V4 Full 和 Optional 各 Gate。P2 延期不妨碍 Full，但必须在发布说明中标 DEFERRED；P1 未通过时只能称 V4 Core — ACCEPTED，不能将整个 V4 称为 ACCEPTED / FROZEN。
 
 V4 的最终验收不能只依赖：
 
