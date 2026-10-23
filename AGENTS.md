@@ -1,25 +1,39 @@
-# ChatGPT-Harness 工作规则
+# Repository Guidelines
 
-## Source of truth
-判断当前系统实际行为时，按以下优先级：
-```text
-源码 / Tests / Manifests
-        ↓
-wiki/**
-        ↓
-docs-codex/**
-        ↓
-docs/archive/**
+## Project Structure & Module Organization
+
+The repository combines a Rust workspace with a React/Vite frontend and Tauri desktop shell:
+
+- `protocol/` contains shared protocol types, schemas, fixtures, and contract tests.
+- `runtime/` contains the Runtime process, MCP/Control, workspace security, activity, and audit logic; black-box tests live in `runtime/tests/`.
+- `ui/src/` contains React UI and colocated tests. `ui/src-tauri/` contains the Tauri host and backend.
+- `ui/scripts/` contains Windows packaging scripts. `fixtures/`, `assets/`, `wiki/`, and `docs-codex/` contain test data, media, architecture notes, and milestone plans.
+
+Use source code, tests, and manifests as the behavioral source of truth. `wiki/**` documents current design; `docs-codex/**` describes planned work, not implemented behavior.
+
+## Build, Test, and Development Commands
+
+Run frontend commands from `ui/`:
+
+```powershell
+npm install                 # install dependencies
+npm run dev                 # start browser UI
+npm run tauri:dev           # build debug Runtime and start Tauri
+npm run typecheck           # run TypeScript checks
+npm test                    # run Vitest
+npm run build               # build frontend
 ```
-- `wiki/**` 描述 HEAD 当前系统事实。
-- `docs-codex/**` 保存 SPEC / PLAN / TASKS 等开发规划，不得作为已经实现的证据。
-- `docs/archive/**` 仅保存历史上下文；除非用户明确要求历史审计，否则不要读取。
-## Working rules
-- 默认只完成当前明确任务，不主动扩大范围。
-- 未经用户明确授权，不使用 Computer Use；能通过代码、日志、CLI、接口或 MCP 获取的信息直接获取。
-- 启动、构建、部署或验收 Runtime、Portable、服务实例、二进制前，必须确认实际运行产物来自本次修改，不能根据源码或旧进程推断验证成功。
-- Windows 环境使用 PowerShell 兼容命令；优先复用已经验证可用的构建、启动和测试命令。命令失败后先定位原因，不原样重复。
-- 主 Agent 保留核心问题、关键路径判断和最终整合。子 Agent 仅用于独立且适合并行的任务，不并行修改同一文件或强耦合模块。
-- 不覆盖、不删除与当前任务无关的工作区修改。
-- - 每个 Milestone 完成开发并通过自动化 QA 后、进入 Manual Acceptance 前，必须基于当前最新代码重新构建并打包 Portable；
-- 每个 Milestone 使用独立产物目录，目录名必须明确包含 Milestone 标识，例如 `artifacts/M4-Human-Approval/`。禁止覆盖或复用上一 Milestone 的构建产物，Manual Acceptance 必须使用该 Milestone 对应的最新包。
+
+At the root, `cargo test --workspace` runs Rust tests and `cargo fmt --all -- --check` verifies formatting. In `ui/`, `npm run portable:windows` builds and verifies the Windows portable distribution; `npm run tauri:build` produces the NSIS bundle.
+
+## Coding Style & Naming Conventions
+
+Use rustfmt-compatible 4-space Rust indentation and the existing 2-space TypeScript/JSON style. Use `PascalCase` for React components/types, `camelCase` for TypeScript values, `snake_case` for Rust modules/functions, and descriptive `kebab-case` script names. Synchronize protocol changes with fixtures, schemas, and tests. Store credentials through `SecretStore`; never commit API keys or machine configuration.
+
+## Testing Guidelines
+
+Name frontend tests `*.test.ts` or `*.test.tsx` and keep them near the implementation. Rust unit tests may be inline; protocol contracts belong in `protocol/tests/`, and runtime integration tests in `runtime/tests/`. Run the narrowest relevant test first, then the applicable suite. Report local automated results separately from manual or external ChatGPT acceptance; do not label unrun external checks as passing.
+
+## Commit & Pull Request Guidelines
+
+Follow observed prefixes: `feat(scope):`, `fix(scope):`, `docs:`, `test:`, and `release:`. Keep subjects short and behavior-focused. PRs should describe scope and design impact, link the issue/spec/TASKS, list verification commands and outcomes, and include screenshots for UI changes. Packaging changes should include artifact path/version and verification result; call out non-blocking observations and skipped manual checks.
