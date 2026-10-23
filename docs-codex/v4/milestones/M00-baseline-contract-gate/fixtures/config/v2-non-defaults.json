@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "configRevision": "9",
+  "workspace": { "rootPath": "D:\\M00OtherWorkspace" },
+  "tunnel": {
+    "tunnelId": "m00-second-tunnel",
+    "controlPlaneHttpProxy": "https://127.0.0.1:9443",
+    "tunnelClientPath": null,
+    "autoDetect": true,
+    "apiKeyRef": { "provider": "synthetic-secret-store", "key": "m00-second-opaque-ref" }
+  },
+  "security": { "mode": "normal", "developerTestMode": false },
+  "ui": { "theme": "light", "language": "en" },
+  "tools": {
+    "readFile": { "enabled": false },
+    "glob": { "enabled": true },
+    "write": { "enabled": true },
+    "edit": { "enabled": false },
+    "bash": { "enabled": false }
+  },
+  "policies": {
+    "toolDefaults": { "readFile": "deny", "glob": "allow", "write": "ask", "edit": "deny", "bash": "deny" },
+    "userRules": []
+  },
+  "bash": { "autoDetect": true }
+}

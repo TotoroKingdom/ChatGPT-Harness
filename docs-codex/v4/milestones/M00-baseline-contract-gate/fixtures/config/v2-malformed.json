@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "configRevision": "41",
+  "workspace": { "rootPath": "C:\\M00FixtureWorkspace" },
+  "tunnel": {
+    "tunnelId": "m00-fixture-tunnel",
+    "controlPlaneHttpProxy": null,
+    "tunnelClientPath": null,
+    "autoDetect": true,
+    "apiKeyRef": { "provider": "synthetic-secret-store", "key": "m00/opaque/reference-only" }
+  },
+  "security": { "mode": "normal", "developerTestMode": false },
+  "ui": { "theme": "system", "language": "en" },
+  "tools": {
+    "readFile": { "enabled": true },
+    "glob": { "enabled": true },
+    "write": { "enabled": "not-a-boolean" },
+    "edit": { "enabled": true },
+    "bash": { "enabled": false }
+  },
+  "policies": { "toolDefaults": { "readFile": "allow", "glob": "allow", "write": "allow", "edit": "allow", "bash": "ask" }, "userRules": [] },
+  "bash": { "autoDetect": true }
+}

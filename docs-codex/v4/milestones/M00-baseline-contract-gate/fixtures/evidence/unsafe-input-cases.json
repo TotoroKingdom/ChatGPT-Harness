@@ -1,0 +1,32 @@
+[
+  {
+    "case": "physical_path",
+    "candidate": "C:\\M00_SYNTHETIC_PHYSICAL_PATH\\private.txt",
+    "expected": "omitted"
+  },
+  {
+    "case": "raw_file_body",
+    "candidate": "M00_SYNTHETIC_FILE_BODY_SENTINEL",
+    "expected": "omitted"
+  },
+  {
+    "case": "raw_command",
+    "candidate": "M00_SYNTHETIC_RAW_COMMAND_SENTINEL",
+    "expected": "omitted"
+  },
+  {
+    "case": "raw_environment",
+    "candidate": "M00_SYNTHETIC_RAW_ENV_SENTINEL",
+    "expected": "omitted"
+  },
+  {
+    "case": "secret_looking_value",
+    "candidate": "M00_SYNTHETIC_SECRET_SENTINEL",
+    "expected": "omitted_or_redacted"
+  },
+  {
+    "case": "unbounded_error",
+    "candidate": "M00_SYNTHETIC_UNBOUNDED_ERROR_SENTINEL",
+    "expected": "omitted_or_bounded"
+  }
+]

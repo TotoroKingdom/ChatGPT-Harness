@@ -1,0 +1,22 @@
+{
+  "case_id": "m00-read-file-smoke",
+  "version": "1",
+  "task": "Inspect README.md in the isolated Workspace and report its exact content.",
+  "workspace_fixture_hash": "8a3367b637c9e3699c4f5576658f76db44c53d1b254656bef4c05cf563293f5b",
+  "allowed_tools": ["read_file"],
+  "expected_tool": "read_file",
+  "argument_constraints": {
+    "path": { "type": "relative_workspace_path", "required": true, "equals": "README.md" }
+  },
+  "expected_final_state": {
+    "path": "README.md",
+    "content": "M00 evaluation fixture\n"
+  },
+  "policy_expectation": "ALLOW",
+  "limits": { "max_steps": 4, "timeout_ms": 10000, "max_spend_micros": 0 },
+  "adapter_id": "provider-neutral-http-json",
+  "model_identity": "USER_SUPPLIED_AND_AUTHORIZED_MODEL_ENDPOINT",
+  "adapter_version": "m00-http-json-v1",
+  "tool_schema_hash": "m00-read-file-tool-schema-v1",
+  "scorer_version": "m00-final-state-scorer-v1"
+}

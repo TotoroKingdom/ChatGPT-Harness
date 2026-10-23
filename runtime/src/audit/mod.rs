@@ -20,3 +20,9 @@ pub(crate) use redaction::redact_value;
 pub(crate) trait AuditSink: Send + Sync {
     fn on_audit_event(&self, event: &AuditEvent);
 }
+
+// M00 is a contract/feasibility gate. Keep its projection proof in the test
+// build so it cannot become a production evidence store or authorization
+// surface by accident.
+#[cfg(test)]
+mod m00_contract;

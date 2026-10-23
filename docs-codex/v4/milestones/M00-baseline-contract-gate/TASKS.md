@@ -1,6 +1,6 @@
 # M00 TASKS — As-Is Baseline and Architecture Contract Gate
 
-> Status: IMPLEMENTATION READY / VALIDATION FROZEN  
+> Status: DEVELOPMENT COMPLETE (Integration/E2E/Manual acceptance pending)
 > Inputs: SPEC.md, PLAN.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md, MANUAL_ACCEPTANCE_CHECKLIST.md  
 > Executor: Codex / Coding Agent  
 > Upstream: V4 planning baseline FROZEN FOR M00  

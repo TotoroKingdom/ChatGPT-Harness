@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "configRevision": "41",
+  "workspace": { "rootPath": "C:\\M00FixtureWorkspace" },
+  "tunnel": {
+    "tunnelId": "m00-fixture-tunnel",
+    "controlPlaneHttpProxy": "http://127.0.0.1:7890",
+    "tunnelClientPath": "C:\\M00FixtureTunnelClient",
+    "autoDetect": false,
+    "apiKeyRef": { "provider": "windows-credential-manager", "key": "m00/opaque/tunnel-key" }
+  },
+  "security": { "mode": "developer_test", "developerTestMode": true },
+  "ui": { "theme": "dark", "language": "zh-CN" },
+  "tools": {
+    "readFile": { "enabled": true },
+    "glob": { "enabled": true },
+    "write": { "enabled": false },
+    "edit": { "enabled": true },
+    "bash": { "enabled": false }
+  },
+  "policies": {
+    "toolDefaults": { "readFile": "allow", "glob": "allow", "write": "deny", "edit": "ask", "bash": "ask" },
+    "userRules": [
+      {
+        "id": "m00-deny-write",
+        "name": "M00 review writes",
+        "enabled": true,
+        "decision": "deny",
+        "matcher": { "type": "tool", "tool": "write" },
+        "reason": "M00 synthetic rule"
+      }
+    ]
+  },
+  "bash": { "autoDetect": false, "executablePath": "C:\\M00FixtureGit\\bin\\bash.exe" }
+}

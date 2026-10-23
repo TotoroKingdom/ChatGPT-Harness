@@ -15,6 +15,9 @@ pub use harness_control_protocol::CURRENT_SCHEMA_VERSION;
 #[cfg(test)]
 mod m7_qa;
 
+#[cfg(test)]
+mod m00_contract;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigMetadata {
