@@ -1,10 +1,11 @@
 # ChatGPT-Harness V4 Roadmap
 
-> **Status:** DRAFT / DELIVERY ROADMAP (2026-10-23)  
+> **Status:** V4 UPSTREAM PLANNING BASELINE / FROZEN FOR M00 (2026-10-23)  
 > **Product:** [V4 PRD](./ChatGPT-Harness_V4_PRD.md)  
 > **Design:** [V4 Architecture](./ChatGPT-Harness_V4_ARCHITECTURE.md)  
 > **Reference:** [V3 historical Roadmap](../docs/archive/v3-2026-10/ChatGPT-Harness_V3_ROADMAP.md)  
-> **Scope:** 里程碑、交付顺序、三层验收与版本 Gate；不代表已开发或已通过验收。
+> **Scope:** 里程碑、交付顺序、三层验收与版本 Gate；不代表已开发或已通过验收。  
+> **Freeze semantics:** 本 Roadmap 作为 M00 的上游交付基线冻结；M00 验证若要求改变依赖、Milestone scope、release gate 或 canonical AC owner，必须先显式修订并重新冻结 Roadmap，而不是在下游 TASK 中临时改路线。
 
 ---
 
@@ -20,7 +21,7 @@ V4 依照 **架构契约 → 具体验收能力 → Core Gate → Full Gate** �
 
 **功能唯一交付归属：** M01 F01/F03/F04；M02 F05/F06；M03 Shared Evidence Contract/F07；M04 F12；M05 F10；M07 F02；M08 F08/F14；M09 F11；M10 F13；O01 F09；O02 F15。M00 承担架构/契约先决门禁；M06/M11 只负责集成发布 Gate，不重复声称功能开发。
 
-原则：**M04 受控 Evaluation baseline 必须先于 M05 新增 grep 的质量回归；Shared Evidence Contract 必须先于 F07/F08/F14 的实现及 Eval 对接。** F05 性能目标、F12 质量准入阈值在各自 SPEC **开发前**冻结，不得在验收后倒填。V4 Roadmap、Architecture 和 PRD 均是规划文件，不能当作代码当前事实。
+原则：**M04 受控 Evaluation baseline 必须先于 M05 新增 grep 的质量回归；Shared Evidence Contract 必须先于 F07/F08/F14 的实现及 Eval 对接。** F05 性能目标、F12 质量准入阈值必须在各自 Milestone 的 SPEC 编写阶段完成，并在进入 `SPEC_READY`、创建任何实现型 TASK 或开始候选实现之前冻结；不得在候选实现或验收后倒填。V4 Roadmap、Architecture 和 PRD 均是规划文件，不能当作代码当前事实。
 
 # 2. Mandatory SPEC → PLAN → TASKS Delivery Protocol
 
@@ -41,7 +42,7 @@ docs-codex/v4/milestones/Mxx-short-name/
 此 Roadmap 不预先生成空模板；**启动对应里程碑才创建文件**。流程：
 
 ~~~text
-Frozen scope: PRD + Architecture + Roadmap
+Frozen upstream planning baseline: PRD + Architecture + Roadmap
      → SPEC (AC编号/正反例/接口/安全/可量化阈值)
      → PLAN (owner/实现顺序/依赖/迁移/回退)
      → TASKS (小任务、影响模块、完成定义、受影响单测)
@@ -54,7 +55,7 @@ Frozen scope: PRD + Architecture + Roadmap
      → ACCEPTED / FROZEN，或明确 BLOCKED/FAIL/NOT_VERIFIED
 ~~~
 
-**SPEC** 必须有 AC-ID → 实现 task → Integration/E2E/Manual Test-ID 的双向追踪；说明 Scope/Non-goals、DTO/Protocol、错误/取消/超时/数据库失败、安全不变量、回归与阈值冻结。**PLAN** 指明唯一模块 owner、可回退分段、迁移与资源清理。**TASKS** 每条应足够小，能指定影响范围、验证命令和证据，禁止两个 Agent 并发修改同一模块及覆盖他人未提交文件。
+**SPEC** 必须以 PRD §4.1 的 Canonical AC-ID 为上游追踪键，并建立 Canonical AC-ID → Derived AC（如有）→ 实现 Task → Integration/E2E/Manual Test-ID 的双向追踪；说明 Scope/Non-goals、DTO/Protocol、错误/取消/超时/数据库失败、安全不变量、回归与阈值冻结。**PLAN** 指明唯一模块 owner、可回退分段、迁移与资源清理。**TASKS** 每条应足够小，能指定影响范围、验证命令和证据，禁止两个 Agent 并发修改同一模块及覆盖他人未提交文件。
 
 测试计划是 **PLANNED** 而非 PASS；实际运行后填真实时间、OS/App/Runtime/Tool/Config 版本、commit、Workspace fixture、执行命令、实际结果及脱敏日志/截图。**Unit → Integration → E2E → Manual** 四层逐级区分，不能用 mock、process exists、MCP Inspector、自动 UI 取代真实 ChatGPT 与人工验收。外部 ChatGPT/付费模型、重启受管实例、Windows 安装及影响持久状态的 E2E 在执行前需要用户明确授权；无授权/环境不可用标 BLOCKED，不擅自运行。
 
@@ -75,6 +76,7 @@ flowchart TD
   M04 --> M06
   M05 --> M06
   M01 --> M07["M07 Auto Start"]
+  M02 --> M07
   M03 --> M08["M08 Metrics/Trace"]
   M05 --> M09["M09 File Tools Admission"]
   M05 --> M10["M10 MCP Conformance"]
@@ -171,7 +173,7 @@ M01/M02/M03 可在 M00 验收后由不同模块 owner 并行；M04 必须在 M03
 
 # M07 — Auto Start on App Launch
 
-**Scope:** P1 F02。**Depends on:** M01/M00。  
+**Scope:** P1 F02。**Depends on:** M00/M01/M02。  
 **Deliverable:** 新安装默认关闭、用户可开关的 App 启动自动 Start Harness；不是 Windows 登录自启动，不绕过安全校验。
 
 - **SPEC/PLAN/TASKS：** 冻结 Host-only config、默认/升级值、UI 开关、StartupCoordinator 生命周期、初始化只调用一次、UI/Tray/Auto Start 并发冲突、失败和 SecretStore/eligibility 错误；明确无 Runtime restart debt。
@@ -187,7 +189,7 @@ M01/M02/M03 可在 M00 验收后由不同模块 owner 并行；M04 必须在 M03
 
 - **SPEC/PLAN/TASKS：** 冻结 received/attempted/terminal/success、DENY/cancel/timeout 的分母与分类；execution vs approval wait vs wall time；nearest-rank P95、最小样本、查询窗口与性能预算；只观察 Harness MCP Tool Request 阶段，缺失/崩溃标 INCOMPLETE。
 - **Integration：** 真实 AuditEvent 混合成功、拒绝、ASK、超时、取消、crash 样本计算；同一 request_id 的 spans 与 History 交叉查询；无事件/库清理/故障后的统计 coverage；核算小样本 P95。
-- **E2E：** 真实 ChatGPT 调用 read/grep/ASK/DENY/失败 Tool，History、Metrics 与 MCP Tool Request Trace 显示同一事实；确认审批等待不算 executor duration，无法观测的模型阶段不存在。
+- **E2E：** 真实 ChatGPT 调用 read、ASK、DENY 与失败 Tool，History、Metrics 与 MCP Tool Request Trace 显示同一事实；确认审批等待不算 executor duration，无法观测的模型阶段不存在。grep 的跨功能统计/Trace 回归在 M11 使用 Full candidate 统一覆盖，不作为 M08 自身的前置依赖。
 - **Manual：** 人工用样本复核 totals/success denominator/P95、Trace 时间线与错误节点，确认没有“模型选工具全过程”的虚假展示。
 - **Exit Gate：** F08/F14 PASS，指标与 Trace 均可追溯到同一 Safe Evidence，样本不足/数据缺失时明确提示，不将图表存在作为成功。
 
@@ -305,9 +307,9 @@ M01/M02/M03 可在 M00 验收后由不同模块 owner 并行；M04 必须在 M03
 7. **Release 语义**：M06 只允许 V4 Core — ACCEPTED；M11 才允许 V4 — ACCEPTED / FROZEN；Optional 未实现显示 DEFERRED，已交付但失败不得被忽略。
 8. **失败回退**：Config/SQLite schema migration、ToolRegistry/Policy、Tauri 生命周期变更必须在 PLAN 中定义回退。不可逆数据迁移需单独授权。
 
-# 7. Roadmap Freeze Checklist
+# 7. M00 Validation Checklist for Implementation Freeze
 
-Roadmap 从 DRAFT 进入 ACCEPTED/FROZEN 前，至少确认：
+当前 Roadmap 已作为上游 planning baseline 冻结。M00 要把三份上游文档提升为可供 M01+ 实现直接依赖的 implementation-frozen contract，至少确认：
 
 - [ ] V4 PRD 的 F01–F15 和 Shared Evidence Contract 逐项唯一映射到里程碑；
 - [ ] 核心 Architecture ADR 决策与源码基线可行，尚未证明的技术假设有 M00 验证 Gate；
@@ -319,4 +321,4 @@ Roadmap 从 DRAFT 进入 ACCEPTED/FROZEN 前，至少确认：
 - [ ] M06/M11 版本验收范围及 P2 延期规则与 PRD 一致；
 - [ ] 每次测试都能关联 commit、binary、fixtures 与可复核 Evidence，失败路径与清理均被覆盖。
 
-**Document status remains DRAFT.** 本文件只定义未来工作分解与完成标准，不表示已经创建 Milestone SPEC、完成代码开发或执行真实验收。
+**Document status:** V4 upstream planning baseline is FROZEN FOR M00。本文件只定义未来工作分解与完成标准，不表示已经创建 Milestone SPEC、完成代码开发或执行真实验收；M00 通过后，受验证的 Architecture Contract 与后续 Milestone 依赖再进入 implementation-frozen 状态。

@@ -1,11 +1,12 @@
 # ChatGPT-Harness V4 Product Requirements Document
 
-> Status: REVISED DRAFT / PRODUCT REQUIREMENTS (2026-10-23)  
+> Status: V4 UPSTREAM PLANNING BASELINE / FROZEN FOR M00 (2026-10-23)  
 > Baseline: current main after V3 documentation archive  
 > Product input: V4 feature set F01–F15  
-> Architecture: TBD — defined separately in ChatGPT-Harness_V4_ARCHITECTURE.md  
-> Roadmap: TBD — defined separately in ChatGPT-Harness_V4_ROADMAP.md  
-> Scope: V4 product behavior, quality targets, delivery boundaries, and testable acceptance; architecture remains separate
+> Architecture: [ChatGPT-Harness_V4_ARCHITECTURE.md](./ChatGPT-Harness_V4_ARCHITECTURE.md) — upstream planning baseline  
+> Roadmap: [ChatGPT-Harness_V4_ROADMAP.md](./ChatGPT-Harness_V4_ROADMAP.md) — upstream planning baseline  
+> Scope: V4 product behavior, quality targets, delivery boundaries, and testable acceptance; architecture remains separate  
+> Freeze semantics: this document is frozen as the product input to M00; any scope, priority, default behavior, security semantics, release gate, or canonical AC change requires explicit upstream document revision before downstream implementation proceeds
 
 ---
 
@@ -290,7 +291,7 @@ Harness 应能够建立稳定的 Evaluation baseline，并回答：
 
 ## 3.7 Milestone acceptance threshold contract
 
-PRD 在没有真实测量之前不虚构毫秒或准确率目标，但 **F05 启动性能与 F12 Agent Evaluation 的阈值必须在对应 Milestone SPEC 开发前确定**。必须事先冻结指标定义、baseline 样本、运行配置、判定阈值 / 允许退化、失败场景与证据形式。若未完成该前置工作，对应 Gate 为 BLOCKED；仅建成面板、采集日志或观察到 Tool 返回成功都不足以验收。
+PRD 在没有真实测量之前不虚构毫秒或准确率目标。**F05 启动性能与 F12 Agent Evaluation 的指标定义、baseline 样本、运行配置、判定阈值 / 允许退化、失败场景与证据形式，必须在对应 Milestone 的 SPEC 编写阶段完成，并在该 Milestone 进入 `SPEC_READY`、创建任何实现型 TASK 或开始候选实现之前冻结。** 若真实 baseline 测量导致阈值无法成立，应先修订并重新冻结 SPEC；不得在候选实现或验收完成后倒填阈值。未完成该前置工作时，对应 Gate 为 BLOCKED；仅建成面板、采集日志或观察到 Tool 返回成功都不足以验收。
 
 ## 3.8 Shared evidence dependency
 
@@ -315,6 +316,62 @@ F07 / F08 / F12 / F14 须共用的请求身份、事件结果、授权状态边�
 | F13 | MCP 协议兼容性测试 | 验证工具发现、调用、错误语义及客户端兼容性 | P1 |
 | F14 | MCP Tool Request Trace | Trace / Span 关联 Runtime 可观测的单次 MCP Tool Request，不承诺模型隐藏推理或完整 Agent Loop | P1 |
 | F15 | Policy Simulator | 使用真实 Policy semantics 模拟判定，不执行真实操作 | P2 |
+
+## 4.1 Canonical Acceptance Criteria IDs
+
+以下 AC-ID 是 V4 上游产品契约的稳定追踪键。Milestone SPEC 可以将单个 Canonical AC 细化为更具体的 Derived AC，但必须保留对上游 AC-ID 的映射；不得在 SPEC / PLAN / TASKS 中重新定义、删除或改变其产品语义。
+
+| AC-ID | Canonical acceptance criterion |
+| --- | --- |
+| SEC-AC01 | 同一次真实 Tool request 必须以稳定 identity 关联 Activity、Approval、History、Metrics 与 Trace；不得依赖模糊时间匹配。 |
+| SEC-AC02 | Durable evidence 只保存最小化、typed、bounded、sanitized 的安全投影；不得建立第二套 Policy / authorization truth。 |
+| SEC-AC03 | 历史 evidence 不得恢复 Pending Approval、Session Grant、ExecutionPermit 或其他实时授权状态。 |
+| F01-AC01 | Harness Ready 时关闭主窗口默认隐藏到托盘且 Runtime / MCP / Tunnel / Approval 状态继续工作；关闭窗口不等于 Stop 或 Quit。 |
+| F01-AC02 | Tray 提供 Show、Start、Stop、真实连接状态、Pending Approval count 与 Quit，状态来自权威 lifecycle。 |
+| F01-AC03 | Explicit Quit 走正常停止流程并回收受管 Runtime / Tunnel，不留下 owned orphan process。 |
+| F02-AC01 | Auto Start on app launch 是独立持久化设置，新安装默认关闭，升级不得覆盖用户已有明确选择。 |
+| F02-AC02 | 开启后 App 初始化完成只通过标准 Harness Start 流程自动尝试一次，不绕过 config / eligibility / secret / security 检查。 |
+| F02-AC03 | Auto Start 失败进入真实 Error / Diagnostics flow，不重复启动、不伪报 Ready，也不等同于 Windows 登录自启动。 |
+| F03-AC01 | 每个新的 Pending Approval 至多发送一次对应 Windows notification，并保留 Tray / Approval Center fallback。 |
+| F03-AC02 | 点击通知后聚焦 App 并查询该 approval 的实时状态；resolved / expired 请求不得被恢复为 Pending。 |
+| F03-AC03 | 通知失败不得丢失 Approval，通知内容不得泄露 secret、raw unrestricted args 或未处理文件内容。 |
+| F04-AC01 | Disconnect / degraded 通知按真实状态转换与 incident episode 去重，持续同一故障不重复刷屏。 |
+| F04-AC02 | 恢复后可发送一次 recovery notification；恢复后新的独立故障可形成新的 incident。 |
+| F04-AC03 | 通知成功不等于连接恢复，通知入口必须指向真实 Overview / Diagnostics 状态。 |
+| F05-AC01 | Start→Ready 必须记录可比较的总耗时和关键阶段耗时，并区分 cold / warm、P50 / P95、失败率和环境。 |
+| F05-AC02 | 性能 baseline 与改善阈值必须按 §3.7 在 SPEC_READY 前冻结，候选版本必须达到已冻结目标才能 PASS。 |
+| F05-AC03 | 优化不得跳过 authoritative readiness checks，不能以 spawn success 或 process exists 冒充 Ready。 |
+| F06-AC01 | 一键诊断至少覆盖 config、Workspace、Runtime、MCP、Tunnel、control-plane、proxy、credential 可安全判断状态和 lifecycle。 |
+| F06-AC02 | 每项诊断返回 PASS / WARNING / FAIL / UNKNOWN、可读解释、安全技术证据与适用 remediation。 |
+| F06-AC03 | 默认诊断只读；修改配置、重启、触碰密钥或文件的修复动作必须另行显式授权，并以故障 fixtures 验证。 |
+| F07-AC01 | Activity、终态 Approval 与统计 / Trace 所需 evidence 可跨 Runtime / App 重启持久查询，并支持时间、Tool、outcome、decision、approval、分页。 |
+| F07-AC02 | History 与 live authorization 严格隔离，旧 Pending / Grant / Permit 不能从 SQLite 恢复。 |
+| F07-AC03 | Retention、容量上限、手工清理、migration / full / busy / corrupt / drop 等降级语义必须可观察且不得改变 Policy truth。 |
+| F08-AC01 | Metrics 至少提供 calls、success / failure、success rate、average、P95 与 approval wait，并按 Tool / time range 查询。 |
+| F08-AC02 | execution duration、approval wait 与 request wall time 必须分离；DENY、cancel、timeout 与 executor failure 不得混为同一分母。 |
+| F08-AC03 | 样本量、INCOMPLETE / UNKNOWN 与 P95 算法必须透明；样本不足不得伪装为稳定统计结论。 |
+| F09-AC01 | 记录 bounded input / output bytes、chars、truncation 与 estimated input / output tokens。 |
+| F09-AC02 | Token 数值始终标为 estimated，并记录 estimator name / version；不得冒充 provider billed / actual model usage。 |
+| F09-AC03 | 不得为了 Token 估算额外持久化 raw 文件正文、secret 或无限 payload。 |
+| F10-AC01 | grep 支持 text / regex、Workspace-relative scope、include / exclude、line number、bounded results 与 deterministic truncation。 |
+| F10-AC02 | grep 必须走既有 Workspace / Policy / Approval / ExecutionPipeline，不得通过隐藏 shell grep 绕过安全链。 |
+| F10-AC03 | grep 需覆盖越界、symlink / junction / reparse、TOCTOU、无效 regex、超大输入 / 输出，并通过 F12 baseline regression。 |
+| F11-AC01 | mkdir / list / copy / move / rename / delete 等候选项逐项形成可审计的 ADMIT / REJECT / DEFER 决策，而不是默认全部加入。 |
+| F11-AC02 | 所有 ADMIT 并实际交付的 Tool 必须具有明确 schema、Workspace / Policy / Approval 语义并走完整 Runtime pipeline。 |
+| F11-AC03 | destructive / 双路径操作必须定义覆盖、冲突、跨卷、中间态、不可逆性和恢复边界，并通过真实 E2E 与 Eval regression。 |
+| F12-AC01 | Evaluation 使用真实可控 Agent / Model adapter、版本化 dataset / ground truth、隔离 Workspace 与真实 MCP Runtime。 |
+| F12-AC02 | 至少独立计算 Tool selection、argument validity、runtime call outcome 与最终 task completion；tool returned success 不等于 task success。 |
+| F12-AC03 | baseline、candidate、样本量、随机性与回归阈值按 §3.7 在实现前冻结；不可控模型或样本不足必须 BLOCKED / INCONCLUSIVE。 |
+| F12-AC04 | Passive production telemetry 不得冒充 Tool selection accuracy、未发出候选工具或模型隐藏推理。 |
+| F13-AC01 | 固定 MCP protocol revision、rmcp / client / runner 版本并验证 initialize、tools/list、schema、tools/call 与错误 / 取消 / 超时适用语义。 |
+| F13-AC02 | 官方 conformance 可用时实际执行并保留原始证据；未执行项目必须标 NOT_VERIFIED。 |
+| F13-AC03 | 官方 protocol conformance、Harness-specific security semantics 与真实 ChatGPT→Tunnel E2E 必须作为三类独立证据。 |
+| F14-AC01 | 每个 MCP Tool request 能关联 received、resolve、Workspace、Policy、Approval、execution 与 terminal / incomplete 阶段。 |
+| F14-AC02 | Trace 与 Activity / Approval / History 使用稳定 request identity 关联，并能解释失败阶段、慢阶段和 executor 是否启动。 |
+| F14-AC03 | 不伪造 ChatGPT 隐藏推理、完整 Agent Loop 或不可观测 Span；Trace 不得成为 raw payload dump。 |
+| F15-AC01 | Simulator 使用 Runtime 当前 effective Tool / Workspace / Policy semantics 返回 ALLOW / ASK / DENY / UNKNOWN、原因、规则与 would-require-approval。 |
+| F15-AC02 | Preview 不执行 Tool、不改 filesystem、不启动 bash、不创建 Permit / Pending Approval / Session Grant，也不污染真实 execution metrics。 |
+| F15-AC03 | Preview 结果不是授权票据；真实请求必须基于当时有效配置重新经过权威 Runtime 判定。 |
 
 ---
 

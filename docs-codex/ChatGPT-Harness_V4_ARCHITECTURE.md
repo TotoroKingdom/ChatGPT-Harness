@@ -1,11 +1,12 @@
 # ChatGPT-Harness V4 Architecture
 
-> **Status:** DRAFT / ARCHITECTURE PROPOSAL (2026-10-23)  
+> **Status:** V4 UPSTREAM PLANNING BASELINE / FROZEN FOR M00 (2026-10-23)  
 > **Target:** Windows-first V4; not an implementation or acceptance statement  
 > **Product contract:** [V4 PRD](./ChatGPT-Harness_V4_PRD.md)  
 > **Inherited reference:** [V3 Architecture](../docs/archive/v3-2026-10/ChatGPT-Harness_V3_ARCHITECTURE.md)  
 > **As-is source:** source code, tests, manifests, [current Wiki](../wiki/ARCHITECTURE.md)  
-> **Next:** V4 Roadmap → Milestone SPEC → PLAN → TASK → gated verification
+> **Next:** V4 Roadmap → M00 SPEC → PLAN → TASK → gated verification  
+> **Freeze semantics:** 本文当前冻结为 M00 的上游目标架构基线；M00 负责用源码、POC 与真实链路验证技术假设。M00 若证明某 ADR 不成立，必须先显式修订并重新冻结本 Architecture / PRD / Roadmap 的受影响部分，不能在下游 TASK 中静默改语义。
 
 ---
 
@@ -74,12 +75,12 @@
 | A12 | F10 grep 属于 WorkspaceRead，通过已有执行管线 | 不通过隐藏 shell grep 绕过 Policy |
 | A13 | F11 候选工具需 Admission Gate | P1 不强制实现全部文件工具 |
 | A14 | F15 复用 Runtime PolicyEngine 的无副作用评估入口 | 不创建 Permit/Approval/执行 |
-| A15 | AppConfig 建议 v2→v3；Control Protocol v1 增量升级 | Host-only prefs 不生成 Runtime restart debt |
+| A15 | AppConfig V4 迁移方向固定为 v2→v3；Control Protocol v1 增量升级 | Host-only prefs 不生成 Runtime restart debt；具体字段与 migration fixture 在 M00 / 对应 SPEC 冻结 |
 | A16 | P95 从原始有效样本计算，不平均多个 P95 | 样本不足标 INCONCLUSIVE |
 | A17 | 默认 History/Trace 为非授权组件 | 强制审计可用才能执行属于未来独立 PRD/ADR |
 | A18 | MCP conformance 锁定协议 revision、SDK 和工具版本 | 协议兼容与真实 ChatGPT E2E 分开验收 |
 
-以上 ADR 为**架构建议，等待技术评审/验证后冻结**；对于影响用户行为的变更必须先修改 PRD。
+以上 ADR 是 **M00 的规划基线决策**。M00 必须验证其中标注的技术假设、POC 与当前源码兼容性；验证通过后形成 implementation-frozen contract。若 M00 发现某决策不可行，应先修订上游文档并记录替代 ADR，而不是在 SPEC / TASK 中自行漂移。对于影响用户行为的变更必须先修改 PRD。
 
 # 5. Target Topology and Ownership
 
@@ -289,7 +290,7 @@ Runner 建议作为仓库独立 `evaluation/` CLI + test fixtures，**不**嵌�
 | policy.simulate | Runtime control RPC | only no-side-effect preview |
 | evaluation.results.list | Offline eval result facade | 不假设能读取 ChatGPT 内部信息 |
 
-**Config** 建议 `AppConfig schemaVersion 2→3`，原子迁移并保留全部 Workspace/Tunnel/Proxy/Security/Tools/Policy/Bash/SecretReference：
+**Config** 的 V4 迁移方向冻结为 `AppConfig schemaVersion 2→3`；具体新增字段、默认值和 migration fixture 在 M00 / 对应 Milestone SPEC 冻结。迁移必须原子并保留全部 Workspace/Tunnel/Proxy/Security/Tools/Policy/Bash/SecretReference：
 
 ```text
 AppConfig v3
@@ -366,7 +367,7 @@ Host-only prefs 不进入 RuntimeConfigSnapshot，也不推进 Runtime configRev
 | Optional / P2 | F09/F15 若未交付标 DEFERRED；若交付必须各自 PASS |
 | V4 — ACCEPTED / FROZEN | Full Gate 全通过、交付的 P2 已验收、证据链可追溯；未执行标 NOT_VERIFIED/BLOCKED |
 
-# 20. Recommended Roadmap and Architecture Freeze
+# 20. Recommended Roadmap and M00 Implementation-Freeze Gate
 
 1. **As-Is & Contract Gate**：重新验证 V3 实现、Protocol/Migration、SQLite ownership 原型、Shared Evidence Contract；锁定核心 ADR。
 2. **Desktop Continuity**：Tray、Close/Quit、Auto Start、通知、启动诊断；可与证据层并行。
@@ -375,7 +376,7 @@ Host-only prefs 不进入 RuntimeConfigSnapshot，也不推进 Runtime configRev
 5. **Tool Expansion**：grep 回归比较；F11 候选 Admission；F13 Conformance；F09/F15 视范围实施。
 6. **End-to-end Acceptance**：Core / Full / Optional 分 Gate 提交测试证据、缺陷、阻断与最终版本结论。
 
-**冻结 Architecture 的前置检查：**
+**M00 将本 planning baseline 提升为 implementation-frozen Architecture Contract 的前置检查：**
 
 - [ ] 已核对当前源码、Tests、Manifests 与 V3 Milestone 的 As-Is 基线
 - [ ] SQLite 运行时 writer/停机 reader/维护锁/迁移原型验证
@@ -398,4 +399,4 @@ Host-only prefs 不进入 RuntimeConfigSnapshot，也不推进 Runtime configRev
 - [Tauri 2 Notifications](https://v2.tauri.app/plugin/notification/)
 - [MCP Official Conformance](https://github.com/modelcontextprotocol/conformance)
 
-> **Design status reminder:** 本文是目标设计，不是实现证明。新模块名、DTO 和 method 为建议命名，仍需 Milestone SPEC、测试与真实 ChatGPT 验收来验证。
+> **Design status reminder:** 本文已作为 V4 上游 planning baseline 冻结，但不是实现证明。新模块名、DTO 和 method 仍可在不改变 ADR / PRD 语义的前提下由 Milestone SPEC 精化；任何改变 Authority、security boundary、release gate、migration direction 或 canonical behavior 的方案必须先走上游 change control。M00 通过后再将经验证的 Architecture Contract 标记为 implementation-frozen。
