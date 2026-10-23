@@ -2,7 +2,8 @@
 
 ## 文档入口
 
-- [`docs-codex/ChatGPT-Harness_V4_PRD.md`](docs-codex/ChatGPT-Harness_V4_PRD.md)：V4 产品需求（修订草案）；Architecture 与 Roadmap 尚待编制。
+- [`docs-codex/ChatGPT-Harness_V4_PRD.md`](docs-codex/ChatGPT-Harness_V4_PRD.md)：V4 产品需求（修订草案）。
+- [`docs-codex/ChatGPT-Harness_V4_ARCHITECTURE.md`](docs-codex/ChatGPT-Harness_V4_ARCHITECTURE.md)：V4 增量架构（草案）；Roadmap 尚待编制。
 - [`docs/archive/README.md`](docs/archive/README.md)：历史文档索引。
 - [`wiki/README.md`](wiki/README.md)：当前实现说明与源码导航。
 - [`docs/archive/v3-2026-10/README.md`](docs/archive/v3-2026-10/README.md)：V3 开发、测试和验收文档归档。
