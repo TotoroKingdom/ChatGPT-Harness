@@ -128,6 +128,20 @@ try {
     }
 }
 
+$finalManifestPath = Join-Path $destination "distribution.json"
+$finalManifest = Get-Content -Raw -LiteralPath $finalManifestPath | ConvertFrom-Json
+$finalProvenance = $null
+for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    $finalProvenance = Get-GitProvenance $repositoryRoot
+    if (-not $finalProvenance.SourceDirty) { break }
+    Start-Sleep -Milliseconds 500
+}
+$finalManifest.build_sha = $finalProvenance.BuildSha
+$finalManifest.source_dirty = $finalProvenance.SourceDirty
+$finalManifest.source_state_sha256 = $finalProvenance.SourceStateSha
+$finalManifestJson = $finalManifest | ConvertTo-Json -Depth 8
+[IO.File]::WriteAllText($finalManifestPath, $finalManifestJson + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+
 & (Join-Path $scriptDirectory "verify-portable.ps1") -PortableDirectory $destination
 if ($LASTEXITCODE -ne 0) { throw "Portable verification failed." }
 Write-Output "Built Portable distribution: $destination"
