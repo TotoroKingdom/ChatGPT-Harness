@@ -77,12 +77,13 @@ if ([string]::IsNullOrWhiteSpace($manifest.build_sha) -or
     [string]::IsNullOrWhiteSpace($manifest.cloudflared_sha256)) {
     throw "Portable manifest provenance is incomplete."
 }
-$currentBuildSha = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false rev-parse HEAD 2>$null)
+$gitProvenanceArgs = @('-C', $repositoryRoot, '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', '-c', 'core.trustctime=false')
+$currentBuildSha = (& git @gitProvenanceArgs rev-parse HEAD 2>$null)
 if ($LASTEXITCODE -ne 0) { throw "Could not determine current source revision." }
 $currentBuildSha = $currentBuildSha.Trim()
-$currentStatus = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false status --porcelain 2>$null) -join "`n"
-$currentDiff = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false diff --binary HEAD 2>$null) -join "`n"
-$currentCachedDiff = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false diff --cached --binary 2>$null) -join "`n"
+$currentStatus = (& git @gitProvenanceArgs status --porcelain 2>$null) -join "`n"
+$currentDiff = (& git @gitProvenanceArgs diff --binary HEAD 2>$null) -join "`n"
+$currentCachedDiff = (& git @gitProvenanceArgs diff --cached --binary 2>$null) -join "`n"
 $currentSourceDirty = -not [string]::IsNullOrWhiteSpace($currentStatus)
 $currentSourceState = Get-Sha256Text ($currentBuildSha + "`n" + $currentStatus + "`n" + $currentDiff + "`n" + $currentCachedDiff)
 if ($manifest.build_sha -ne $currentBuildSha -or

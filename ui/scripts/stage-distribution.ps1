@@ -85,14 +85,15 @@ $protocolContent = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "pro
 $protocolMatch = [regex]::Match($protocolContent, 'PROTOCOL_VERSION\s*:\s*u32\s*=\s*(\d+)')
 if (-not $protocolMatch.Success) { throw "Could not read protocol version." }
 $protocolVersion = [int]$protocolMatch.Groups[1].Value
-$buildSha = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false rev-parse HEAD 2>$null)
+$gitProvenanceArgs = @('-C', $repositoryRoot, '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', '-c', 'core.trustctime=false')
+$buildSha = (& git @gitProvenanceArgs rev-parse HEAD 2>$null)
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildSha)) {
     throw "Could not determine the build SHA."
 }
 $buildSha = $buildSha.Trim()
-$sourceStatus = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false status --porcelain 2>$null) -join "`n"
-$sourceDiff = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false diff --binary HEAD 2>$null) -join "`n"
-$sourceCachedDiff = (& git -C $repositoryRoot -c core.autocrlf=false -c core.safecrlf=false diff --cached --binary 2>$null) -join "`n"
+$sourceStatus = (& git @gitProvenanceArgs status --porcelain 2>$null) -join "`n"
+$sourceDiff = (& git @gitProvenanceArgs diff --binary HEAD 2>$null) -join "`n"
+$sourceCachedDiff = (& git @gitProvenanceArgs diff --cached --binary 2>$null) -join "`n"
 $sourceDirty = -not [string]::IsNullOrWhiteSpace($sourceStatus)
 $sourceStateSha = Get-Sha256Text ($buildSha + "`n" + $sourceStatus + "`n" + $sourceDiff + "`n" + $sourceCachedDiff)
 
