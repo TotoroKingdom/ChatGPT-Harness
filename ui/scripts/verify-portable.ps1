@@ -81,9 +81,13 @@ $gitProvenanceArgs = @('-C', $repositoryRoot, '-c', 'core.autocrlf=false', '-c',
 $currentBuildSha = (& git @gitProvenanceArgs rev-parse HEAD 2>$null)
 if ($LASTEXITCODE -ne 0) { throw "Could not determine current source revision." }
 $currentBuildSha = $currentBuildSha.Trim()
-$currentStatus = (& git @gitProvenanceArgs status --porcelain 2>$null) -join "`n"
+$currentStatusRaw = (& git @gitProvenanceArgs status --porcelain 2>$null) -join "`n"
 $currentDiff = (& git @gitProvenanceArgs diff --binary HEAD 2>$null) -join "`n"
 $currentCachedDiff = (& git @gitProvenanceArgs diff --cached --binary 2>$null) -join "`n"
+$currentStatus = $currentStatusRaw
+if ([string]::IsNullOrWhiteSpace($currentDiff) -and [string]::IsNullOrWhiteSpace($currentCachedDiff)) {
+    $currentStatus = (($currentStatusRaw -split "`n" | Where-Object { $_.StartsWith("??") }) -join "`n")
+}
 $currentSourceDirty = -not [string]::IsNullOrWhiteSpace($currentStatus)
 $currentSourceState = Get-Sha256Text ($currentBuildSha + "`n" + $currentStatus + "`n" + $currentDiff + "`n" + $currentCachedDiff)
 if ($manifest.build_sha -ne $currentBuildSha -or

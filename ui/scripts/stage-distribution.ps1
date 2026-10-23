@@ -91,9 +91,13 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($buildSha)) {
     throw "Could not determine the build SHA."
 }
 $buildSha = $buildSha.Trim()
-$sourceStatus = (& git @gitProvenanceArgs status --porcelain 2>$null) -join "`n"
+$sourceStatusRaw = (& git @gitProvenanceArgs status --porcelain 2>$null) -join "`n"
 $sourceDiff = (& git @gitProvenanceArgs diff --binary HEAD 2>$null) -join "`n"
 $sourceCachedDiff = (& git @gitProvenanceArgs diff --cached --binary 2>$null) -join "`n"
+$sourceStatus = $sourceStatusRaw
+if ([string]::IsNullOrWhiteSpace($sourceDiff) -and [string]::IsNullOrWhiteSpace($sourceCachedDiff)) {
+    $sourceStatus = (($sourceStatusRaw -split "`n" | Where-Object { $_.StartsWith("??") }) -join "`n")
+}
 $sourceDirty = -not [string]::IsNullOrWhiteSpace($sourceStatus)
 $sourceStateSha = Get-Sha256Text ($buildSha + "`n" + $sourceStatus + "`n" + $sourceDiff + "`n" + $sourceCachedDiff)
 
