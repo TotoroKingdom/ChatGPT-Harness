@@ -1,94 +1,58 @@
 # Repository Guidelines
 
-This file contains **long-lived repository rules** for Coding Agents. It must remain useful across product versions and milestones. Do not put active milestone names, release numbers, temporary acceptance states, or phase-specific implementation instructions here; those belong in the relevant milestone documents.
+## 项目结构与职责
 
-## Sources of Truth
+- `protocol/`：共享控制协议、生成的 TypeScript 类型、JSON Schema（结构约束）、样例与契约测试。
+- `runtime/`：MCP 服务、工作区隔离、工具执行、策略、审批和审计；集成测试位于 `runtime/tests/`。
+- `ui/src/`：React 界面及前端测试；`ui/src-tauri/`：Tauri 桌面宿主、配置、凭据和进程管理。
+- `ui/scripts/`：Windows 打包与验证；`fixtures/`、`assets/`：测试数据和媒体资源。
+- `docs-codex/`：当前需求及里程碑文档；`wiki/`：技术参考；`docs/archive/`：历史资料。
 
-- For **implemented behavior**, inspect source code, tests, manifests, and build scripts. Do not infer shipped features from requirements or archived reports.
-- For **intended behavior**, read the active PRD, Architecture, Roadmap, and the current milestone's SPEC / PLAN / TASKS / verification plans under `docs-codex/`.
-- `wiki/` may help navigate the codebase, but verify its statements against code because it can lag behind.
-- `docs/archive/` is historical. Do not consult or treat it as authoritative for current work unless a task explicitly requires historical comparison or migration.
-- When an implementation contradicts an approved requirement, surface the discrepancy instead of silently changing either side.
+UI 展示状态并表达操作意图，Tauri 管理桌面进程，Runtime 负责授权和执行；Tunnel 只负责传输。
 
-## Repository Structure and Ownership
+## 构建、测试与本地开发
 
-- `protocol/`: shared control contracts, schema, fixtures, and contract tests.
-- `runtime/`: MCP endpoints, Workspace enforcement, Tool execution, Policy, Approval, Activity, and Audit.
-- `ui/src/`: React application and frontend tests.
-- `ui/src-tauri/`: Tauri Host, desktop lifecycle, configuration, secrets, and managed Runtime/Tunnel processes.
-- `ui/scripts/`: distribution and packaging automation.
-- `fixtures/`, `assets/`, `wiki/`: test fixtures, media, and implementation references.
-- `docs-codex/`: active product and milestone documentation.
-- `docs/archive/`: archived historical documents.
+准备 Node.js 20+、Rust 工具链及 Tauri 2 的 Windows 构建依赖。
 
-Respect process and authority boundaries: UI expresses intent and displays observed state; Tauri manages desktop processes, configuration, and secrets; Runtime authorizes and executes tools. Tunnel transports traffic and must not become an authorization authority. Verify the exact ownership in code before altering a boundary.
-
-## Milestone Development Process
-
-For milestone work, follow the active project's delivery contract:
-
-```text
-PRD / Architecture / Roadmap
-→ SPEC / PLAN / TASKS
-→ Integration / E2E / Manual Acceptance plans
-→ Task implementation + Unit/contract tests
-→ independent Integration and E2E verification
-→ human Manual Acceptance
-→ evidence and explicit milestone acceptance/freeze
-```
-
-- Read the *current* milestone documents and their entry/exit criteria before changing production code.
-- Define and review test/acceptance criteria **before** implementing against them. Do not weaken them to fit an implementation.
-- Keep tasks scoped, verify each task locally, and separate development-complete from verified and accepted.
-- Follow the milestone's definitions of automated E2E, external-system E2E, and manual checks. Do not replace a required real boundary with mocks or call an unexecuted check PASS.
-- Record actual commands, versions, evidence, skipped checks, and failures. Use PASS, FAIL, BLOCKED, or NOT_EXECUTED accurately.
-- Only human reviewers can attest to manual acceptance; the Coding Agent must not self-certify it.
-- If an upstream product or architecture decision must change, record the affected requirement, evidence, and blocker; do not edit an approved upstream baseline just to make a task pass. Obtain explicit direction and re-verify affected contracts.
-
-## Security and Runtime Invariants
-
-- Never bypass Workspace confinement, path normalization, Policy, Approval, or Tool authorization to make a test succeed.
-- Fail closed on invalid, missing, or inconsistent security state. Preserve cancellation, timeout, process cleanup, and generation/session isolation.
-- Keep API keys and credentials in the established secret store/secret-reference flow; do not commit secrets or expose them in logs, argv, IPC responses, error messages, fixtures, or evidence.
-- Treat external inputs, MCP tool arguments, persisted configuration, and diagnostic payloads as untrusted.
-- Preserve compatibility and migration behavior unless a separately approved contract change explicitly revises it.
-- Use disposable directories and synthetic credentials for tests/POCs. Keep experiments separate from production dependencies and persistent user data.
-- Avoid unrelated refactors, destructive cleanup, or global process termination. Protect unrelated local changes.
-
-## Development and Verification Commands
-
-From repository root:
+仓库根目录执行：
 
 ```powershell
-cargo fmt --all -- --check
-cargo check --workspace
-cargo test --workspace
+cargo check --workspace        # 检查 Rust 工作区
+cargo fmt --all -- --check     # 检查 Rust 格式
+cargo test --workspace         # 运行 Rust 测试
 ```
 
-From `ui/`:
+进入 `ui/` 后执行：
 
 ```powershell
-npm install
-npm run dev
-npm run tauri:dev
-npm run typecheck
-npm test
-npm run build
+npm install                   # 安装依赖
+npm run dev                   # 启动浏览器前端
+npm run tauri:dev              # 构建调试 Runtime 并启动桌面应用
+npm run typecheck             # TypeScript 类型检查
+npm test                      # 单次运行前端测试
+npm run build                 # 类型检查并构建前端
+npm run portable:windows      # 构建 Windows 便携版
+npm run tauri:build            # 构建并验证 NSIS 安装包
 ```
 
-Windows packaging (from `ui/`):
+打包还需构建脚本指定的 Runtime/Tunnel 分发资源。
 
-```powershell
-npm run portable:windows
-npm run tauri:build
-```
+## 代码风格与命名
 
-Run focused tests first and then all relevant regression suites. Rust protocol contract tests belong with `protocol/`; Runtime black-box/integration tests live under `runtime/tests/`; frontend tests use the established `*.test.ts` / `*.test.tsx` conventions. Packaging or native behavior must be verified on an appropriate Windows environment; do not claim success without running it.
+Rust 使用 rustfmt 默认格式、四空格缩进；模块和函数采用 `snake_case`，类型采用 `PascalCase`。TypeScript 使用严格模式、两空格缩进、双引号和分号；React 组件采用 `PascalCase`，函数及变量采用 `camelCase`。沿用 `@/` 和 `@protocol/` 导入别名。当前未配置 ESLint 或 Prettier 脚本。协议变更需同步生成类型、结构约束、样例和契约测试。
 
-## Changes, Documentation, and Evidence
+## 测试要求
 
-- Follow existing Rust formatting and TypeScript conventions. Keep changes narrow and update schemas, protocol fixtures, generated types, and tests when contracts change.
-- Keep `README.md` **Chinese-first and reader-facing**: what the product does, the currently available features, how to get started, and concise development links. Avoid internal milestone task lists and lengthy acceptance reports in README.
-- Keep milestone-specific rules, thresholds, proofs, and blockers in their own `docs-codex/` files, not in this AGENTS.md.
-- Explain assumptions, risks, and verification gaps in handoffs. Separate implemented, tested, externally verified, and manually accepted states.
-- Use existing commit conventions such as `feat(scope):`, `fix(scope):`, `docs:`, `test:`, and `release:`. Do not force-push, rewrite history, or discard unrelated changes without explicit authorization.
+前端使用 Vitest、React Testing Library 和 jsdom；测试命名为 `*.test.ts` 或 `*.test.tsx`，通常与功能代码相邻。Rust 使用内置测试框架，协议契约测试位于 `protocol/tests/`。可用 `npm test -- src/App.test.tsx` 或 `cargo test -p chatgpt-harness-runtime` 缩小验证范围，再执行受影响的回归检查。当前未设置统一覆盖率门槛。
+
+本地测试通过不能证明外部 ChatGPT 连接成功；分别记录自动化验证、真实外部调用和人工验收证据，明确未执行项。
+
+## 提交与合并请求
+
+沿用历史提交格式，如 `fix(tunnel): ...`、`feat(scope): ...`、`docs: ...`、`test: ...` 和 `release: ...`。每次提交聚焦一个变更。合并请求说明问题、行为变化、关联 Issue（如有）、验证命令及结果；界面变更附截图，协议或安全变更说明兼容性和风险。保留无关本地修改，仅暂存明确路径。
+
+## 安全与文档依据
+
+不得绕过工作区隔离、策略或审批；凭据沿用 SecretStore（凭据存储）及引用流程，不写入代码、日志、配置样例或验证证据。测试使用临时目录和合成凭据。
+
+实现状态以源码、测试、清单和构建脚本为准；规划文档不代表功能已发布。里程碑开发先阅读当前需求与验收计划，不为通过测试降低标准。README 保持中文优先、面向用户；阶段性规则和验收记录放入对应里程碑文档。
