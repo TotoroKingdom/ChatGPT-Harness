@@ -2,7 +2,7 @@
 
 > 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: Integration PASS (12/12); M00 overall BLOCKED — E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; Manual Acceptance NOT EXECUTED; not ACCEPTED / FROZEN
+> Status: Integration PASS (12/12); M00 ACCEPTED / FROZEN under explicit user-approved E2E-02 deferral — E2E-01 PASS; E2E-02 DEFERRED BY USER (NOT EXECUTED; not a M00 blocker); E2E-03 PASS; Manual Acceptance APPROVED BY USER
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md  
 > Owner: independent Coding/QA Agent after T1–T6 Development Complete  
@@ -524,8 +524,8 @@ Next:
 
 ~~~text
 Integration PASS (12/12)
-→ E2E-03 recorded PASS; E2E-01/E2E-02 remain BLOCKED pending real-boundary evidence
-→ E2E overall BLOCKED
-→ Manual Acceptance NOT EXECUTED
+→ E2E-01/E2E-03 recorded PASS; E2E-02 DEFERRED BY USER / NOT EXECUTED, with no PASS claim
+→ M00 closeout accepted under the explicit user-approved E2E-02 deferral exception
+→ Manual Acceptance APPROVED BY USER
 → human sign-off in the existing manual checklist + evidence locations
 ~~~

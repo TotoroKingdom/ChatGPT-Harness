@@ -2,7 +2,7 @@
 
 > 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: M00 overall BLOCKED — Development Complete PASS; Integration PASS (12/12); E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; Manual Acceptance NOT EXECUTED; not ACCEPTED / FROZEN
+> Status: M00 ACCEPTED / FROZEN — Development Complete PASS; Integration PASS (12/12); E2E-01 PASS; E2E-02 DEFERRED BY USER (NOT EXECUTED; not a M00 blocker); E2E-03 PASS; Manual Acceptance APPROVED BY USER
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Upstream baseline: V4 PRD + V4 Architecture + V4 Roadmap, FROZEN FOR M00  
 > Target: validate current code facts, prove critical V4 architecture assumptions, and freeze the implementation contract consumed by M01+  
@@ -28,13 +28,13 @@ M00 is successful only when these claims are supported by code inspection, runna
 
 - M00 Development Complete: PASS.
 - M00 Integration: PASS (12/12).
-- M00-E2E-01: BLOCKED — no real ChatGPT → Tunnel → Runtime MCP evidence was produced.
-- M00-E2E-02: BLOCKED — no real controllable Agent/Model → Eval Runner → Runtime MCP evidence was produced.
+- M00-E2E-01: PASS — the user confirmed the real ChatGPT → Tunnel → Harness Runtime MCP → `read_file` → Workspace chain completed.
+- M00-E2E-02: DEFERRED BY USER — NOT EXECUTED; no real controllable Agent/Model → Eval Runner → Runtime MCP evidence is claimed. This is not a M00 blocker under the explicit user-approved closeout exception.
 - M00-E2E-03: PASS; this previously executed result was not rerun during the closeout.
-- Manual Acceptance: NOT EXECUTED.
-- M00 overall: BLOCKED; it cannot be marked ACCEPTED / FROZEN.
+- Manual Acceptance: APPROVED BY USER.
+- M00 overall: ACCEPTED / FROZEN under the explicit user-approved E2E-02 deferral exception.
 
-The deleted standalone reports, standalone ADR, Evidence Index and POC source trees are not recreated. They do not turn the completed Development, Integration or E2E-03 execution into “not executed”; the remaining acceptance blockers are M00-E2E-01, M00-E2E-02 and the subsequent Manual Acceptance.
+The deleted standalone reports, standalone ADR, Evidence Index and POC source trees are not recreated. E2E-02 remains unexecuted and is not represented as PASS. The later Agent Evaluation Milestone must revalidate the real model closed loop: actual model turn, real Runtime MCP call and independent final-state scorer.
 
 ---
 
@@ -414,7 +414,7 @@ The case must define:
 
 The runner must capture real MCP tool calls and grade the final state independently from “tool returned success”.
 
-Current E2E-02 result: BLOCKED. The local/deterministic runner mechanics remain Integration evidence and do not substitute for a real controllable Agent/Model turn through the real Runtime MCP.
+Current E2E-02 result: DEFERRED BY USER — NOT EXECUTED. The local/deterministic runner mechanics remain Integration evidence and do not substitute for a real controllable Agent/Model turn through the real Runtime MCP. The real closed loop must be revalidated in the later Agent Evaluation Milestone; this closeout does not claim E2E-02 PASS.
 
 ### 9.3 Truthfulness boundary
 
@@ -459,7 +459,7 @@ Requirements:
 - do not claim SQLite History, Trace or other V4 functionality from this test;
 - external execution requires explicit authorization when the E2E plan is run.
 
-Current E2E-01 result: BLOCKED. No real ChatGPT → Tunnel → Runtime MCP chain evidence is available; local UI/process or Runtime smoke evidence cannot substitute for that boundary.
+Current E2E-01 result: PASS. The user confirmed the real ChatGPT → Tunnel → Harness Runtime MCP → `read_file` → Workspace chain completed; this closeout does not substitute local UI/process or Runtime smoke evidence for that boundary.
 
 ---
 
@@ -538,7 +538,7 @@ If real external ChatGPT access or the controlled Agent/Model adapter cannot be 
 
 ### Current exit status
 
-The local development and Integration gates are complete, and E2E-03 is PASS. The M00 exit gate remains unsatisfied solely because E2E-01 and E2E-02 are BLOCKED; Manual Acceptance therefore remains NOT EXECUTED. No ACCEPTED / FROZEN claim is valid until those two real-boundary cases pass and the Human Reviewer completes the manual checklist.
+The local development and Integration gates are complete; E2E-01 and E2E-03 are PASS. E2E-02 remains DEFERRED BY USER and NOT EXECUTED, with no PASS claim. On 2026-10-24 the user explicitly approved this exception, approved Manual Acceptance and accepted/froze M00. The later Agent Evaluation Milestone must revalidate the real model closed loop before relying on the M00-E2E-02 feasibility result.
 
 ---
 

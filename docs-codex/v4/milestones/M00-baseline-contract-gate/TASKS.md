@@ -2,7 +2,7 @@
 
 > 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: Development Complete PASS; Integration PASS (12/12); E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; Manual Acceptance NOT EXECUTED; M00 overall BLOCKED and not ACCEPTED / FROZEN
+> Status: Development Complete PASS; Integration PASS (12/12); E2E-01 PASS; E2E-02 DEFERRED BY USER (NOT EXECUTED; not a M00 blocker); E2E-03 PASS; Manual Acceptance APPROVED BY USER; M00 ACCEPTED / FROZEN
 > Inputs: SPEC.md, PLAN.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md, MANUAL_ACCEPTANCE_CHECKLIST.md  
 > Executor: Codex / Coding Agent  
 > Upstream: V4 planning baseline FROZEN FOR M00  
@@ -631,7 +631,7 @@ Update cross-links among:
 - 架构决策及阻塞项（在既有 SPEC/PLAN 中维护）
 - future 人工验收签认（沿用既有验收清单） and 验收证据定位（沿用既有验收清单） references; no standalone Evidence Index is required.
 
-The three validation plans were frozen before implementation. Their verdicts follow actual execution: Integration = PASS (12/12), E2E-03 = PASS, E2E-01/E2E-02 = BLOCKED, and Manual Acceptance = NOT EXECUTED. Do not mark an unexecuted or unavailable boundary PASS merely because M00 development is complete.
+The three validation plans were frozen before implementation. Their recorded closeout status is: Integration = PASS (12/12), E2E-01 = PASS, E2E-02 = DEFERRED BY USER (NOT EXECUTED; not marked PASS), E2E-03 = PASS, and Manual Acceptance = APPROVED BY USER under the explicit exception. The later Agent Evaluation Milestone must revalidate the real model closed loop. Do not mark E2E-02 PASS merely because M00 was accepted by exception.
 
 ### Required task-local verification
 
@@ -666,10 +666,10 @@ M00 Development Complete means:
 - all required design outputs exist;
 - no production V4 feature was accidentally implemented/enabled;
 - no unresolved REVISED ADR remains only in milestone docs;
-- M00 Development Complete = PASS; formal Integration is PASS (12/12), while E2E execution is partial: E2E-03 PASS and E2E-01/E2E-02 BLOCKED;
-- Manual Acceptance remains NOT EXECUTED because the two real-boundary E2E blockers are unresolved.
+- M00 Development Complete = PASS; formal Integration is PASS (12/12), E2E-01 and E2E-03 are PASS, and E2E-02 is DEFERRED BY USER / NOT EXECUTED without a PASS claim;
+- Manual Acceptance is APPROVED BY USER under the explicit E2E-02 deferral exception; the later Agent Evaluation Milestone must revalidate the real model closed loop.
 
-Do not mark M00 ACCEPTED/FROZEN in TASKS. The current overall verdict is BLOCKED; the remaining acceptance blockers are E2E-01, E2E-02 and the subsequent Manual Acceptance.
+M00 is ACCEPTED / FROZEN by explicit user approval. This closeout status does not change the frozen E2E-02 definition or convert its unexecuted evidence into PASS.
 
 ---
 
@@ -696,8 +696,8 @@ The required sequence is:
 Pre-development: SPEC / PLAN / TASKS / Integration / E2E / Manual plans frozen
 → T1–T6 M00 Development Complete
 → independent QA executes Integration: 12/12 PASS
-→ E2E-03: PASS; E2E-01/E2E-02: BLOCKED pending real-boundary evidence
-→ Manual Acceptance: NOT EXECUTED until E2E-01/E2E-02 pass
+→ E2E-01/E2E-03: PASS; E2E-02: DEFERRED BY USER / NOT EXECUTED, with no PASS claim
+→ Manual Acceptance: APPROVED BY USER under the explicit E2E-02 deferral exception
 → human sign-off in the existing manual checklist + evidence locations
 → M00 ACCEPTED / FROZEN
 → only then unlock M01/M02/M03

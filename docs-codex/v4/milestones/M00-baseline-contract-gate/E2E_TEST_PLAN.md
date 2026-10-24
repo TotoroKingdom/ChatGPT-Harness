@@ -2,7 +2,7 @@
 
 > 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: E2E BLOCKED — E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; M00 overall BLOCKED; Manual Acceptance NOT EXECUTED; not ACCEPTED / FROZEN
+> Status: E2E-01 PASS; E2E-02 DEFERRED BY USER (NOT EXECUTED; not a M00 blocker); E2E-03 PASS; M00 ACCEPTED / FROZEN under explicit user-approved exception; Manual Acceptance APPROVED BY USER
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md  
 > Owner: QA/Coding Agent for locally automatable steps; explicitly authorized external execution for ChatGPT/networked model steps  
@@ -53,7 +53,7 @@ M00 = not ACCEPTED
 
 Do not replace it with a mock and mark PASS.
 
-Current E2E entry evaluation: Development Complete = PASS and Integration = PASS (12/12), so the E2E plan was entered. E2E-01 and E2E-02 nevertheless remain BLOCKED because their required real external boundaries were not available; E2E-03 is PASS. Manual Acceptance cannot enter until the E2E exit criteria are satisfied.
+Current E2E entry evaluation: Development Complete = PASS and Integration = PASS (12/12), so the E2E plan was entered. The user confirmed E2E-01 PASS; E2E-02 was not executed and is DEFERRED BY USER without a PASS claim; E2E-03 is PASS. The user approved Manual Acceptance and the M00 closeout exception; the later Agent Evaluation Milestone must revalidate the real model closed loop.
 
 ---
 
@@ -189,7 +189,7 @@ No Workspace mutation should remain. Stop only test-owned instances.
 
 **PASS:** the current real external Harness chain is proven on the M00 candidate.
 
-**Current execution verdict: BLOCKED.** No real ChatGPT tool call and no correlated Tunnel `/poll`/`/response`, Runtime `/mcp`, Activity, request-identity or Workspace evidence was produced. Local UI/process, package, Runtime smoke or historical evidence does not substitute for this case.
+**Recorded execution verdict: PASS.** The user confirmed the real ChatGPT → Tunnel → Harness Runtime MCP → `read_file` → Workspace chain completed for M00-E2E-01.
 
 ---
 
@@ -258,7 +258,7 @@ The scorer must mark task failure.
 - network/model unavailable → BLOCKED;
 - too little evidence to distinguish task success → INCONCLUSIVE.
 
-**Current execution verdict: BLOCKED.** No real controllable Agent/Model endpoint, model identity, authorized credential, actual model turn, real Runtime MCP call or independent final-state scorer evidence was available. The deterministic/local adapter remains Integration evidence only and does not satisfy E2E-02.
+**Recorded execution verdict: DEFERRED BY USER — NOT EXECUTED.** No real controllable Agent/Model endpoint, actual model turn, real Runtime MCP call or independent final-state scorer evidence is claimed. The deterministic/local adapter remains Integration evidence only and does not satisfy E2E-02. This item is not a M00 blocker under the explicit user-approved closeout exception and must be revalidated in the later Agent Evaluation Milestone; no E2E-02 PASS is claimed.
 
 ---
 
@@ -365,10 +365,14 @@ Only after this may the Human Reviewer execute MANUAL_ACCEPTANCE_CHECKLIST.md.
 
 E2E PASS still does not itself mark M00 ACCEPTED/FROZEN.
 
+### M00 closeout exception — 2026-10-24
+
+The user explicitly approved M00 acceptance/freeze with M00-E2E-02 deferred. This is a closeout exception only; it does not change the frozen E2E-02 test definition or its requirement for a real controllable Agent/Model closed loop. E2E-02 remains NOT EXECUTED and must be revalidated in the later Agent Evaluation Milestone.
+
 ---
 
 ## 9. Execution evidence location
 
 Execution results are maintained in this plan, E2E 执行结论（对话交付，不自动新建报告） and 验收证据定位（沿用既有验收清单）. No standalone execution report or Evidence Index is recreated.
 
-Current result: E2E-01 = BLOCKED, E2E-02 = BLOCKED, E2E-03 = PASS; therefore E2E overall = BLOCKED and Manual Acceptance = NOT EXECUTED.
+Current result: E2E-01 = PASS, E2E-02 = DEFERRED BY USER (NOT EXECUTED; not PASS), E2E-03 = PASS; M00 closeout = ACCEPTED / FROZEN by explicit user-approved exception; Manual Acceptance = APPROVED BY USER. The later Agent Evaluation Milestone must revalidate the real model closed loop.

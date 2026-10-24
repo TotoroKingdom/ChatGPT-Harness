@@ -2,7 +2,7 @@
 
 > 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: M00 overall BLOCKED — Development Complete PASS; Integration PASS (12/12); E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; Manual Acceptance NOT EXECUTED; not ACCEPTED / FROZEN
+> Status: M00 ACCEPTED / FROZEN — Development Complete PASS; Integration PASS (12/12); E2E-01 PASS; E2E-02 DEFERRED BY USER (NOT EXECUTED; not a M00 blocker); E2E-03 PASS; Manual Acceptance APPROVED BY USER
 > Input: SPEC.md  
 > Upstream: V4 PRD / Architecture / Roadmap, FROZEN FOR M00  
 > Goal: turn architectural assumptions into executable evidence and a frozen implementation contract for M01+  
@@ -340,7 +340,7 @@ If any ADR is REVISED:
 
 ### Exit
 
-All M00 local development work is complete: M00 Development Complete = PASS. The frozen validation sequence then recorded Integration = PASS (12/12), E2E-03 = PASS, E2E-01 = BLOCKED and E2E-02 = BLOCKED. Manual Acceptance is NOT EXECUTED, so M00 remains BLOCKED and is not ACCEPTED / FROZEN.
+All M00 local development work is complete: M00 Development Complete = PASS. The frozen validation sequence recorded Integration = PASS (12/12), E2E-01 = PASS and E2E-03 = PASS. E2E-02 is DEFERRED BY USER and NOT EXECUTED; it is not recorded as PASS. On 2026-10-24 the user explicitly approved the deferral, approved Manual Acceptance and accepted/froze M00. The later Agent Evaluation Milestone must revalidate the real model closed loop.
 
 ---
 
@@ -398,7 +398,7 @@ Exact commands created by implementation are recorded in TASKS completion/eviden
 
 Formal component Integration, real ChatGPT E2E and Manual acceptance are defined in the already-frozen M00 validation documents. Implementation must satisfy those documents rather than regenerate them after coding.
 
-Current execution closeout: Integration is PASS (12/12); E2E-03 is PASS; E2E-01 and E2E-02 remain BLOCKED for missing real-boundary evidence; Manual Acceptance is NOT EXECUTED. The deleted standalone reports, ADR, Evidence Index and POC trees are not recreated and do not erase the completed Development/Integration results.
+Current execution closeout: Integration is PASS (12/12); E2E-01 and E2E-03 are PASS; E2E-02 is DEFERRED BY USER and NOT EXECUTED, with no PASS claim; Manual Acceptance is APPROVED BY USER under the explicit closeout exception. The deleted standalone reports, ADR, Evidence Index and POC trees are not recreated and do not erase the completed Development/Integration results. The later Agent Evaluation Milestone must revalidate the real model closed loop.
 
 ---
 
@@ -417,4 +417,4 @@ Before M00 can enter Integration testing:
 - git diff/checks show only intended files;
 - cleanup has removed temporary DBs, test processes and fixture mutations.
 
-The Development Completion Gate was satisfied and Integration was executed as PASS (12/12). The remaining sequence is E2E-01/E2E-02 real-boundary completion, followed by Manual Acceptance; until then M00 remains BLOCKED.
+The Development Completion Gate was satisfied and Integration was executed as PASS (12/12). E2E-01 and E2E-03 are PASS. E2E-02 is explicitly deferred by the user, remains NOT EXECUTED and is not a PASS claim; Manual Acceptance and M00 acceptance/freeze were approved under that exception. The later Agent Evaluation Milestone must revalidate the real model closed loop.

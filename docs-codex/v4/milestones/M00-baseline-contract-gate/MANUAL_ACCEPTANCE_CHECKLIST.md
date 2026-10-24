@@ -2,7 +2,7 @@
 
 > 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: Manual Acceptance NOT EXECUTED — entry blocked by E2E-01/E2E-02; M00 overall BLOCKED; not ACCEPTED / FROZEN
+> Status: Manual Acceptance APPROVED BY USER — M00 ACCEPTED / FROZEN under explicit E2E-02 deferral exception; E2E-01 PASS; E2E-02 DEFERRED BY USER (NOT EXECUTED; not PASS); E2E-03 PASS
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md  
 > Owner: Human Reviewer  
@@ -66,7 +66,7 @@ Manual Acceptance = BLOCKED
 
 Do not compensate with subjective approval.
 
-Current entry evaluation: Development Complete = PASS and Integration = PASS (12/12), but E2E-01 and E2E-02 are BLOCKED; therefore the E2E exit criteria are not satisfied and Manual Acceptance is NOT EXECUTED. E2E-03 = PASS does not remove those blockers.
+Current closeout evaluation: Development Complete = PASS, Integration = PASS (12/12), E2E-01 = PASS and E2E-03 = PASS. E2E-02 remains DEFERRED BY USER / NOT EXECUTED and is not a PASS claim. The user explicitly approved Manual Acceptance and the M00 acceptance/freeze exception; the later Agent Evaluation Milestone must revalidate the real model closed loop.
 
 ---
 
@@ -312,28 +312,29 @@ Fill PASS/FAIL/BLOCKED only after M00-MAN-01 through M00-MAN-05. If the entry cr
 
 | Manual case | Verdict | Notes/Evidence |
 | --- | --- | --- |
-| M00-MAN-01 | NOT EXECUTED | Entry criteria not met because M00-E2E-01 is BLOCKED. |
-| M00-MAN-02 | NOT EXECUTED | Manual Acceptance was not started; the E2E entry/exit gate remains blocked. |
-| M00-MAN-03 | NOT EXECUTED | Manual Acceptance was not started; the E2E entry/exit gate remains blocked. |
-| M00-MAN-04 | NOT EXECUTED | Entry criteria not met because M00-E2E-02 is BLOCKED. |
-| M00-MAN-05 | NOT EXECUTED | E2E overall is BLOCKED; no downstream unlock decision was made. |
+| M00-MAN-01 | PASS (USER-APPROVED) | User-approved M00 closeout; E2E-01 is recorded PASS. |
+| M00-MAN-02 | PASS (USER-APPROVED) | User-approved M00 closeout; Integration is 12/12 PASS and evidence boundaries remain unchanged. |
+| M00-MAN-03 | PASS (USER-APPROVED) | User-approved M00 closeout; SQLite/config contract status remains unchanged. |
+| M00-MAN-04 | DEFERRED BY USER | Mirrors E2E-02: NOT EXECUTED, not PASS; later Agent Evaluation Milestone must revalidate the real model closed loop. |
+| M00-MAN-05 | PASS (USER-APPROVED) | M00 freeze and downstream unlock approved under the explicit E2E-02 deferral exception. |
 
 Automated prerequisite summary:
 
 ~~~text
 Development: PASS
 Integration: PASS (12/12)
-E2E: BLOCKED (E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS)
-Cleanup: PASS for completed automated layers; Manual Acceptance not executed
+E2E: E2E-01 PASS; E2E-02 DEFERRED BY USER (NOT EXECUTED; not PASS); E2E-03 PASS
+Cleanup: PASS for completed automated layers; E2E-02 deferred for future Agent Evaluation Milestone
+Manual Acceptance: APPROVED BY USER under the explicit E2E-02 deferral exception
 ~~~
 
 ### Final decision
 
 Choose exactly one:
 
-- [ ] M00 — ACCEPTED / FROZEN
+- [x] M00 — ACCEPTED / FROZEN
 - [ ] M00 — FAIL
-- [x] M00 — BLOCKED
+- [ ] M00 — BLOCKED
 - [ ] M00 — INCONCLUSIVE
 
 M00 may be ACCEPTED / FROZEN only if:
@@ -347,6 +348,8 @@ M00 may be ACCEPTED / FROZEN only if:
 - candidate/evidence identity is stable;
 - cleanup is complete.
 
+Closeout exception recorded on 2026-10-24: the user explicitly approved M00 ACCEPTED / FROZEN while deferring M00-E2E-02. This does not convert E2E-02 or M00-MAN-04 into PASS; E2E-02 remains NOT EXECUTED and must be revalidated in the later Agent Evaluation Milestone with a real model closed loop.
+
 When ACCEPTED / FROZEN:
 
 ~~~text
@@ -354,6 +357,6 @@ M01 / M02 / M03 are unlocked.
 M04 remains dependent on M03.
 ~~~
 
-The ACCEPTED / FROZEN branch is not reached. M01/M02/M03 remain locked until E2E-01 and E2E-02 pass and the Human Reviewer executes this checklist.
+The ACCEPTED / FROZEN branch is reached by explicit user approval of the 2026-10-24 closeout exception. M01/M02/M03 are unlocked; E2E-02 remains NOT EXECUTED and must be revalidated in the later Agent Evaluation Milestone before relying on its feasibility result.
 
 Acceptance itself must be recorded in 人工验收签认（沿用既有验收清单） and evidence locations in 验收证据定位（沿用既有验收清单）. This checklist is the human sign-off source, not a substitute for those final records.
