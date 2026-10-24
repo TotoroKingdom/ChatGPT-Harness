@@ -1,6 +1,6 @@
 # M01 TASKS — Tray, Background Lifecycle and Notifications
 
-> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。当前仅有 SPEC / PLAN / TASKS 三份草案，缺少 Integration / E2E / Manual 三份计划，未达到六文件冻结门槛；M00 未验收，禁止开始实现。报告更新既有证据记录，不逐次新建总结报告。
+> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。M01 六份里程碑文档现已齐全；三份验证/验收计划已在实现前冻结。M00 当前仍未完成最终验收，M01 实现继续受 M00 ACCEPTED / FROZEN Gate（验收通过 / 冻结门槛）约束；M00 若修订上游契约，必须先同步更新并重新冻结 M01 文档。报告更新既有证据记录，不逐次新建总结报告。
 
 > Inputs: SPEC.md, PLAN.md  
 > Executor: Codex / Coding Agent  
