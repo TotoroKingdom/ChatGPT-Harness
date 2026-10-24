@@ -141,20 +141,32 @@ if ($null -eq $associatedIcon -or $associatedIcon.Width -le 1 -or $associatedIco
 }
 $associatedIcon.Dispose()
 
-$requests = @(
-    (@{id=1;method='initialize';params=@{clientInfo=@{name='portable-verifier';title='Portable Verifier';version=$expectedVersion};protocolVersion=1;capabilities=@{activityReplay=$true};runtimeConfig=@{configRevision='1';workspace=@{rootPath=$repositoryRoot};security=@{mode='normal';developerTestMode=$false};runtimeLimits=@{maxConcurrentRequests=1;maxActivityEvents=100;maxReadBytes=1048576};tools=@{readFile=@{enabled=$true};glob=@{enabled=$true};write=@{enabled=$true};edit=@{enabled=$true};bash=@{enabled=$false}}}}} | ConvertTo-Json -Depth 8 -Compress),
-    (@{method='initialized';params=@{}} | ConvertTo-Json -Depth 4 -Compress),
-    (@{id=2;method='runtime.status';params=@{}} | ConvertTo-Json -Depth 4 -Compress),
-    (@{id=3;method='runtime.stop';params=@{}} | ConvertTo-Json -Depth 4 -Compress)
-)
-$runtimeOutput = $requests | & $runtimeExecutable 2>$null
-if ($LASTEXITCODE -ne 0) { throw "Portable Runtime smoke test exited with $LASTEXITCODE." }
-$messages = @($runtimeOutput | ForEach-Object { $_ | ConvertFrom-Json })
-if (-not ($messages | Where-Object { $_.id -eq 2 -and $_.result.lifecycle -eq 'ready' })) {
-    throw "Portable Runtime did not report ready."
-}
-if (-not ($messages | Where-Object { $_.id -eq 3 -and $_.result.accepted -eq $true })) {
-    throw "Portable Runtime did not stop cleanly."
+$smokeWorkspace = Join-Path ([IO.Path]::GetTempPath()) ("harness-portable-smoke-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $smokeWorkspace | Out-Null
+try {
+    $requests = @(
+        (@{id=1;method='initialize';params=@{clientInfo=@{name='portable-verifier';title='Portable Verifier';version=$expectedVersion};protocolVersion=1;capabilities=@{activityReplay=$true};runtimeConfig=@{configRevision='1';workspace=@{rootPath=$smokeWorkspace};security=@{mode='normal';developerTestMode=$false};runtimeLimits=@{maxConcurrentRequests=1;maxActivityEvents=100;maxReadBytes=1048576};tools=@{readFile=@{enabled=$true};glob=@{enabled=$true};write=@{enabled=$true};edit=@{enabled=$true};bash=@{enabled=$false}}}}} | ConvertTo-Json -Depth 8 -Compress),
+        (@{method='initialized';params=@{}} | ConvertTo-Json -Depth 4 -Compress),
+        (@{id=2;method='runtime.status';params=@{}} | ConvertTo-Json -Depth 4 -Compress),
+        (@{id=3;method='runtime.stop';params=@{}} | ConvertTo-Json -Depth 4 -Compress)
+    )
+    $runtimeOutput = $requests | & $runtimeExecutable 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "Portable Runtime smoke test exited with $LASTEXITCODE." }
+    $messages = @($runtimeOutput | ForEach-Object { $_ | ConvertFrom-Json })
+    if (-not ($messages | Where-Object { $_.id -eq 2 -and $_.result.lifecycle -eq 'ready' })) {
+        throw "Portable Runtime did not report ready."
+    }
+    if (-not ($messages | Where-Object { $_.id -eq 3 -and $_.result.accepted -eq $true })) {
+        throw "Portable Runtime did not stop cleanly."
+    }
+} finally {
+    $resolvedSmokeWorkspace = [IO.Path]::GetFullPath($smokeWorkspace)
+    $smokeTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $resolvedSmokeWorkspace.StartsWith($smokeTempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($resolvedSmokeWorkspace) -notlike 'harness-portable-smoke-*') {
+        throw "Refusing to clean an unexpected Portable smoke workspace."
+    }
+    Remove-Item -LiteralPath $smokeWorkspace -Recurse -Force
 }
 
 $archives = @(Get-ChildItem -LiteralPath $portableRoot -File -Filter "*.zip" -ErrorAction SilentlyContinue)

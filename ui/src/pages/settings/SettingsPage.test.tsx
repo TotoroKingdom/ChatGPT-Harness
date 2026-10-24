@@ -94,7 +94,8 @@ describe("M8 Settings section/list workflow", () => {
     const setDesktopPreferences = vi.fn().mockResolvedValue({ ok: true });
     state.context = makeContext({ setDesktopPreferences });
     render(<SettingsPage />);
-    const approval = screen.getByRole("checkbox", { name: "Approval notifications" });
+    const approval = screen.getByRole("checkbox", { name: "Approval Tray reminder" });
+    expect(screen.getByText("Flash the Tray icon while approvals are pending, including when the window is hidden. No approval pop-up notifications are sent.")).toBeInTheDocument();
     const connection = screen.getByRole("checkbox", { name: "Connection notifications" });
     fireEvent.click(approval);
     await waitFor(() => expect(setDesktopPreferences).toHaveBeenCalledWith({ approvalNotifications: false }));

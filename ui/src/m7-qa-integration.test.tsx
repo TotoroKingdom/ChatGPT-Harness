@@ -111,7 +111,9 @@ describe("M7 Integration — typed remediation and invalid Policy UX", () => {
     const inspect = async (tool: string, reason: string, remediation: string) => {
       fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${tool}\\b`) }));
       expect(await screen.findByText(reason)).toBeInTheDocument();
-      expect(screen.getByText(remediation, { exact: false })).toBeInTheDocument();
+      // The reason can already be present in the compact row while the
+      // inspector is still loading its remediation. Await the actual detail.
+      expect(await screen.findByText(remediation, { exact: false })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Close" }));
     };
     await inspect("write", "Tool disabled", "Enable the tool, save, and restart Harness.");

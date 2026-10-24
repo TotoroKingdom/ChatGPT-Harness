@@ -14,6 +14,42 @@ pub struct DesktopLifecycleState {
     pub education_visible: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TrayFlashState {
+    generation: u64,
+    active: bool,
+}
+
+impl TrayFlashState {
+    pub fn start(&mut self, app_quitting: bool) -> Option<u64> {
+        if app_quitting || self.active {
+            return None;
+        }
+        self.generation = self.generation.saturating_add(1);
+        self.active = true;
+        Some(self.generation)
+    }
+
+    pub fn stop(&mut self) {
+        if self.active {
+            self.generation = self.generation.saturating_add(1);
+            self.active = false;
+        }
+    }
+
+    pub fn should_continue(&self, generation: u64, pending: bool) -> bool {
+        self.active && self.generation == generation && pending
+    }
+
+    pub fn is_current(&self, generation: u64) -> bool {
+        self.active && self.generation == generation
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+}
+
 impl DesktopLifecycleState {
     pub fn begin_quit(&mut self) -> bool {
         if self.app_quitting {
@@ -130,5 +166,27 @@ mod tests {
             lifecycle_from_process_observation(true, HarnessLifecycle::Stopped),
             HarnessLifecycle::Stopped
         );
+    }
+
+    #[test]
+    fn tray_flash_stops_for_zero_or_unavailable_pending_and_quit() {
+        let mut state = TrayFlashState::default();
+        let generation = state.start(false).expect("flash should start");
+        assert!(state.should_continue(generation, true));
+        assert!(!state.should_continue(generation, false));
+        state.stop();
+        assert!(!state.is_active());
+        assert!(!state.should_continue(generation, true));
+        assert!(state.start(true).is_none());
+    }
+
+    #[test]
+    fn tray_flash_current_generation_can_be_stopped_after_pending_clears() {
+        let mut state = TrayFlashState::default();
+        let generation = state.start(false).expect("flash should start");
+        assert!(state.is_current(generation));
+        assert!(!state.should_continue(generation, false));
+        state.stop();
+        assert!(!state.is_current(generation));
     }
 }

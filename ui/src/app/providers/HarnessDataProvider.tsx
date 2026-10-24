@@ -574,10 +574,24 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     }
   }, [client, refreshConfig, refreshLifecycleActivity]);
 
-  const restartHarness = useCallback(async () => {
-    const stopped = await stopHarness();
-    return stopped.ok ? startHarness() : stopped;
-  }, [startHarness, stopHarness]);
+  const restartHarness = useCallback(async (): Promise<SaveResult> => {
+    try {
+      // Keep Stop + Start inside the Host's existing lifecycle operation lock.
+      // Separate UI commands allow Tray actions to interleave between them.
+      const state = await client.harnessRestart();
+      setComponents(client.getComponentStates());
+      setHarness(state);
+      setHarnessObserved(true);
+      setActiveRevision(state.configRevision ?? null);
+      await refreshRuntimeResources();
+      return { ok: true };
+    } catch (error) {
+      // Report the failed operation immediately; reconcile the actual Host
+      // state separately so the user can retry a bounded shutdown/start.
+      void refreshHarness();
+      return { ok: false, error: toClientError(error) };
+    }
+  }, [client, refreshHarness, refreshRuntimeResources]);
 
   const runDiagnostics = useCallback(async () => {
     const result = await client.localDiagnosticsRun();

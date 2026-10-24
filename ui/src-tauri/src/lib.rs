@@ -48,6 +48,7 @@ pub fn run() {
             desktop.set_background_notice_acknowledged(acknowledged);
             desktop.observe_status(controller.status());
             desktop.bootstrap_approvals(
+                desktop.snapshot().status.active_session_id.as_deref(),
                 runtime
                     .approvals_list(harness_control_protocol::ApprovalsListParams::default())
                     .map(|result| result.items)
@@ -68,11 +69,12 @@ pub fn run() {
                 ) {
                     return;
                 }
+                let session = desktop_for_activity.snapshot().status.active_session_id;
                 let approvals = runtime_for_activity
                     .approvals_list(harness_control_protocol::ApprovalsListParams::default())
                     .map(|result| result.items)
                     .map_err(|_| ());
-                desktop_for_activity.handle_activity(&handle_for_activity, event, approvals);
+                desktop_for_activity.handle_activity(session.as_deref(), event, approvals);
                 // Approval activity changes the authoritative Pending
                 // projection without necessarily changing Harness lifecycle.
                 // Refresh the Tray here so its count cannot remain stale.
@@ -126,6 +128,7 @@ pub fn run() {
                 );
             })?;
             crate::desktop::tray::install(&handle, desktop.clone())?;
+            crate::desktop::tray::observe_pending(&handle, &desktop, &runtime);
             let desktop_for_status = desktop.clone();
             let runtime_for_status = runtime.clone();
             controller.set_status_sink(std::sync::Arc::new(move |status| {
@@ -135,7 +138,8 @@ pub fn run() {
                         .approvals_list(harness_control_protocol::ApprovalsListParams::default())
                         .map(|result| result.items)
                         .map_err(|_| ());
-                    desktop_for_status.bootstrap_approvals(approvals);
+                    desktop_for_status
+                        .bootstrap_approvals(status.active_session_id.as_deref(), approvals);
                 }
                 crate::desktop::tray::refresh(&handle, &desktop_for_status);
             }));

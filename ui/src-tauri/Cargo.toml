@@ -11,6 +11,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+# Opt in only on Windows hosts that can load the native Wry event loop.
+native-tray-tests = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

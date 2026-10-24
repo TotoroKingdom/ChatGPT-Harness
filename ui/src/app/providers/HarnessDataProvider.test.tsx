@@ -105,6 +105,16 @@ function RuntimeProbe() {
   );
 }
 
+function RestartProbe() {
+  const { restartHarness, restartRequired } = useHarnessData();
+  const [result, setResult] = useState("");
+  return <>
+    <output data-testid="restart-result">{result}</output>
+    <output data-testid="restart-required">{String(restartRequired)}</output>
+    <button onClick={() => void restartHarness().then((next) => setResult(next.ok ? "ok" : next.error?.code ?? "error"))}>Restart</button>
+  </>;
+}
+
 describe("HarnessDataProvider activity subscription", () => {
   beforeEach(() => {
     activityListener = undefined;
@@ -248,6 +258,29 @@ describe("HarnessDataProvider runtime rehydration", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("uses the serialized Host restart and permits retry after a restart error", async () => {
+    const config = await client.configGet();
+    vi.spyOn(client, "configGet").mockResolvedValue(config ? { ...config, configRevision: "8" } : config);
+    vi.spyOn(client, "runtimeStatus").mockResolvedValueOnce(runtimeState()).mockResolvedValue(runtimeState({ configRevision: "8" }));
+    vi.spyOn(client, "runtimeProcessStatus").mockResolvedValue({ phase: "running", last_error: null });
+    const ready = { ...client.getHarnessStatus(), lifecycle: "ready" as const, configRevision: "8" };
+    const restart = vi.spyOn(client, "harnessRestart")
+      .mockRejectedValueOnce(new HarnessClientError("error", "Shutdown failed; retry Stop or Restart.", undefined, "RUNTIME_TIMEOUT"))
+      .mockResolvedValue(ready);
+    const stop = vi.spyOn(client, "harnessStop");
+    const start = vi.spyOn(client, "harnessStart");
+    render(<HarnessDataProvider><RestartProbe /></HarnessDataProvider>);
+    await waitFor(() => expect(screen.getByTestId("restart-required")).toHaveTextContent("true"));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    await waitFor(() => expect(screen.getByTestId("restart-result")).toHaveTextContent("RUNTIME_TIMEOUT"));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    await waitFor(() => expect(screen.getByTestId("restart-result")).toHaveTextContent("ok"));
+    expect(screen.getByTestId("restart-required")).toHaveTextContent("false");
+    expect(restart).toHaveBeenCalledTimes(2);
+    expect(stop).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("refreshes Runtime-owned resources after Start succeeds", async () => {

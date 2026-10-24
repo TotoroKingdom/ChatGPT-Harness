@@ -54,4 +54,11 @@ try {
     $stream.Dispose()
 }
 
+# Keep the Host Tray resource in lockstep with the packaged icon. The Tray
+# loader embeds this canonical path, while the Portable/NSIS bundle consumes
+# the generated multi-size set above.
+$canonicalIconPath = Join-Path $uiDirectory "src-tauri\icons\icon.ico"
+Copy-Item -LiteralPath $iconPath -Destination $canonicalIconPath -Force
+
 Write-Output "Generated Portable icons: $output"
+Write-Output "Updated Host Tray icon: $canonicalIconPath"

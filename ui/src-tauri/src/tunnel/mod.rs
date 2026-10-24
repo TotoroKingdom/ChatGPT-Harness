@@ -513,6 +513,34 @@ pub(crate) trait TunnelEventSink: Send + Sync {
     );
 }
 
+/// Snapshot of a Tunnel lifecycle event. The observer is invoked only after
+/// the Tunnel state mutex has been released so Host callbacks may safely query
+/// the manager again (for example while projecting Harness status).
+struct TunnelNotification {
+    observer: Arc<dyn TunnelEventSink>,
+    generation: u64,
+    instance_id: Option<String>,
+    state: TunnelState,
+    health: TunnelHealth,
+    readiness: Option<TunnelReadinessEvidence>,
+    recovery: TunnelRecoveryStatus,
+    error: Option<TunnelProcessError>,
+}
+
+impl TunnelNotification {
+    fn emit(self) {
+        self.observer.tunnel_event(
+            self.generation,
+            self.instance_id.as_deref(),
+            self.state,
+            self.health,
+            self.readiness.as_ref(),
+            &self.recovery,
+            self.error.as_ref(),
+        );
+    }
+}
+
 pub struct TunnelProcessManager {
     inner: Arc<Mutex<TunnelInner>>,
     recovery: Arc<Mutex<RecoveryState>>,
@@ -592,7 +620,7 @@ impl TunnelProcessManager {
     }
 
     pub fn start(&self, launch: TunnelLaunch) -> Result<TunnelStatus, TunnelProcessError> {
-        let _operation = self.lock_operation();
+        let _operation = self.try_manual_operation()?;
         self.start_internal(launch)
     }
 
@@ -1125,16 +1153,21 @@ impl TunnelProcessManager {
                 }),
             );
             let recovery = self.recovery_status();
-            if let Ok(mut inner) = self.lock_inner() {
+            let notification = if let Ok(mut inner) = self.lock_inner() {
                 inner.status.state = TunnelState::Stopping;
                 inner.status.health = TunnelHealth::stopping();
-                self.notify_locked(
+                capture_notification(
                     &inner,
                     Some(&process.instance.instance_id),
                     TunnelState::Stopping,
                     &recovery,
                     None,
-                );
+                )
+            } else {
+                None
+            };
+            if let Some(notification) = notification {
+                notification.emit();
             }
             if let Err(error) = self.stop_process(&process) {
                 if !self.finish_recovery_attempt(generation, token, Some(error.clone())) {
@@ -1231,7 +1264,7 @@ impl TunnelProcessManager {
     }
 
     pub fn stop(&self) -> Result<TunnelStopResult, TunnelProcessError> {
-        let _operation = self.lock_operation();
+        let _operation = self.try_manual_operation()?;
         self.stop_internal()
     }
 
@@ -1261,7 +1294,7 @@ impl TunnelProcessManager {
         &self,
         expected_instance_id: &str,
     ) -> Result<TunnelStopResult, TunnelProcessError> {
-        let _operation = self.lock_operation();
+        let _operation = self.try_manual_operation()?;
         self.stop_instance_internal(expected_instance_id)
     }
 
@@ -1270,7 +1303,7 @@ impl TunnelProcessManager {
         expected_instance_id: &str,
     ) -> Result<TunnelStopResult, TunnelProcessError> {
         let recovery = self.recovery_status();
-        let process = {
+        let (process, notification) = {
             let mut inner = self.lock_inner()?;
             match inner.status.state {
                 TunnelState::Stopped => {
@@ -1298,15 +1331,18 @@ impl TunnelProcessManager {
             inner.status.state = TunnelState::Stopping;
             inner.status.health = TunnelHealth::stopping();
             inner.status.last_error = None;
-            self.notify_locked(
+            let notification = capture_notification(
                 &inner,
                 Some(expected_instance_id),
                 TunnelState::Stopping,
                 &recovery,
                 None,
             );
-            process
+            (process, notification)
         };
+        if let Some(notification) = notification {
+            notification.emit();
+        }
         let generation = self.disarm_for_manual_stop();
         self.logger.event(
             "manual_stop_instance_requested",
@@ -1333,7 +1369,7 @@ impl TunnelProcessManager {
     }
 
     pub fn restart(&self, launch: TunnelLaunch) -> Result<TunnelStatus, TunnelProcessError> {
-        let _operation = self.lock_operation();
+        let _operation = self.try_manual_operation()?;
         let active_instance_id = {
             let inner = self.lock_inner()?;
             inner
@@ -1460,7 +1496,7 @@ impl TunnelProcessManager {
 
     fn set_failed(&self, instance_id: Option<&str>, error: TunnelProcessError) {
         let recovery = self.recovery_status();
-        if let Ok(mut inner) = self.lock_inner() {
+        let notification = if let Ok(mut inner) = self.lock_inner() {
             if instance_id.is_none()
                 || inner.process.as_ref().is_some_and(|process| {
                     Some(process.instance.instance_id.as_str()) == instance_id
@@ -1470,14 +1506,21 @@ impl TunnelProcessManager {
                 inner.status.health = TunnelHealth::failed();
                 inner.status.last_error = Some(error.clone());
                 inner.status.readiness = None;
-                self.notify_locked(
+                capture_notification(
                     &inner,
                     instance_id,
                     TunnelState::Failed,
                     &recovery,
                     Some(&error),
-                );
+                )
+            } else {
+                None
             }
+        } else {
+            None
+        };
+        if let Some(notification) = notification {
+            notification.emit();
         }
     }
 
@@ -1488,25 +1531,18 @@ impl TunnelProcessManager {
         error: Option<&TunnelProcessError>,
     ) {
         let recovery = self.recovery_status();
-        if let Ok(inner) = self.lock_inner() {
-            self.notify_locked(&inner, instance_id, state, &recovery, error);
+        let notification = self
+            .lock_inner()
+            .ok()
+            .and_then(|inner| capture_notification(&inner, instance_id, state, &recovery, error));
+        if let Some(notification) = notification {
+            notification.emit();
         }
-    }
-
-    fn notify_locked(
-        &self,
-        inner: &TunnelInner,
-        instance_id: Option<&str>,
-        state: TunnelState,
-        recovery: &TunnelRecoveryStatus,
-        error: Option<&TunnelProcessError>,
-    ) {
-        notify_inner(inner, instance_id, state, recovery, error);
     }
 
     fn notify_recovery(&self) {
         let recovery = self.recovery_status();
-        if let Ok(inner) = self.lock_inner() {
+        let notification = self.lock_inner().ok().and_then(|inner| {
             let instance_id = inner
                 .process
                 .as_ref()
@@ -1518,13 +1554,16 @@ impl TunnelProcessManager {
                         .as_ref()
                         .map(|instance| instance.instance_id.as_str())
                 });
-            notify_inner(
+            capture_notification(
                 &inner,
                 instance_id,
                 inner.status.state,
                 &recovery,
                 inner.status.last_error.as_ref(),
-            );
+            )
+        });
+        if let Some(notification) = notification {
+            notification.emit();
         }
     }
 
@@ -1595,6 +1634,14 @@ impl TunnelProcessManager {
         drop(recovery);
         self.notify_recovery();
         true
+    }
+
+    fn try_manual_operation(&self) -> Result<MutexGuard<'_, ()>, TunnelProcessError> {
+        self.operation.try_lock().map_err(|_| {
+            TunnelProcessError::conflict(
+                "Another Tunnel operation is in progress. Retry Stop or Restart after it finishes.",
+            )
+        })
     }
 
     fn lock_operation(&self) -> MutexGuard<'_, ()> {
@@ -1829,7 +1876,8 @@ fn spawn_readiness_watcher(
                 }
                 let recovery = manager.recovery_status();
                 let mut current_after_probe = false;
-                if let Ok(mut inner) = manager.inner.lock() {
+                let mut changed_after_probe = false;
+                let notification = if let Ok(mut inner) = manager.inner.lock() {
                     if !matches!(
                         inner.status.state,
                         TunnelState::Stopping | TunnelState::Stopped
@@ -1846,29 +1894,41 @@ fn spawn_readiness_watcher(
                         inner.status.readiness = Some(evidence.clone());
                         inner.status.last_error = next_error.clone();
                         if changed {
-                            notify_inner(
+                            changed_after_probe = true;
+                            capture_notification(
                                 &inner,
                                 Some(&process.instance.instance_id),
                                 next_state,
                                 &recovery,
                                 next_error.as_ref(),
-                            );
-                            manager.logger.event(
-                                "readiness_transition",
-                                serde_json::json!({
-                                    "generation": recovery_generation,
-                                    "instance_id": process.instance.instance_id,
-                                    "state": next_state,
-                                    "health": next_health,
-                                    "error_code": next_error.as_ref().map(|error| error.code.as_str()),
-                                    "error": next_error.as_ref().map(|error| error.message.as_str()),
-                                }),
-                            );
+                            )
+                        } else {
+                            None
                         }
+                    } else {
+                        None
                     }
-                }
+                } else {
+                    None
+                };
                 if !current_after_probe {
                     return;
+                }
+                if let Some(notification) = notification {
+                    notification.emit();
+                }
+                if changed_after_probe {
+                    manager.logger.event(
+                        "readiness_transition",
+                        serde_json::json!({
+                            "generation": recovery_generation,
+                            "instance_id": process.instance.instance_id,
+                            "state": next_state,
+                            "health": next_health,
+                            "error_code": next_error.as_ref().map(|error| error.code.as_str()),
+                            "error": next_error.as_ref().map(|error| error.message.as_str()),
+                        }),
+                    );
                 }
                 if next_state == TunnelState::Ready {
                     manager.note_recovered(
@@ -1937,7 +1997,8 @@ fn spawn_readiness_watcher(
                 let previous_health = manager.inner.lock().ok().map(|inner| inner.status.health);
                 let next_health = TunnelHealth::probe_failed(previous_health.as_ref());
                 let recovery = manager.recovery_status();
-                if let Ok(mut inner) = manager.inner.lock() {
+                let mut changed_after_probe = false;
+                let notification = if let Ok(mut inner) = manager.inner.lock() {
                     if matches!(
                         inner.status.state,
                         TunnelState::Stopping | TunnelState::Stopped
@@ -1953,26 +2014,36 @@ fn spawn_readiness_watcher(
                     inner.status.health = next_health;
                     inner.status.last_error = Some(error.clone());
                     if changed {
-                        notify_inner(
+                        changed_after_probe = true;
+                        capture_notification(
                             &inner,
                             Some(&process.instance.instance_id),
                             next_state,
                             &recovery,
                             Some(&error),
-                        );
-                        manager.logger.event(
-                            "health_probe_failed",
-                            serde_json::json!({
-                                "generation": recovery_generation,
-                                "instance_id": process.instance.instance_id,
-                                "consecutive_failures": failures,
-                                "state": next_state,
-                                "health": next_health,
-                                "error_code": error.code,
-                                "error": error.message,
-                            }),
-                        );
+                        )
+                    } else {
+                        None
                     }
+                } else {
+                    None
+                };
+                if let Some(notification) = notification {
+                    notification.emit();
+                }
+                if changed_after_probe {
+                    manager.logger.event(
+                        "health_probe_failed",
+                        serde_json::json!({
+                            "generation": recovery_generation,
+                            "instance_id": process.instance.instance_id,
+                            "consecutive_failures": failures,
+                            "state": next_state,
+                            "health": next_health,
+                            "error_code": error.code,
+                            "error": error.message,
+                        }),
+                    );
                 }
                 if failures >= READINESS_LOSS_TOLERANCE && !health_recovery_requested {
                     health_recovery_requested = true;
@@ -2270,6 +2341,7 @@ fn spawn_exit_watcher(
 
         let mut recovery_error = None;
         let mut should_recover = false;
+        let mut notification = None;
         let recovery = manager.recovery_status();
         if let Ok(mut inner) = manager.inner.lock() {
             let is_current = inner
@@ -2303,7 +2375,7 @@ fn spawn_exit_watcher(
                     last_error: error.clone(),
                     recovery: TunnelRecoveryStatus::default(),
                 };
-                notify_inner(
+                notification = capture_notification(
                     &inner,
                     Some(&process.instance.instance_id),
                     inner.status.state,
@@ -2313,6 +2385,16 @@ fn spawn_exit_watcher(
                 should_recover = !stopped_by_manager;
                 recovery_error = error;
             }
+        }
+        // Publish process termination before invoking the Host observer. The
+        // stop path must not wait for a callback that re-enters Tunnel state.
+        let (lock, wake) = &*process.exited;
+        if let Ok(mut exited) = lock.lock() {
+            *exited = true;
+            wake.notify_all();
+        }
+        if let Some(notification) = notification {
+            notification.emit();
         }
         manager.logger.event(
             "process_exited",
@@ -2341,32 +2423,26 @@ fn spawn_exit_watcher(
             }
         }
         remove_health_file(&process.health_url_file);
-        let (lock, wake) = &*process.exited;
-        if let Ok(mut exited) = lock.lock() {
-            *exited = true;
-            wake.notify_all();
-        }
     });
 }
 
-fn notify_inner(
+fn capture_notification(
     inner: &TunnelInner,
     instance_id: Option<&str>,
     state: TunnelState,
     recovery: &TunnelRecoveryStatus,
     error: Option<&TunnelProcessError>,
-) {
-    if let Some(observer) = &inner.observer {
-        observer.tunnel_event(
-            inner.status.generation,
-            instance_id,
-            state,
-            inner.status.health,
-            inner.status.readiness.as_ref(),
-            recovery,
-            error,
-        );
-    }
+) -> Option<TunnelNotification> {
+    Some(TunnelNotification {
+        observer: inner.observer.clone()?,
+        generation: inner.status.generation,
+        instance_id: instance_id.map(str::to_owned),
+        state,
+        health: inner.status.health,
+        readiness: inner.status.readiness.clone(),
+        recovery: recovery.clone(),
+        error: error.cloned(),
+    })
 }
 
 fn wait_for_exit(exited: &Arc<(Mutex<bool>, Condvar)>, timeout: Duration) -> bool {
@@ -3066,6 +3142,79 @@ mod tests {
             let _ = stream.write_all(response.as_bytes());
         });
         (format!("http://{address}"), healthy)
+    }
+
+    struct ReentrantTunnelObserver {
+        manager: TunnelProcessManager,
+        returned: std::sync::mpsc::Sender<()>,
+    }
+
+    #[test]
+    fn manual_stop_returns_conflict_during_recovery_and_allows_retry() {
+        let manager = TunnelProcessManager::new();
+        let recovery = manager.lock_operation();
+        assert_eq!(manager.stop().unwrap_err().code, "LIFECYCLE_CONFLICT");
+        drop(recovery);
+        assert!(!manager.stop().expect("retry stop").accepted);
+    }
+
+    impl TunnelEventSink for ReentrantTunnelObserver {
+        fn tunnel_event(
+            &self,
+            _generation: u64,
+            _instance_id: Option<&str>,
+            _state: TunnelState,
+            _health: TunnelHealth,
+            _readiness: Option<&TunnelReadinessEvidence>,
+            _recovery: &TunnelRecoveryStatus,
+            _error: Option<&TunnelProcessError>,
+        ) {
+            let _ = self.manager.status();
+            let _ = self.returned.send(());
+        }
+    }
+
+    #[test]
+    fn tunnel_event_observer_can_reenter_manager_without_deadlock() {
+        let manager = TunnelProcessManager::new();
+        let (returned_sender, returned_receiver) = std::sync::mpsc::channel();
+        manager.set_event_sink(Arc::new(ReentrantTunnelObserver {
+            manager: manager.clone(),
+            returned: returned_sender,
+        }));
+
+        let dispatch = manager.clone();
+        let dispatch_thread = thread::spawn(move || {
+            dispatch.notify(None, TunnelState::Stopping, None);
+        });
+        assert!(
+            returned_receiver
+                .recv_timeout(Duration::from_millis(250))
+                .is_ok(),
+            "Tunnel event observer callback deadlocked on tunnel.inner"
+        );
+        dispatch_thread
+            .join()
+            .expect("tunnel event dispatch thread");
+    }
+
+    #[test]
+    fn tunnel_stop_with_reentrant_observer_completes() {
+        let manager = sleeping_manager();
+        let (returned_sender, returned_receiver) = std::sync::mpsc::channel();
+        manager.set_event_sink(Arc::new(ReentrantTunnelObserver {
+            manager: manager.clone(),
+            returned: returned_sender,
+        }));
+        manager.start(launch()).expect("Tunnel start");
+        assert!(manager.stop().expect("Tunnel stop").accepted);
+        wait_for_state(&manager, TunnelState::Stopped);
+        assert!(
+            returned_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .is_ok(),
+            "Tunnel lifecycle observer did not run during stop"
+        );
     }
 
     #[test]

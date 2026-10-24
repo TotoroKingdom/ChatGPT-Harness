@@ -143,11 +143,17 @@ pub fn ui_language_set(
 #[tauri::command]
 pub fn desktop_preferences_set(
     app: AppHandle,
+    coordinator: State<'_, DesktopLifecycleCoordinator>,
     patch: DesktopPreferencesPatch,
 ) -> Result<AppConfig, ControlError> {
-    store(&app)?
+    let config = store(&app)?
         .set_desktop_preferences(patch)
-        .map_err(Into::into)
+        .map_err(ControlError::from)?;
+    // Preference changes must take effect while the window is hidden. Refresh
+    // the existing Tray projection; this never creates a second approval state
+    // and lets a newly enabled reminder observe the authoritative count.
+    crate::desktop::tray::refresh(&app, &coordinator);
+    Ok(config)
 }
 
 #[tauri::command]
@@ -160,11 +166,8 @@ pub fn desktop_continue_in_background(
 }
 
 #[tauri::command]
-pub fn desktop_quit(
-    app: AppHandle,
-    coordinator: State<'_, DesktopLifecycleCoordinator>,
-) -> Result<(), ControlError> {
-    coordinator.quit(&app)
+pub async fn desktop_quit(app: AppHandle) -> Result<(), ControlError> {
+    lifecycle_in_background(move || app.state::<DesktopLifecycleCoordinator>().quit(&app)).await
 }
 
 #[tauri::command]
@@ -653,19 +656,19 @@ pub fn harness_start_eligibility(
 }
 
 #[tauri::command]
-pub fn harness_start(
-    app: AppHandle,
-    controller: State<'_, HarnessController>,
-    state: State<'_, Mutex<BackendState>>,
-    desktop: State<'_, DesktopLifecycleCoordinator>,
-) -> Result<HarnessStatus, ControlError> {
-    if !desktop.start_allowed() {
-        return Err(ControlError {
-            code: "LIFECYCLE_CONFLICT".into(),
-            message: "Harness is already running, changing state, or quitting.".into(),
-        });
-    }
-    controller.start(&app, &state)
+pub async fn harness_start(app: AppHandle) -> Result<HarnessStatus, ControlError> {
+    lifecycle_in_background(move || {
+        let desktop = app.state::<DesktopLifecycleCoordinator>();
+        if !desktop.start_allowed() {
+            return Err(ControlError {
+                code: "LIFECYCLE_CONFLICT".into(),
+                message: "Harness is already running, changing state, or quitting.".into(),
+            });
+        }
+        app.state::<HarnessController>()
+            .start(&app, &app.state::<Mutex<BackendState>>())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -674,24 +677,36 @@ pub fn harness_status(controller: State<'_, HarnessController>) -> HarnessStatus
 }
 
 #[tauri::command]
-pub fn harness_stop(
-    app: AppHandle,
-    controller: State<'_, HarnessController>,
-    desktop: State<'_, DesktopLifecycleCoordinator>,
-) -> Result<HarnessStatus, ControlError> {
-    desktop.mark_intentional_stop();
-    controller.stop(&app)
+pub async fn harness_stop(app: AppHandle) -> Result<HarnessStatus, ControlError> {
+    lifecycle_in_background(move || {
+        app.state::<DesktopLifecycleCoordinator>()
+            .mark_intentional_stop();
+        app.state::<HarnessController>().stop(&app)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn harness_restart(
-    app: AppHandle,
-    controller: State<'_, HarnessController>,
-    state: State<'_, Mutex<BackendState>>,
-    desktop: State<'_, DesktopLifecycleCoordinator>,
-) -> Result<HarnessStatus, ControlError> {
-    desktop.mark_intentional_stop();
-    controller.restart(&app, &state)
+pub async fn harness_restart(app: AppHandle) -> Result<HarnessStatus, ControlError> {
+    lifecycle_in_background(move || {
+        app.state::<DesktopLifecycleCoordinator>()
+            .mark_intentional_stop();
+        app.state::<HarnessController>()
+            .restart(&app, &app.state::<Mutex<BackendState>>())
+    })
+    .await
+}
+
+async fn lifecycle_in_background<T: Send + 'static>(
+    operation: impl FnOnce() -> Result<T, ControlError> + Send + 'static,
+) -> Result<T, ControlError> {
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|_| ControlError {
+            code: "HARNESS_LIFECYCLE_FAILED".into(),
+            message: "Harness lifecycle worker failed. Refresh status and retry Stop or Restart."
+                .into(),
+        })?
 }
 
 #[cfg(test)]
@@ -700,6 +715,27 @@ mod validation_tests {
     use harness_control_protocol::{
         PolicyConfig, SecurityConfig, ToolConfig, TunnelConfig, UiConfig, WorkspaceConfig,
     };
+
+    #[test]
+    fn lifecycle_worker_runs_off_the_calling_thread_and_preserves_retryable_errors() {
+        let caller = std::thread::current().id();
+        tauri::async_runtime::block_on(async move {
+            let worker = lifecycle_in_background(|| Ok(std::thread::current().id()))
+                .await
+                .expect("background lifecycle worker");
+            assert_ne!(caller, worker);
+            let failed = lifecycle_in_background(|| {
+                Err::<(), _>(ControlError {
+                    code: "RUNTIME_TIMEOUT".into(),
+                    message: "Shutdown timed out. Retry Stop.".into(),
+                })
+            })
+            .await
+            .unwrap_err();
+            assert_eq!(failed.code, "RUNTIME_TIMEOUT");
+            assert_eq!(lifecycle_in_background(|| Ok(42)).await.unwrap(), 42);
+        });
+    }
 
     fn valid_config(directory: &std::path::Path) -> AppConfig {
         AppConfig {

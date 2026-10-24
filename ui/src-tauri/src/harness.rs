@@ -9,7 +9,7 @@ use crate::{
 };
 use harness_control_protocol::{AppConfig, SecurityMode, StartEligibility, StartEligibilityStatus};
 use serde::Serialize;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -219,21 +219,13 @@ impl HarnessController {
         app: &AppHandle,
         secrets: &Mutex<crate::commands::BackendState>,
     ) -> Result<HarnessStatus, crate::commands::ControlError> {
-        let _operation = self
-            .shared
-            .operation
-            .lock()
-            .map_err(|_| lifecycle_error("Harness lifecycle state is unavailable."))?;
+        let _operation = self.lock_operation()?;
         self.attach_app(app);
         self.start_locked(app, secrets)
     }
 
     pub fn stop(&self, app: &AppHandle) -> Result<HarnessStatus, crate::commands::ControlError> {
-        let _operation = self
-            .shared
-            .operation
-            .lock()
-            .map_err(|_| lifecycle_error("Harness lifecycle state is unavailable."))?;
+        let _operation = self.lock_operation()?;
         self.attach_app(app);
         self.stop_locked(app)
     }
@@ -243,11 +235,7 @@ impl HarnessController {
         app: &AppHandle,
         secrets: &Mutex<crate::commands::BackendState>,
     ) -> Result<HarnessStatus, crate::commands::ControlError> {
-        let _operation = self
-            .shared
-            .operation
-            .lock()
-            .map_err(|_| lifecycle_error("Harness lifecycle state is unavailable."))?;
+        let _operation = self.lock_operation()?;
         self.attach_app(app);
         let stopped = self.stop_locked(app)?;
         if stopped.lifecycle != HarnessLifecycle::Stopped {
@@ -258,11 +246,30 @@ impl HarnessController {
         self.start_locked(app, secrets)
     }
 
+    fn lock_operation(&self) -> Result<MutexGuard<'_, ()>, crate::commands::ControlError> {
+        self.shared.operation.try_lock().map_err(|error| match error {
+            TryLockError::WouldBlock => crate::commands::ControlError {
+                code: "LIFECYCLE_CONFLICT".into(),
+                message: "Another Harness operation is in progress. Wait for it to finish, then retry.".into(),
+            },
+            TryLockError::Poisoned(_) => lifecycle_error("Harness lifecycle state is unavailable."),
+        })
+    }
+
     fn start_locked(
         &self,
         app: &AppHandle,
         secrets: &Mutex<crate::commands::BackendState>,
     ) -> Result<HarnessStatus, crate::commands::ControlError> {
+        if app
+            .try_state::<crate::desktop::DesktopLifecycleCoordinator>()
+            .is_some_and(|desktop| desktop.snapshot().state.app_quitting)
+        {
+            return Err(crate::commands::ControlError {
+                code: "LIFECYCLE_CONFLICT".into(),
+                message: "Application shutdown is in progress; Harness cannot start.".into(),
+            });
+        }
         let eligibility = self.start_eligibility(app, secrets)?;
         if !eligibility.can_start {
             return Err(lifecycle_error(eligibility.message));
@@ -443,10 +450,17 @@ impl HarnessController {
     }
 
     fn emit_status(&self, status: &HarnessStatus) {
-        if let Ok(sink) = self.shared.status_sink.lock() {
-            if let Some(sink) = sink.as_ref() {
-                sink(status);
-            }
+        // Status sinks may synchronously query Runtime/Tunnel to refresh
+        // authoritative projections. Clone the callback while protected, but
+        // never hold status_sink across that external call.
+        let sink = self
+            .shared
+            .status_sink
+            .lock()
+            .ok()
+            .and_then(|sink| sink.clone());
+        if let Some(sink) = sink {
+            sink(status);
         }
     }
 
@@ -828,6 +842,46 @@ mod tests {
 
     fn controller() -> HarnessController {
         HarnessController::new(RuntimeSupervisor::new(), TunnelProcessManager::new())
+    }
+
+    #[test]
+    fn concurrent_lifecycle_operation_returns_conflict_and_can_retry() {
+        let controller = controller();
+        let held = controller.lock_operation().expect("first operation");
+        assert_eq!(
+            controller.lock_operation().unwrap_err().code,
+            "LIFECYCLE_CONFLICT"
+        );
+        drop(held);
+        assert!(
+            controller.lock_operation().is_ok(),
+            "retry after operation completes"
+        );
+    }
+
+    #[test]
+    fn status_sink_can_reenter_controller_without_deadlock() {
+        let controller = controller();
+        let nested = controller.clone();
+        controller.set_status_sink(Arc::new(move |_| {
+            // Replacing a sink is a harmless Host-side reconfiguration, but
+            // it must not self-deadlock when emit_status is dispatching.
+            nested.set_status_sink(Arc::new(|_| {}));
+        }));
+        let status = controller.status();
+        let dispatch = controller.clone();
+        let (done_sender, done_receiver) = std::sync::mpsc::channel();
+        let dispatch_thread = std::thread::spawn(move || {
+            dispatch.emit_status(&status);
+            let _ = done_sender.send(());
+        });
+        assert!(
+            done_receiver
+                .recv_timeout(std::time::Duration::from_millis(250))
+                .is_ok(),
+            "Harness status sink callback deadlocked on status_sink"
+        );
+        dispatch_thread.join().expect("status dispatch thread");
     }
 
     fn readiness(

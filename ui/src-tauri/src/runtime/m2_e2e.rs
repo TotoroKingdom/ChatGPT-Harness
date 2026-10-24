@@ -295,7 +295,13 @@ impl RuntimeProcess {
         config: &AppConfig,
         generation: &str,
     ) -> E2eResult<(Self, McpClient)> {
-        let mut child = Command::new(binary)
+        let mut command = Command::new(binary);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

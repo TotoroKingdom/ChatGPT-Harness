@@ -275,14 +275,21 @@ impl RuntimeSupervisor {
     }
 
     pub(crate) fn set_activity_sink(&self, sink: Arc<dyn Fn(ActivityEvent) + Send + Sync>) {
+        // Keep one ordered Host worker for activity callbacks. Spawning one
+        // thread per Runtime event allowed ApprovalRequested/Resolved
+        // refreshes to race and could regress the Tray projection to an older
+        // Pending list. The unbounded channel send is non-blocking for the
+        // protocol reader; only the worker performs the potentially blocking
+        // Host/Runtime refresh.
+        let (sender, receiver) = mpsc::channel::<ActivityEvent>();
+        thread::spawn(move || {
+            for event in receiver {
+                sink(event);
+            }
+        });
         if let Ok(mut inner) = self.inner.lock() {
-            // Activity notifications are emitted by the Runtime protocol
-            // reader.  Never let a Host-side refresh or notification callback
-            // block that reader, otherwise its synchronous approvals.list
-            // request cannot be routed back to the waiting caller.
             inner.activity_sink = Some(Arc::new(move |event| {
-                let sink = sink.clone();
-                thread::spawn(move || sink(event));
+                let _ = sender.send(event);
             }));
         }
     }
@@ -478,7 +485,15 @@ impl RuntimeSupervisor {
         let (generation, process) = {
             let mut inner = self.lock_inner()?;
             match inner.process_status.phase {
-                RuntimeProcessPhase::Stopped | RuntimeProcessPhase::Crashed => {
+                RuntimeProcessPhase::Stopped => {
+                    return Ok(RuntimeStopResult { accepted: false });
+                }
+                RuntimeProcessPhase::Crashed
+                    if inner
+                        .process
+                        .as_ref()
+                        .is_none_or(|process| !process_is_alive(process)) =>
+                {
                     return Ok(RuntimeStopResult { accepted: false });
                 }
                 RuntimeProcessPhase::Starting => {
@@ -487,7 +502,7 @@ impl RuntimeSupervisor {
                 RuntimeProcessPhase::Stopping => {
                     return Err(SupervisorError::conflict("Runtime is already stopping."));
                 }
-                RuntimeProcessPhase::Running => {
+                RuntimeProcessPhase::Running | RuntimeProcessPhase::Crashed => {
                     let process = inner.process.as_ref().ok_or_else(|| {
                         SupervisorError::disconnected("Runtime process is not available.")
                     })?;
@@ -943,10 +958,17 @@ impl RuntimeSupervisor {
         phase: RuntimeProcessPhase,
         error: Option<&SupervisorError>,
     ) {
-        if let Ok(inner) = self.inner.lock() {
-            if let Some(observer) = &inner.observer {
-                observer.runtime_event(generation, phase, error);
-            }
+        // Clone the observer handle while protected, then invoke user/Host
+        // code after releasing supervisor.inner. Host status callbacks may
+        // synchronously query Runtime (for example approvals.list); invoking
+        // them under this lock creates a self-deadlock during Restart/Stop.
+        let observer = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.observer.clone());
+        if let Some(observer) = observer {
+            observer.runtime_event(generation, phase, error);
         }
     }
 }
@@ -1166,18 +1188,26 @@ fn spawn_waiter(
                 status.as_ref(),
             )
         });
-        if let Some((phase, error)) = transition {
-            sink.emit_process(phase, error.as_ref());
-            if let Ok(supervisor) = inner.lock() {
-                if let Some(observer) = &supervisor.observer {
-                    observer.runtime_event(generation, phase, error.as_ref());
-                }
-            }
-        }
+
+        // Publish the terminal supervisor state and signal process exit before
+        // invoking the Host observer. Observer callbacks are external code
+        // and may block while refreshing UI or authoritative Runtime state;
+        // the bounded stop path must be able to return without waiting on it.
         let (lock, cvar) = &*exited;
         if let Ok(mut completed) = lock.lock() {
             *completed = true;
             cvar.notify_all();
+        }
+
+        if let Some((phase, error)) = transition {
+            sink.emit_process(phase, error.as_ref());
+            let observer = inner
+                .lock()
+                .ok()
+                .and_then(|supervisor| supervisor.observer.clone());
+            if let Some(observer) = observer {
+                observer.runtime_event(generation, phase, error.as_ref());
+            }
         }
     });
 }
@@ -1393,6 +1423,149 @@ mod tests {
             "timed out waiting for {phase:?}; current status: {:?}",
             supervisor.process_status()
         );
+    }
+
+    struct ReentrantObserver {
+        supervisor: RuntimeSupervisor,
+        returned: std::sync::mpsc::Sender<()>,
+    }
+
+    impl RuntimeEventSink for ReentrantObserver {
+        fn runtime_event(
+            &self,
+            _generation: uuid::Uuid,
+            _phase: RuntimeProcessPhase,
+            _error: Option<&SupervisorError>,
+        ) {
+            // Host observers are allowed to query the same supervisor from a
+            // status callback (for example, to refresh the authoritative
+            // approval projection). This must not run while supervisor.inner
+            // is held by the event dispatcher.
+            let _ = self.supervisor.process_status();
+            let _ = self.returned.send(());
+        }
+    }
+
+    #[test]
+    fn runtime_event_observer_can_reenter_supervisor_without_deadlock() {
+        let supervisor = RuntimeSupervisor::new();
+        let (returned_sender, returned_receiver) = std::sync::mpsc::channel();
+        supervisor.set_event_sink(Arc::new(ReentrantObserver {
+            supervisor: supervisor.clone(),
+            returned: returned_sender,
+        }));
+
+        let dispatch = supervisor.clone();
+        let dispatch_thread = thread::spawn(move || {
+            dispatch.notify_observer(uuid::Uuid::new_v4(), RuntimeProcessPhase::Stopping, None);
+        });
+
+        let returned = returned_receiver
+            .recv_timeout(Duration::from_millis(250))
+            .is_ok();
+        assert!(
+            returned,
+            "Runtime event observer callback deadlocked on supervisor.inner"
+        );
+        dispatch_thread.join().expect("event dispatch thread");
+    }
+
+    #[test]
+    fn runtime_fixture_restart_with_reentrant_observer_completes() {
+        let supervisor = test_supervisor("normal", Duration::from_secs(1));
+        let (returned_sender, _returned_receiver) = std::sync::mpsc::channel();
+        supervisor.set_event_sink(Arc::new(ReentrantObserver {
+            supervisor: supervisor.clone(),
+            returned: returned_sender,
+        }));
+
+        let first = supervisor
+            .start_for_test(&config(1))
+            .expect("first Runtime start");
+        let mut changed = config(2);
+        changed.policies.tool_defaults.write = harness_control_protocol::PolicyDecision::Ask;
+        supervisor.stop_for_test().expect("first Runtime stop");
+        let second = supervisor
+            .start_for_test(&changed)
+            .expect("Runtime restart after policy revision");
+
+        assert_ne!(first.runtime_id, second.runtime_id);
+        assert_eq!(second.config_revision, DecimalU64::new(2));
+        supervisor.stop_for_test().expect("final Runtime stop");
+    }
+
+    #[test]
+    fn failed_cleanup_state_can_retry_stopping_an_owned_live_process() {
+        let supervisor = test_supervisor("normal", Duration::from_secs(1));
+        supervisor
+            .start_for_test(&config(1))
+            .expect("Runtime start");
+        // A failed termination can leave the owned child alive with a Crashed
+        // projection. Stop must retry cleanup rather than treat it as gone.
+        supervisor.inner.lock().unwrap().process_status.phase = RuntimeProcessPhase::Crashed;
+        assert!(supervisor.stop_for_test().expect("retry cleanup").accepted);
+        assert_eq!(
+            supervisor.process_status().phase,
+            RuntimeProcessPhase::Stopped
+        );
+        supervisor
+            .start_for_test(&config(2))
+            .expect("start after cleanup retry");
+        supervisor.stop_for_test().expect("final cleanup");
+    }
+
+    struct BlockingStopObserver {
+        stopped: std::sync::mpsc::Sender<()>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl RuntimeEventSink for BlockingStopObserver {
+        fn runtime_event(
+            &self,
+            _generation: uuid::Uuid,
+            phase: RuntimeProcessPhase,
+            _error: Option<&SupervisorError>,
+        ) {
+            if phase != RuntimeProcessPhase::Stopped {
+                return;
+            }
+            let _ = self.stopped.send(());
+            let _ = self
+                .release
+                .lock()
+                .expect("stop observer release lock")
+                .recv();
+        }
+    }
+
+    #[test]
+    fn runtime_stop_returns_before_blocking_terminal_observer() {
+        let supervisor = test_supervisor("normal", Duration::from_secs(1));
+        let (stopped_sender, stopped_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        supervisor.set_event_sink(Arc::new(BlockingStopObserver {
+            stopped: stopped_sender,
+            release: std::sync::Mutex::new(release_receiver),
+        }));
+        supervisor
+            .start_for_test(&config(1))
+            .expect("Runtime start");
+
+        let stopping = supervisor.clone();
+        let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
+        let stop_thread = thread::spawn(move || {
+            let result = stopping.stop_for_test();
+            let _ = finished_sender.send(result);
+        });
+        stopped_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("terminal observer did not run");
+        let result = finished_receiver
+            .recv_timeout(Duration::from_millis(300))
+            .expect("Runtime stop waited for a blocking observer");
+        assert!(result.is_ok(), "Runtime stop returned an error: {result:?}");
+        release_sender.send(()).expect("release terminal observer");
+        stop_thread.join().expect("stop thread");
     }
 
     fn write_fixture_result<T: Serialize>(
@@ -1616,6 +1789,36 @@ mod tests {
             supervisor.status().unwrap_err().code,
             "RUNTIME_DISCONNECTED"
         );
+    }
+
+    #[test]
+    fn stop_timeout_leaves_runtime_restartable() {
+        let mut supervisor = test_supervisor("ignore_stop", Duration::from_millis(100));
+        supervisor.start_for_test(&config(1)).expect("start");
+
+        let stopped = supervisor.stop_for_test().expect("bounded stop fallback");
+        assert!(stopped.accepted);
+        assert_eq!(
+            supervisor.process_status().phase,
+            RuntimeProcessPhase::Stopped
+        );
+        assert_eq!(
+            supervisor
+                .process_status()
+                .last_error
+                .as_ref()
+                .map(|error| error.code.as_str()),
+            Some("RUNTIME_GRACEFUL_STOP_TIMEOUT")
+        );
+
+        // A failed graceful stop must not leave lifecycle state stuck in
+        // Stopping/Crashed; the next generation can be started normally.
+        set_fixture_mode(&mut supervisor, "normal");
+        let restarted = supervisor
+            .start_for_test(&config(2))
+            .expect("restart after bounded stop failure");
+        assert_eq!(restarted.config_revision, DecimalU64::new(2));
+        supervisor.stop_for_test().expect("final stop");
     }
 
     #[test]

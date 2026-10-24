@@ -522,11 +522,11 @@
     "appearance": "外观",
     "notifications": {
       "title": "后台与通知",
-      "approvalTitle": "审批通知",
-      "approvalHelp": "有新的 Runtime 审批请求等待处理时通知。",
+      "approvalTitle": "审批托盘提醒",
+      "approvalHelp": "有待处理审批时闪烁托盘图标，窗口隐藏后仍会提醒。不发送审批弹出通知。",
       "connectionTitle": "连接通知",
       "connectionHelp": "Ready 连接降级以及恢复时各通知一次。",
-      "fallback": "Windows 可能会阻止系统通知；系统托盘和审批中心仍可使用。",
+      "fallback": "可从托盘菜单或审批中心查看待处理请求。Windows 可能会阻止连接通知。",
       "saved": "通知偏好已保存。"
     },
     "theme": "主题",

@@ -5,11 +5,13 @@ pub mod notifications;
 use crate::{
     commands::{BackendState, ControlError},
     config::{ConfigStore, DesktopPreferencesPatch},
-    harness::{HarnessController, HarnessStatus},
+    harness::{HarnessComponentStatus, HarnessController, HarnessStatus},
 };
 use harness_control_protocol::{ActivityEvent, ActivityEventType, AppConfig, ApprovalRequest};
 use incidents::{format_connection_notification, IncidentCoordinator, IncidentTransition};
-use lifecycle::{close_decision, start_allowed, CloseDecision, DesktopLifecycleState};
+use lifecycle::{
+    close_decision, start_allowed, CloseDecision, DesktopLifecycleState, TrayFlashState,
+};
 use notifications::{
     route_notification_click, ApprovalClickRoute, ApprovalNotificationCoordinator,
 };
@@ -48,6 +50,7 @@ struct DesktopInner {
     lifecycle: DesktopLifecycleState,
     status: HarnessStatus,
     pending_approvals: PendingApprovalCount,
+    tray_flash: TrayFlashState,
     approval_notifications: ApprovalNotificationCoordinator,
     incidents: IncidentCoordinator,
 }
@@ -65,6 +68,7 @@ impl DesktopLifecycleCoordinator {
                 lifecycle: DesktopLifecycleState::default(),
                 status: harness.status(),
                 pending_approvals: PendingApprovalCount::Unavailable,
+                tray_flash: TrayFlashState::default(),
                 approval_notifications: ApprovalNotificationCoordinator::default(),
                 incidents: IncidentCoordinator::default(),
             })),
@@ -101,10 +105,19 @@ impl DesktopLifecycleCoordinator {
             // This is a display projection only; HarnessController remains the
             // lifecycle authority and is queried again for actions.
             let session_changed = inner.status.active_session_id != status.active_session_id;
+            let runtime_became_ready = inner.status.runtime != HarnessComponentStatus::Ready
+                && status.runtime == HarnessComponentStatus::Ready;
             let app_quitting = inner.lifecycle.app_quitting;
             let transition = inner.incidents.observe(&status, app_quitting);
+            if status.runtime != HarnessComponentStatus::Ready {
+                // A cached Pending count is not authoritative after Runtime
+                // loss or while a generation is changing. Stop the Tray
+                // reminder at the same boundary so it cannot outlive truth.
+                inner.pending_approvals = PendingApprovalCount::Unavailable;
+                inner.tray_flash.stop();
+            }
             inner.status = status;
-            return (session_changed, transition);
+            return (session_changed || runtime_became_ready, transition);
         }
         (false, IncidentTransition::None)
     }
@@ -140,24 +153,74 @@ impl DesktopLifecycleCoordinator {
         }
     }
 
-    pub fn bootstrap_approvals(&self, approvals: Result<Vec<ApprovalRequest>, ()>) {
-        let Ok(approvals) = approvals else {
-            self.set_pending_approvals(PendingApprovalCount::Unavailable);
-            return;
-        };
+    pub(crate) fn approval_reminder_enabled(&self, app: &AppHandle) -> bool {
+        app_desktop_config(app).desktop.approval_notifications
+    }
+
+    pub(crate) fn start_tray_flash(&self) -> Option<u64> {
+        self.inner.lock().ok().and_then(|mut inner| {
+            let app_quitting = inner.lifecycle.app_quitting;
+            inner.tray_flash.start(app_quitting)
+        })
+    }
+
+    pub(crate) fn stop_tray_flash(&self) {
         if let Ok(mut inner) = self.inner.lock() {
-            let result = inner.approval_notifications.bootstrap(&approvals);
-            inner.pending_approvals = result.pending_count;
+            inner.tray_flash.stop();
         }
+    }
+
+    pub(crate) fn tray_flash_should_continue(&self, generation: u64) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| {
+                inner.tray_flash.should_continue(
+                    generation,
+                    matches!(
+                        inner.pending_approvals,
+                        PendingApprovalCount::Known(count) if count > 0
+                    ),
+                )
+            })
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn stop_tray_flash_if_current(&self, generation: u64) -> bool {
+        self.inner
+            .lock()
+            .map(|mut inner| {
+                if inner.tray_flash.is_current(generation) {
+                    inner.tray_flash.stop();
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn has_active_tray_flash(&self) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| inner.tray_flash.is_active())
+            .unwrap_or(false)
+    }
+
+    pub fn bootstrap_approvals(
+        &self,
+        session: Option<&str>,
+        approvals: Result<Vec<ApprovalRequest>, ()>,
+    ) {
+        self.apply_approval_refresh(session, approvals, None);
     }
 
     pub fn handle_activity(
         &self,
-        app: &AppHandle,
+        session: Option<&str>,
         event: ActivityEvent,
         approvals: Result<Vec<ApprovalRequest>, ()>,
     ) {
-        if !matches!(
+        if matches!(
             event.event_type,
             ActivityEventType::ApprovalRequested
                 | ActivityEventType::ApprovalResolved
@@ -165,49 +228,39 @@ impl DesktopLifecycleCoordinator {
                 | ActivityEventType::ApprovalExpired
                 | ActivityEventType::ApprovalCancelled
         ) {
-            return;
-        }
-        let Ok(approvals) = approvals else {
-            self.set_pending_approvals(PendingApprovalCount::Unavailable);
-            return;
-        };
-        let notification = {
-            let Ok(mut inner) = self.inner.lock() else {
-                return;
-            };
-            let result = inner
-                .approval_notifications
-                .observe_activity(&event, &approvals);
-            inner.pending_approvals = result.pending_count;
-            result.notification
-        };
-        let Some(notification) = notification else {
-            return;
-        };
-        let preferences = app_desktop_config(app);
-        let app_quitting = self
-            .inner
-            .lock()
-            .map(|inner| inner.lifecycle.app_quitting)
-            .unwrap_or(true);
-        if app_quitting || !preferences.desktop.approval_notifications {
-            return;
-        }
-        let result = app
-            .notification()
-            .builder()
-            .title(notification.title)
-            .body(notification.body)
-            .extra("runtimeId", notification.identity.runtime_id)
-            .extra("requestId", notification.identity.request_id)
-            .show();
-        if result.is_err() {
-            if let Ok(mut inner) = self.inner.lock() {
-                inner.approval_notifications.record_delivery_failure();
-            }
+            self.apply_approval_refresh(session, approvals, Some(&event));
         }
     }
 
+    fn apply_approval_refresh(
+        &self,
+        session: Option<&str>,
+        approvals: Result<Vec<ApprovalRequest>, ()>,
+        event: Option<&ActivityEvent>,
+    ) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        // A query that started before Restart must not overwrite the new
+        // session's projection, including with an old disconnected error.
+        if inner.status.active_session_id.as_deref() != session {
+            return;
+        }
+        if inner.status.runtime != HarnessComponentStatus::Ready || approvals.is_err() {
+            inner.pending_approvals = PendingApprovalCount::Unavailable;
+            inner.tray_flash.stop();
+            return;
+        }
+        let approvals = approvals.expect("successful approval query");
+        let result = match event {
+            Some(event) => inner
+                .approval_notifications
+                .observe_activity(event, &approvals),
+            None => inner.approval_notifications.bootstrap(&approvals),
+        };
+        inner.pending_approvals = result.pending_count;
+        // Reminders use the existing Tray projection; no approval Toast is sent.
+    }
     pub fn handle_notification_click(
         &self,
         app: &AppHandle,
@@ -313,6 +366,7 @@ impl DesktopLifecycleCoordinator {
             tray::refresh(app, self);
             return Err(error);
         }
+        tray::stop_flashing(app, self);
         let _ = app.remove_tray_by_id(tray::TRAY_ID);
         app.exit(0);
         Ok(())
@@ -369,4 +423,92 @@ fn app_desktop_config(app: &AppHandle) -> AppConfig {
         .and_then(|directory| ConfigStore::new(directory).load().ok())
         .flatten()
         .unwrap_or_else(ConfigStore::safe_defaults)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        harness::{HarnessComponentStatus, HarnessErrorSummary},
+        tunnel::{TunnelHealth, TunnelProcessManager, TunnelRecoveryStatus},
+    };
+    fn status(
+        lifecycle: crate::harness::HarnessLifecycle,
+        runtime: HarnessComponentStatus,
+        session: Option<&str>,
+    ) -> HarnessStatus {
+        HarnessStatus {
+            lifecycle,
+            runtime,
+            mcp: runtime,
+            tunnel: runtime,
+            active_session_id: session.map(str::to_owned),
+            config_revision: Some("1".into()),
+            last_error: None::<HarnessErrorSummary>,
+            tunnel_health: TunnelHealth::stopped(),
+            tunnel_readiness: None,
+            tunnel_recovery: TunnelRecoveryStatus::default(),
+        }
+    }
+
+    fn coordinator() -> DesktopLifecycleCoordinator {
+        let harness = HarnessController::new(
+            crate::runtime::RuntimeSupervisor::new(),
+            TunnelProcessManager::new(),
+        );
+        DesktopLifecycleCoordinator::new(harness)
+    }
+
+    #[test]
+    fn late_approval_query_cannot_overwrite_a_new_harness_session() {
+        let coordinator = coordinator();
+        coordinator.observe_status(status(
+            crate::harness::HarnessLifecycle::Ready,
+            HarnessComponentStatus::Ready,
+            Some("new-session"),
+        ));
+        coordinator.set_pending_approvals(PendingApprovalCount::Known(3));
+        coordinator.bootstrap_approvals(Some("old-session"), Ok(vec![]));
+        assert_eq!(
+            coordinator.snapshot().pending_approvals,
+            PendingApprovalCount::Known(3)
+        );
+        coordinator.bootstrap_approvals(Some("old-session"), Err(()));
+        assert_eq!(
+            coordinator.snapshot().pending_approvals,
+            PendingApprovalCount::Known(3)
+        );
+        coordinator.bootstrap_approvals(Some("new-session"), Ok(vec![]));
+        assert_eq!(
+            coordinator.snapshot().pending_approvals,
+            PendingApprovalCount::Known(0)
+        );
+    }
+
+    #[test]
+    fn runtime_loss_invalidates_pending_projection_and_stops_flash_even_with_same_session() {
+        let coordinator = coordinator();
+        coordinator.observe_status(status(
+            crate::harness::HarnessLifecycle::Ready,
+            HarnessComponentStatus::Ready,
+            Some("session-1"),
+        ));
+        coordinator.set_pending_approvals(PendingApprovalCount::Known(1));
+        let generation = coordinator.start_tray_flash().expect("flash started");
+
+        // The Runtime can report loss while the old session id is still
+        // present. The Host must invalidate the cached Pending count anyway.
+        coordinator.observe_status(status(
+            crate::harness::HarnessLifecycle::Degraded,
+            HarnessComponentStatus::Stopped,
+            Some("session-1"),
+        ));
+        let snapshot = coordinator.snapshot();
+        assert_eq!(
+            snapshot.pending_approvals,
+            PendingApprovalCount::Unavailable
+        );
+        assert!(!coordinator.tray_flash_should_continue(generation));
+        assert!(!coordinator.has_active_tray_flash());
+    }
 }

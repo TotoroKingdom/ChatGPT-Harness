@@ -522,11 +522,11 @@
     "appearance": "Appearance",
     "notifications": {
       "title": "Background & notifications",
-      "approvalTitle": "Approval notifications",
-      "approvalHelp": "Notify when a new Runtime approval is pending.",
+      "approvalTitle": "Approval Tray reminder",
+      "approvalHelp": "Flash the Tray icon while approvals are pending, including when the window is hidden. No approval pop-up notifications are sent.",
       "connectionTitle": "Connection notifications",
       "connectionHelp": "Notify once when a Ready connection degrades and once when it recovers.",
-      "fallback": "Windows may block system notifications; Tray and Approval Center remain available.",
+      "fallback": "Review pending requests from the Tray menu or Approval Center. Windows may block connection notifications.",
       "saved": "Notification preferences saved."
     },
     "theme": "Theme",
