@@ -1,6 +1,6 @@
 # M02 SPEC — Startup Performance and One-click Diagnostics
 
-> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)。本目录启动阶段只创建 SPEC / PLAN / TASKS；后续再补齐三份验证/人工验收计划，最终严格保持六文件布局。不得新增独立报告、实验工程、仓库顶级目录或把执行日志写入本目录。  
+> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)。M02 六份里程碑文档现已齐全并在实现前作为实施/验证契约冻结；目录必须继续严格保持六文件布局。不得新增独立报告、实验工程、仓库顶级目录或把执行日志写入本目录。  
 > Status: DRAFT / DESIGN READY — IMPLEMENTATION BLOCKED UNTIL PREVIOUS MILESTONE ACCEPTANCE  
 > Milestone: M02 — Startup Performance and One-click Diagnostics  
 > Scope: P0 F05 Harness Startup Performance + F06 One-click Connection Diagnostics  
