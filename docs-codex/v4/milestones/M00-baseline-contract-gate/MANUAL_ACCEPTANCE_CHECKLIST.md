@@ -1,8 +1,8 @@
 # M00 Manual Acceptance Checklist — As-Is Baseline and Architecture Contract Gate
 
-> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
+> Status: Manual Acceptance NOT EXECUTED — entry blocked by E2E-01/E2E-02; M00 overall BLOCKED; not ACCEPTED / FROZEN
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md  
 > Owner: Human Reviewer  
@@ -25,7 +25,7 @@ The Human Reviewer evaluates:
 - whether the As-Is baseline is understandable and matches observed product behavior;
 - whether authority/security boundaries are unambiguous;
 - whether Evidence/SQLite/Config/Eval POC conclusions are strong enough to guide downstream SPECs;
-- whether reports are truthful about limitations;
+- whether evidence records are truthful about limitations;
 - whether Architecture ADR decisions are acceptable;
 - whether M01/M02/M03 may safely unlock.
 
@@ -56,7 +56,7 @@ Manual Acceptance starts only when:
 - 评测可行性结论（对话交付，不自动新建报告） contains the real-model smoke evidence.
 - no required E2E is BLOCKED/INCONCLUSIVE.
 - candidate build/commit is fixed.
-- cleanup report is available.
+- cleanup evidence is available in the existing records.
 
 If any required automated layer is FAIL/BLOCKED/INCONCLUSIVE:
 
@@ -65,6 +65,8 @@ Manual Acceptance = BLOCKED
 ~~~
 
 Do not compensate with subjective approval.
+
+Current entry evaluation: Development Complete = PASS and Integration = PASS (12/12), but E2E-01 and E2E-02 are BLOCKED; therefore the E2E exit criteria are not satisfied and Manual Acceptance is NOT EXECUTED. E2E-03 = PASS does not remove those blockers.
 
 ---
 
@@ -134,7 +136,7 @@ Using the acceptance build:
 - [ ] M00-E2E-01 shows a real external ChatGPT tool call.
 - [ ] The call crossed Tunnel to the recorded Runtime candidate.
 - [ ] The Workspace result is correct.
-- [ ] The report does not falsely call current Activity “V4 durable History/Trace”.
+- [ ] The evidence does not falsely call current Activity “V4 durable History/Trace”.
 
 **Manual verdict M00-MAN-01:** PASS / FAIL / BLOCKED  
 Notes:
@@ -158,7 +160,7 @@ Confirm:
 - [ ] Policy DENY is distinct from executor failure.
 - [ ] Tool success is not described as Agent task success.
 - [ ] Sensitive fields are allowlisted/minimized, not “log everything then redact later”.
-- [ ] Physical paths/raw file body/raw env/raw unrestricted argv/stdout/stderr/secrets are not present in evidence fixtures/reports.
+- [ ] Physical paths/raw file body/raw env/raw unrestricted argv/stdout/stderr/secrets are not present in evidence fixtures/evidence records.
 - [ ] Historical approval/session evidence is data only.
 - [ ] No evidence/History object can restore Pending Approval, Session Grant or ExecutionPermit.
 - [ ] POC/evidence failure cannot produce an ALLOW result.
@@ -190,7 +192,7 @@ From SQLite 验证结论（对话交付，不自动新建报告） confirm:
 - [ ] failed migration preserves diagnosable source DB.
 - [ ] history records cannot reconstruct live authorization.
 - [ ] POC DB lived only in disposable/temp paths.
-- [ ] report clearly states production M03 DDL/retention/query implementation is still future work.
+- [ ] execution evidence clearly states production M03 DDL/retention/query implementation is still future work.
 
 ### 6.2 Config v2→v3 contract review
 
@@ -200,7 +202,7 @@ Confirm:
 - [ ] M00 did not make current ConfigStore write v3.
 - [ ] representative v2 fields are preserved in candidate migration contract.
 - [ ] SecretReference remains opaque.
-- [ ] raw API key is absent from fixtures/reports.
+- [ ] raw API key is absent from fixtures/evidence records.
 - [ ] future host-only desktop fields remain outside RuntimeConfigSnapshot.
 - [ ] future history settings do not become authorization state.
 - [ ] malformed known values fail rather than silently reset.
@@ -233,7 +235,7 @@ Confirm:
 - [ ] Runtime call outcome is recorded separately.
 - [ ] Final task state is independently graded.
 - [ ] Negative control demonstrates “tool call success” can still yield task failure.
-- [ ] Report does not expose or pretend to know model hidden reasoning.
+- [ ] Evidence record does not expose or pretend to know model hidden reasoning.
 - [ ] Passive production telemetry is not described as Tool selection accuracy.
 - [ ] Cost/usage is only claimed if actually observable with defined semantics.
 - [ ] Limits/cleanup are documented.
@@ -306,23 +308,23 @@ Notes:
 
 ## 9. Final Manual Acceptance Summary
 
-Fill only after M00-MAN-01 through M00-MAN-05.
+Fill PASS/FAIL/BLOCKED only after M00-MAN-01 through M00-MAN-05. If the entry criteria are unmet, record NOT EXECUTED with the blocking prerequisite, as in the current closeout below.
 
 | Manual case | Verdict | Notes/Evidence |
 | --- | --- | --- |
-| M00-MAN-01 |  |  |
-| M00-MAN-02 |  |  |
-| M00-MAN-03 |  |  |
-| M00-MAN-04 |  |  |
-| M00-MAN-05 |  |  |
+| M00-MAN-01 | NOT EXECUTED | Entry criteria not met because M00-E2E-01 is BLOCKED. |
+| M00-MAN-02 | NOT EXECUTED | Manual Acceptance was not started; the E2E entry/exit gate remains blocked. |
+| M00-MAN-03 | NOT EXECUTED | Manual Acceptance was not started; the E2E entry/exit gate remains blocked. |
+| M00-MAN-04 | NOT EXECUTED | Entry criteria not met because M00-E2E-02 is BLOCKED. |
+| M00-MAN-05 | NOT EXECUTED | E2E overall is BLOCKED; no downstream unlock decision was made. |
 
 Automated prerequisite summary:
 
 ~~~text
-Development:
-Integration:
-E2E:
-Cleanup:
+Development: PASS
+Integration: PASS (12/12)
+E2E: BLOCKED (E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS)
+Cleanup: PASS for completed automated layers; Manual Acceptance not executed
 ~~~
 
 ### Final decision
@@ -331,7 +333,7 @@ Choose exactly one:
 
 - [ ] M00 — ACCEPTED / FROZEN
 - [ ] M00 — FAIL
-- [ ] M00 — BLOCKED
+- [x] M00 — BLOCKED
 - [ ] M00 — INCONCLUSIVE
 
 M00 may be ACCEPTED / FROZEN only if:
@@ -351,5 +353,7 @@ When ACCEPTED / FROZEN:
 M01 / M02 / M03 are unlocked.
 M04 remains dependent on M03.
 ~~~
+
+The ACCEPTED / FROZEN branch is not reached. M01/M02/M03 remain locked until E2E-01 and E2E-02 pass and the Human Reviewer executes this checklist.
 
 Acceptance itself must be recorded in 人工验收签认（沿用既有验收清单） and evidence locations in 验收证据定位（沿用既有验收清单）. This checklist is the human sign-off source, not a substitute for those final records.

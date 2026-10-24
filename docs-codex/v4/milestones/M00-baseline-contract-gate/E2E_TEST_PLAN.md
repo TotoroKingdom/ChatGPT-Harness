@@ -1,8 +1,8 @@
 # M00 E2E Test Plan — Baseline Chain, Controlled Eval and Production-Isolation Proof
 
-> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
+> Status: E2E BLOCKED — E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; M00 overall BLOCKED; Manual Acceptance NOT EXECUTED; not ACCEPTED / FROZEN
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Inputs: SPEC.md, PLAN.md, TASKS.md, INTEGRATION_TEST_PLAN.md  
 > Owner: QA/Coding Agent for locally automatable steps; explicitly authorized external execution for ChatGPT/networked model steps  
@@ -52,6 +52,8 @@ M00 = not ACCEPTED
 ~~~
 
 Do not replace it with a mock and mark PASS.
+
+Current E2E entry evaluation: Development Complete = PASS and Integration = PASS (12/12), so the E2E plan was entered. E2E-01 and E2E-02 nevertheless remain BLOCKED because their required real external boundaries were not available; E2E-03 is PASS. Manual Acceptance cannot enter until the E2E exit criteria are satisfied.
 
 ---
 
@@ -187,6 +189,8 @@ No Workspace mutation should remain. Stop only test-owned instances.
 
 **PASS:** the current real external Harness chain is proven on the M00 candidate.
 
+**Current execution verdict: BLOCKED.** No real ChatGPT tool call and no correlated Tunnel `/poll`/`/response`, Runtime `/mcp`, Activity, request-identity or Workspace evidence was produced. Local UI/process, package, Runtime smoke or historical evidence does not substitute for this case.
+
 ---
 
 ### M00-E2E-02 — Real controllable Agent/Model → Eval runner → real Runtime MCP → ground-truth grade
@@ -229,14 +233,14 @@ The model must be allowed to emit real Tool calls through the runner. The runner
 - call travels through the real Runtime MCP path;
 - Runtime outcome is recorded separately from final task outcome;
 - scorer validates final observable state independently;
-- report distinguishes:
+- evidence record distinguishes:
   - tool selection;
   - argument validity;
   - Runtime call outcome;
   - task completion;
   - call count;
   - termination reason;
-- report does not claim hidden reasoning or unobserved candidate tools;
+- evidence record does not claim hidden reasoning or unobserved candidate tools;
 - failure or transport success alone does not determine task success;
 - secrets/credentials are not persisted into repository evidence;
 - test Runtime/Workspace is cleaned after run.
@@ -253,6 +257,8 @@ The scorer must mark task failure.
 - only mocked model/provider executes → BLOCKED for M00 acceptance;
 - network/model unavailable → BLOCKED;
 - too little evidence to distinguish task success → INCONCLUSIVE.
+
+**Current execution verdict: BLOCKED.** No real controllable Agent/Model endpoint, model identity, authorized credential, actual model turn, real Runtime MCP call or independent final-state scorer evidence was available. The deterministic/local adapter remains Integration evidence only and does not satisfy E2E-02.
 
 ---
 
@@ -291,6 +297,8 @@ Also compare 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） with th
 - BLOCKED ADR means M00 cannot pass.
 
 **PASS:** production candidate remains behaviorally isolated from M00-only POCs and all resources clean up.
+
+**Recorded execution verdict: PASS.** This result was previously executed and was deliberately not rerun during the current closeout. Its evidence covered the real release Runtime MCP catalog, read-only fixture correctness, no AppData mutation, graceful Runtime exit and cleanup.
 
 ---
 
@@ -361,4 +369,6 @@ E2E PASS still does not itself mark M00 ACCEPTED/FROZEN.
 
 ## 9. Execution evidence location
 
-Execution results are maintained in E2E 执行结论（对话交付，不自动新建报告） and 验收证据定位（沿用既有验收清单）. This plan retains the frozen criteria only.
+Execution results are maintained in this plan, E2E 执行结论（对话交付，不自动新建报告） and 验收证据定位（沿用既有验收清单）. No standalone execution report or Evidence Index is recreated.
+
+Current result: E2E-01 = BLOCKED, E2E-02 = BLOCKED, E2E-03 = PASS; therefore E2E overall = BLOCKED and Manual Acceptance = NOT EXECUTED.

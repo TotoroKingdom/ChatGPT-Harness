@@ -1,8 +1,8 @@
 # M00 PLAN — As-Is Baseline and Architecture Contract Gate
 
-> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
+> Status: M00 overall BLOCKED — Development Complete PASS; Integration PASS (12/12); E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; Manual Acceptance NOT EXECUTED; not ACCEPTED / FROZEN
 > Input: SPEC.md  
 > Upstream: V4 PRD / Architecture / Roadmap, FROZEN FOR M00  
 > Goal: turn architectural assumptions into executable evidence and a frozen implementation contract for M01+  
@@ -48,10 +48,10 @@ No phase may “solve” a POC failure by silently weakening the upstream Archit
 | live Activity | runtime/src/activity/* + current control/UI projection | do not replace or persist in M00 |
 | config | protocol/src/v1/config.rs + ui/src-tauri/src/config/* | current production schema remains v2 |
 | protocol | protocol/src/v1/* | additive test fixtures only; no protocol/v2 |
-| SQLite verification | reuse existing module-owned verification; independent project requires explicit approval | no production dependency; legacy layout remediation pending |
-| Eval feasibility | reuse existing verification boundaries; independent project requires explicit approval | no production Runtime Agent loop; legacy layout remediation pending |
+| SQLite verification | reuse existing module-owned verification; independent project requires explicit approval | no production dependency; removed standalone POC is not recreated |
+| Eval feasibility | reuse existing verification boundaries; independent project requires explicit approval | no production Runtime Agent loop; removed standalone POC is not recreated |
 | M00 plans | docs-codex/v4/milestones/M00-baseline-contract-gate/ | six engineering and validation plans only |
-| M00 evidence | docs-codex/v4/evidence/M00-baseline-contract-gate/ | reports, decisions and acceptance evidence |
+| M00 evidence | existing six documents, fixtures and dialogue | execution evidence and acceptance state; no standalone report or Evidence Index |
 
 Changing an experiment location requires explicit user approval first; record the agreed location and cleanup plan in the existing SPEC/PLAN and manual checklist. A planning note alone is not authorization.
 
@@ -144,7 +144,7 @@ Prove the storage topology before M03 designs production DDL and APIs.
 
 ### Isolation
 
-Reuse existing module-owned tests where suitable. Do not create a separate crate by default. An independent verification project needs explicit user approval of its necessity, exact location, file scope and cleanup plan. Any approved crate must remain outside production dependencies and have explicit Cargo workspace ownership. Current legacy locations are documented only in the existing manual checklist and remain pending cleanup.
+Reuse existing module-owned tests where suitable. Do not create a separate crate by default. An independent verification project needs explicit user approval of its necessity, exact location, file scope and cleanup plan. Any approved crate must remain outside production dependencies and have explicit Cargo workspace ownership. Historical legacy locations are traceability-only and outside the current acceptance gate; do not recreate or relocate them.
 
 ### POC layers
 
@@ -327,7 +327,7 @@ Also close:
 - no-production-dependency check;
 - temp resource cleanup;
 - local verification commands;
-- evidence index locations;
+- evidence locations in the existing six documents, fixtures and dialogue;
 - documentation cross-links.
 
 If any ADR is REVISED:
@@ -340,7 +340,7 @@ If any ADR is REVISED:
 
 ### Exit
 
-All M00 local development work is complete and ready for execution of the already-frozen Integration/E2E/Manual plans.
+All M00 local development work is complete: M00 Development Complete = PASS. The frozen validation sequence then recorded Integration = PASS (12/12), E2E-03 = PASS, E2E-01 = BLOCKED and E2E-02 = BLOCKED. Manual Acceptance is NOT EXECUTED, so M00 remains BLOCKED and is not ACCEPTED / FROZEN.
 
 ---
 
@@ -398,6 +398,8 @@ Exact commands created by implementation are recorded in TASKS completion/eviden
 
 Formal component Integration, real ChatGPT E2E and Manual acceptance are defined in the already-frozen M00 validation documents. Implementation must satisfy those documents rather than regenerate them after coding.
 
+Current execution closeout: Integration is PASS (12/12); E2E-03 is PASS; E2E-01 and E2E-02 remain BLOCKED for missing real-boundary evidence; Manual Acceptance is NOT EXECUTED. The deleted standalone reports, ADR, Evidence Index and POC trees are not recreated and do not erase the completed Development/Integration results.
+
 ---
 
 ## 12. Development Completion Gate
@@ -415,4 +417,4 @@ Before M00 can enter Integration testing:
 - git diff/checks show only intended files;
 - cleanup has removed temporary DBs, test processes and fixture mutations.
 
-Only then is M00 ready for its Integration/E2E/Manual acceptance sequence.
+The Development Completion Gate was satisfied and Integration was executed as PASS (12/12). The remaining sequence is E2E-01/E2E-02 real-boundary completion, followed by Manual Acceptance; until then M00 remains BLOCKED.

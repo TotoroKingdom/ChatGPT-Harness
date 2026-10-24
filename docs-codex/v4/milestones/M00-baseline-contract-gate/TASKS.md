@@ -1,8 +1,8 @@
 # M00 TASKS — As-Is Baseline and Architecture Contract Gate
 
-> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
+> Status: Development Complete PASS; Integration PASS (12/12); E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; Manual Acceptance NOT EXECUTED; M00 overall BLOCKED and not ACCEPTED / FROZEN
 > Inputs: SPEC.md, PLAN.md, INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md, MANUAL_ACCEPTANCE_CHECKLIST.md  
 > Executor: Codex / Coding Agent  
 > Upstream: V4 planning baseline FROZEN FOR M00  
@@ -253,7 +253,7 @@ Use exact filters that exist after implementation and record them.
 
 Reuse an existing module-owned verification boundary where possible. Do not create an independent crate or choose its location from this task alone. If an independent project is necessary, first obtain explicit user approval for necessity, exact location, file scope and cleanup; record the decision in the existing SPEC/PLAN and manual checklist.
 
-Any approved Rust project must have explicit Cargo workspace ownership and must not be imported by production chatgpt-harness-runtime or chatgpt-harness-ui. The legacy prototype and its historical commands remain traceable in SQLite 验证结论（对话交付，不自动新建报告）; its current layout is pending cleanup, not the preferred structure.
+Any approved Rust project must have explicit Cargo workspace ownership and must not be imported by production chatgpt-harness-runtime or chatgpt-harness-ui. The legacy prototype was removed as instructed; its historical commands remain dialogue-only traceability in SQLite 验证结论（对话交付，不自动新建报告）. Do not recreate or relocate the removed project.
 
 Use temporary directories in every automated test.
 
@@ -324,7 +324,7 @@ After writer shutdown:
 
 Persist approval/session-like historical facts and prove POC exposes no API that reconstructs live Runtime authorization objects.
 
-### POC report
+### POC execution evidence
 
 Create:
 
@@ -446,7 +446,7 @@ Add an assertion/test that CURRENT_SCHEMA_VERSION remains 2 at M00 completion.
 
 ### Implement
 
-Verify the runner/adapter boundary using the existing project conventions. Do not create a standalone evaluation project or a new source/report tree by default. If necessary, obtain explicit user approval for the exact independent-project arrangement before implementation; report locations continue to follow AGENTS.md.
+Verify the runner/adapter boundary using the existing project conventions. Do not create a standalone evaluation project or a new source/evidence tree by default. If necessary, obtain explicit user approval for the exact independent-project arrangement before implementation; evidence locations continue to follow AGENTS.md.
 
 The verification must call the real Harness Runtime MCP rather than reimplementing tool behavior. An approved independent Rust project must follow the same explicit workspace-isolation rule as T3. Existing prototype locations and historical replay commands are evidence only, not permission to create more projects.
 
@@ -491,7 +491,7 @@ The runner must:
 5. collect Runtime outcome/evidence;
 6. continue the controlled agent loop within limits;
 7. grade final task state;
-8. emit a report with model/adapter/tool-schema/case/fixture identities.
+8. emit an evidence record with model/adapter/tool-schema/case/fixture identities.
 
 ### Scoring fields for the spike
 
@@ -612,7 +612,7 @@ Prove:
 - CURRENT_SCHEMA_VERSION is still 2;
 - no new user-facing tool is registered;
 - no Policy/Approval/Workspace semantics changed;
-- no raw secret was committed into fixture/report;
+- no raw secret was committed into fixture/evidence;
 - temporary DB/Workspace/process resources are cleaned.
 
 ### Documentation consistency
@@ -629,9 +629,9 @@ Update cross-links among:
 - SQLite 验证结论（对话交付，不自动新建报告）
 - 评测可行性结论（对话交付，不自动新建报告）
 - 架构决策及阻塞项（在既有 SPEC/PLAN 中维护）
-- future 人工验收签认（沿用既有验收清单） and 验收证据定位（沿用既有验收清单） references.
+- future 人工验收签认（沿用既有验收清单） and 验收证据定位（沿用既有验收清单） references; no standalone Evidence Index is required.
 
-The three validation plans are already frozen before implementation. Do not rewrite their acceptance criteria to fit the implementation and do not mark them PASS merely because M00 development is complete.
+The three validation plans were frozen before implementation. Their verdicts follow actual execution: Integration = PASS (12/12), E2E-03 = PASS, E2E-01/E2E-02 = BLOCKED, and Manual Acceptance = NOT EXECUTED. Do not mark an unexecuted or unavailable boundary PASS merely because M00 development is complete.
 
 ### Required task-local verification
 
@@ -666,9 +666,10 @@ M00 Development Complete means:
 - all required design outputs exist;
 - no production V4 feature was accidentally implemented/enabled;
 - no unresolved REVISED ADR remains only in milestone docs;
-- formal Integration/E2E/Manual test execution is still pending.
+- M00 Development Complete = PASS; formal Integration is PASS (12/12), while E2E execution is partial: E2E-03 PASS and E2E-01/E2E-02 BLOCKED;
+- Manual Acceptance remains NOT EXECUTED because the two real-boundary E2E blockers are unresolved.
 
-Do not mark M00 ACCEPTED/FROZEN in TASKS. That verdict requires the later validation documents and actual execution evidence.
+Do not mark M00 ACCEPTED/FROZEN in TASKS. The current overall verdict is BLOCKED; the remaining acceptance blockers are E2E-01, E2E-02 and the subsequent Manual Acceptance.
 
 ---
 
@@ -694,9 +695,9 @@ The required sequence is:
 ~~~text
 Pre-development: SPEC / PLAN / TASKS / Integration / E2E / Manual plans frozen
 → T1–T6 M00 Development Complete
-→ independent QA executes Integration
-→ Local/controlled E2E + explicitly authorized external E2E
-→ Manual Acceptance
+→ independent QA executes Integration: 12/12 PASS
+→ E2E-03: PASS; E2E-01/E2E-02: BLOCKED pending real-boundary evidence
+→ Manual Acceptance: NOT EXECUTED until E2E-01/E2E-02 pass
 → human sign-off in the existing manual checklist + evidence locations
 → M00 ACCEPTED / FROZEN
 → only then unlock M01/M02/M03

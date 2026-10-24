@@ -1,8 +1,8 @@
 # M00 SPEC — As-Is Baseline and Architecture Contract Gate
 
-> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份计划，固定测试数据沿用 `fixtures/v4/m00/`。用户已要求删除独立报告和独立原型源码，现有验证材料不完整，M00 保持 BLOCKED；不得自动重建报告或实验工程，未执行项及缺失证据不得记为 PASS。
+> 存放规则遵守 [AGENTS.md](../../../../AGENTS.md)。本目录只保留六份正式文档，固定测试数据沿用 `fixtures/v4/m00/`。独立报告、独立 ADR、Evidence Index 与独立 POC 工程已按用户要求删除，不恢复；删除不改写已经实际执行的 Development / Integration / E2E-03 结果。未具备真实边界证据的验收项保持 BLOCKED，未执行项保持 NOT EXECUTED，不得记为 PASS。
 
-> Status: BLOCKED / REQUIRED VERIFICATION MATERIAL REMOVED; not ACCEPTED
+> Status: M00 overall BLOCKED — Development Complete PASS; Integration PASS (12/12); E2E-01 BLOCKED; E2E-02 BLOCKED; E2E-03 PASS; Manual Acceptance NOT EXECUTED; not ACCEPTED / FROZEN
 > Milestone: M00 — As-Is Baseline and Architecture Contract Gate  
 > Upstream baseline: V4 PRD + V4 Architecture + V4 Roadmap, FROZEN FOR M00  
 > Target: validate current code facts, prove critical V4 architecture assumptions, and freeze the implementation contract consumed by M01+  
@@ -23,6 +23,18 @@ The milestone must establish five facts with executable evidence:
 5. a real controllable Agent/Model adapter can execute at least one isolated MCP task with ground truth and a final-state assertion, proving that F12 is feasible before M04 depends on it.
 
 M00 is successful only when these claims are supported by code inspection, runnable POCs/tests and the required real baseline E2E. Research notes or architecture opinion alone are insufficient.
+
+### Current execution closeout
+
+- M00 Development Complete: PASS.
+- M00 Integration: PASS (12/12).
+- M00-E2E-01: BLOCKED — no real ChatGPT → Tunnel → Runtime MCP evidence was produced.
+- M00-E2E-02: BLOCKED — no real controllable Agent/Model → Eval Runner → Runtime MCP evidence was produced.
+- M00-E2E-03: PASS; this previously executed result was not rerun during the closeout.
+- Manual Acceptance: NOT EXECUTED.
+- M00 overall: BLOCKED; it cannot be marked ACCEPTED / FROZEN.
+
+The deleted standalone reports, standalone ADR, Evidence Index and POC source trees are not recreated. They do not turn the completed Development, Integration or E2E-03 execution into “not executed”; the remaining acceptance blockers are M00-E2E-01, M00-E2E-02 and the subsequent Manual Acceptance.
 
 ---
 
@@ -150,11 +162,11 @@ Required outputs:
 2. 基线事实与源码引用（在既有 SPEC 中维护） — current source/test/runtime truth with status and evidence path.
 3. 架构决策及阻塞项（在既有 SPEC/PLAN 中维护） — M00 verdict for each relevant ADR and unresolved risks.
 4. Shared Evidence Contract v1 fixture(s), including valid and invalid/redaction cases.
-5. SQLite ownership POC source and automated tests.
-6. SQLite POC evidence/report containing commands, environment and actual results.
+5. SQLite ownership POC source and automated tests used by Development/Integration; the standalone POC source is not retained after the requested cleanup and its deletion is not a new acceptance blocker.
+6. SQLite POC execution evidence containing commands, environment and actual results; the evidence is maintained in the existing six documents or dialogue, not a standalone report.
 7. Config v2 → v3 compatibility fixtures and migration-contract tests.
-8. Controlled Eval feasibility POC, one or more ground-truth cases, and a reproducible smoke report.
-9. Evidence index references consumed by the frozen M00 validation plans.
+8. Controlled Eval feasibility POC, one or more ground-truth cases, and reproducible smoke evidence used by Development/Integration; standalone POC source/report is not retained and is not recreated.
+9. Evidence references consumed by the frozen M00 validation plans, maintained in the existing six documents, fixtures and dialogue; no standalone Evidence Index is recreated.
 
 INTEGRATION_TEST_PLAN.md, E2E_TEST_PLAN.md and MANUAL_ACCEPTANCE_CHECKLIST.md are part of the M00 implementation baseline and must be reviewed/frozen before T1 begins. Implementation may add evidence and executable fixtures, but it must not silently weaken test cases, acceptance criteria, or blocker semantics. Any required validation-contract change follows §15 Change Control.
 
@@ -318,7 +330,7 @@ Follow the existing development/test layout in root AGENTS.md. POC describes the
 
 If verification cannot fit an existing module-owned test, obtain explicit user approval for the necessity, exact location, file scope and cleanup plan before creating or relocating an independent project. If approved as a Rust crate, keep its Cargo workspace ownership explicit and exclude it from production dependencies. Do not silently change production workspace membership.
 
-The removed prototypes' historical locations and commands are recorded in the existing plans and manual checklist for traceability only. Cache cleanup remains blocked; neither this SPEC nor an ADR entry authorizes reuse of the mistaken layout. Record any approved disposition in the existing SPEC/PLAN and manual checklist.
+The removed prototypes' historical locations and commands are recorded in the existing plans and manual checklist for traceability only. Any remaining cache cleanup is a separate repository-hygiene matter, not a current M00 acceptance blocker; neither this SPEC nor an ADR entry authorizes reuse of the mistaken layout. Record any approved disposition in the existing SPEC/PLAN and manual checklist.
 
 ---
 
@@ -402,6 +414,8 @@ The case must define:
 
 The runner must capture real MCP tool calls and grade the final state independently from “tool returned success”.
 
+Current E2E-02 result: BLOCKED. The local/deterministic runner mechanics remain Integration evidence and do not substitute for a real controllable Agent/Model turn through the real Runtime MCP.
+
 ### 9.3 Truthfulness boundary
 
 The spike may report only what it controls/observes.
@@ -444,6 +458,8 @@ Requirements:
 - record commit, app/runtime/tunnel identity and effective config;
 - do not claim SQLite History, Trace or other V4 functionality from this test;
 - external execution requires explicit authorization when the E2E plan is run.
+
+Current E2E-01 result: BLOCKED. No real ChatGPT → Tunnel → Runtime MCP chain evidence is available; local UI/process or Runtime smoke evidence cannot substitute for that boundary.
 
 ---
 
@@ -519,6 +535,10 @@ M00 may be marked ACCEPTED / FROZEN only when all of the following are true:
 - no current-scope blocker remains.
 
 If real external ChatGPT access or the controlled Agent/Model adapter cannot be executed, verdict is BLOCKED or INCONCLUSIVE as specified by the relevant test plan. It must not be replaced by a mock and marked PASS.
+
+### Current exit status
+
+The local development and Integration gates are complete, and E2E-03 is PASS. The M00 exit gate remains unsatisfied solely because E2E-01 and E2E-02 are BLOCKED; Manual Acceptance therefore remains NOT EXECUTED. No ACCEPTED / FROZEN claim is valid until those two real-boundary cases pass and the Human Reviewer completes the manual checklist.
 
 ---
 
