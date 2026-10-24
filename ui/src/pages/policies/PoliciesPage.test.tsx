@@ -12,7 +12,7 @@ afterEach(() => cleanup());
 
 function config(userRules: UserPolicyRuleConfig[] = []): AppConfig {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     configRevision: "7",
     workspace: { rootPath: "D:\\workspace" },
     tunnel: { tunnelId: "tunnel", autoDetect: true },
@@ -21,6 +21,8 @@ function config(userRules: UserPolicyRuleConfig[] = []): AppConfig {
     tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
     bash: { autoDetect: true },
     policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules },
+    desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
+    history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
   };
 }
 

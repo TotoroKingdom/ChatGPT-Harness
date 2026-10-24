@@ -19,6 +19,10 @@ pub(super) struct LegacyAppConfigV1 {
     policies: PolicyConfig,
     #[serde(default)]
     bash: BashConfig,
+    #[serde(default)]
+    desktop: Option<DesktopConfig>,
+    #[serde(default)]
+    history: Option<HistoryConfig>,
 }
 
 fn shape(value: &Value, allowed: &[&str], required: &[&str]) -> Result<(), ConfigError> {
@@ -31,7 +35,7 @@ fn shape(value: &Value, allowed: &[&str], required: &[&str]) -> Result<(), Confi
     Ok(())
 }
 
-pub(super) fn validate_shape(raw: &Value) -> Result<(), ConfigError> {
+pub(super) fn validate_v2_shape(raw: &Value) -> Result<(), ConfigError> {
     shape(&raw["workspace"], &["rootPath"], &["rootPath"])?;
     shape(
         &raw["tunnel"],
@@ -67,8 +71,62 @@ pub(super) fn validate_shape(raw: &Value) -> Result<(), ConfigError> {
     Ok(())
 }
 
-pub(super) fn migrate_v1_to_v2(raw: Value) -> Result<AppConfig, ConfigError> {
-    validate_shape(&raw)?;
+pub(super) fn validate_v3_shape(raw: &Value) -> Result<(), ConfigError> {
+    shape(
+        raw,
+        &[
+            "schemaVersion",
+            "configRevision",
+            "workspace",
+            "tunnel",
+            "security",
+            "ui",
+            "tools",
+            "bash",
+            "policies",
+            "desktop",
+            "history",
+        ],
+        &[
+            "schemaVersion",
+            "configRevision",
+            "workspace",
+            "tunnel",
+            "security",
+            "ui",
+            "tools",
+            "bash",
+            "policies",
+            "desktop",
+            "history",
+        ],
+    )?;
+    validate_v2_shape(raw)?;
+    shape(
+        &raw["desktop"],
+        &[
+            "approvalNotifications",
+            "connectionNotifications",
+            "backgroundNoticeAcknowledged",
+            "autoStartHarnessOnAppLaunch",
+        ],
+        &[
+            "approvalNotifications",
+            "connectionNotifications",
+            "backgroundNoticeAcknowledged",
+            "autoStartHarnessOnAppLaunch",
+        ],
+    )?;
+    shape(
+        &raw["history"],
+        &["enabled", "retentionDays", "maxStorageMiB"],
+        &["enabled", "retentionDays", "maxStorageMiB"],
+    )?;
+    Ok(())
+}
+
+pub(super) fn migrate_v1_to_v3(raw: Value) -> Result<AppConfig, ConfigError> {
+    validate_v2_shape(&raw)?;
     let legacy: LegacyAppConfigV1 =
         serde_json::from_value(raw).map_err(|_| ConfigError::Migration("deserialization"))?;
     if legacy.schema_version != 1 {
@@ -84,5 +142,32 @@ pub(super) fn migrate_v1_to_v2(raw: Value) -> Result<AppConfig, ConfigError> {
         tools: legacy.tools,
         policies: legacy.policies,
         bash: legacy.bash,
+        desktop: legacy.desktop.unwrap_or_default(),
+        history: legacy.history.unwrap_or_default(),
     })
+}
+
+pub(super) fn migrate_v2_to_v3(mut raw: Value) -> Result<AppConfig, ConfigError> {
+    validate_v2_shape(&raw)?;
+    let schema_version = raw
+        .get("schemaVersion")
+        .and_then(Value::as_u64)
+        .ok_or(ConfigError::Migration("schemaVersion"))?;
+    if schema_version != 2 {
+        return Err(ConfigError::UnsupportedSchema);
+    }
+    let object = raw.as_object_mut().ok_or(ConfigError::Migration("shape"))?;
+    object.insert("schemaVersion".into(), Value::from(3));
+    object.insert(
+        "desktop".into(),
+        serde_json::to_value(DesktopConfig::default())
+            .map_err(|_| ConfigError::Migration("desktop defaults"))?,
+    );
+    object.insert(
+        "history".into(),
+        serde_json::to_value(HistoryConfig::default())
+            .map_err(|_| ConfigError::Migration("history defaults"))?,
+    );
+    validate_v3_shape(&raw)?;
+    serde_json::from_value(raw).map_err(|_| ConfigError::Migration("deserialization"))
 }

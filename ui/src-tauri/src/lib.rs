@@ -17,14 +17,113 @@ pub fn run() {
     let harness = crate::harness::HarnessController::new(runtime.clone(), tunnel.clone());
     runtime.set_event_sink(std::sync::Arc::new(harness.clone()));
     tunnel.set_event_sink(std::sync::Arc::new(harness.clone()));
+    let desktop = crate::desktop::DesktopLifecycleCoordinator::new(harness.clone());
+    let desktop_for_window = desktop.clone();
+    let desktop_for_setup = desktop.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_notification::init())
+        .manage(desktop)
+        .on_window_event(move |window, event| {
+            desktop_for_window.handle_window_event(window, event);
+        })
+        .setup(move |app| {
             use tauri::{Emitter, Manager};
+            use tauri_plugin_notification::NotificationExt;
             let controller = app.state::<crate::harness::HarnessController>();
+            let runtime = app
+                .state::<crate::runtime::RuntimeSupervisor>()
+                .inner()
+                .clone();
             let handle = app.handle().clone();
+            let desktop = desktop_for_setup.clone();
+            let acknowledged = app
+                .path()
+                .app_data_dir()
+                .ok()
+                .and_then(|directory| crate::config::ConfigStore::new(directory).load().ok())
+                .flatten()
+                .map(|config| config.desktop.background_notice_acknowledged)
+                .unwrap_or(false);
+            desktop.set_background_notice_acknowledged(acknowledged);
+            desktop.observe_status(controller.status());
+            desktop.bootstrap_approvals(
+                runtime
+                    .approvals_list(harness_control_protocol::ApprovalsListParams::default())
+                    .map(|result| result.items)
+                    .map_err(|_| ()),
+            );
+
+            let desktop_for_activity = desktop.clone();
+            let handle_for_activity = handle.clone();
+            let runtime_for_activity = runtime.clone();
+            runtime.set_activity_sink(std::sync::Arc::new(move |event| {
+                let approvals = runtime_for_activity
+                    .approvals_list(harness_control_protocol::ApprovalsListParams::default())
+                    .map(|result| result.items)
+                    .map_err(|_| ());
+                desktop_for_activity.handle_activity(&handle_for_activity, event, approvals);
+            }));
+
+            let desktop_for_click = desktop.clone();
+            let handle_for_click = handle.clone();
+            let runtime_for_click = runtime.clone();
+            handle.notification().on_action(move |action| {
+                let Some(notification) = action.notification() else {
+                    return;
+                };
+                if notification
+                    .extra()
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("connection")
+                {
+                    let _ = crate::desktop::routing::show_main_window(
+                        &handle_for_click,
+                        Some(crate::desktop::routing::HostNavigationIntent::Overview),
+                    );
+                    return;
+                }
+                let Some(runtime_id) = notification
+                    .extra()
+                    .get("runtimeId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                else {
+                    return;
+                };
+                let Some(request_id) = notification
+                    .extra()
+                    .get("requestId")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                else {
+                    return;
+                };
+                let approvals = runtime_for_click
+                    .approvals_list(harness_control_protocol::ApprovalsListParams::default())
+                    .map(|result| result.items)
+                    .map_err(|_| ());
+                desktop_for_click.handle_notification_click(
+                    &handle_for_click,
+                    runtime_id,
+                    request_id,
+                    approvals,
+                );
+            })?;
+            crate::desktop::tray::install(&handle, desktop.clone())?;
+            let desktop_for_status = desktop.clone();
+            let runtime_for_status = runtime.clone();
             controller.set_status_sink(std::sync::Arc::new(move |status| {
                 let _ = handle.emit("harness:status", status);
+                if desktop_for_status.observe_status_with_app(&handle, status.clone()) {
+                    let approvals = runtime_for_status
+                        .approvals_list(harness_control_protocol::ApprovalsListParams::default())
+                        .map(|result| result.items)
+                        .map_err(|_| ());
+                    desktop_for_status.bootstrap_approvals(approvals);
+                }
+                crate::desktop::tray::refresh(&handle, &desktop_for_status);
             }));
             Ok(())
         })
@@ -39,6 +138,9 @@ pub fn run() {
             crate::commands::config_metadata,
             crate::commands::config_save,
             crate::commands::ui_language_set,
+            crate::commands::desktop_preferences_set,
+            crate::commands::desktop_continue_in_background,
+            crate::commands::desktop_quit,
             crate::commands::config_reset,
             crate::commands::secret_api_key_status,
             crate::commands::secret_api_key_delete,
@@ -75,6 +177,7 @@ pub fn run() {
 
 mod commands;
 mod config;
+mod desktop;
 mod harness;
 mod platform;
 mod runtime;

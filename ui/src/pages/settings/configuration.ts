@@ -2,10 +2,12 @@ import type { AppConfig } from "@protocol/v1";
 
 /** First configuration seed only. Runtime effective values are never derived here. */
 export const initialConfig: AppConfig = {
-  schemaVersion: 2, configRevision: "0", workspace: { rootPath: "" },
+  schemaVersion: 3, configRevision: "0", workspace: { rootPath: "" },
   tunnel: { tunnelId: "", autoDetect: true }, security: { mode: "normal", developerTestMode: false }, ui: {},
   tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
   bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
+  desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
+  history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
 };
 export type ProxyValidationKey = "validation.settings.proxyUrl" | "validation.settings.proxyProtocol" | "validation.settings.proxyHost" | "validation.settings.proxyCredentials" | "validation.settings.proxyPath";
 export function validateControlPlaneProxy(value: string): ProxyValidationKey | "" {

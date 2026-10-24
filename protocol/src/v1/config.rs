@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// Persistent host configuration version, independent of wire protocol v1.
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -25,6 +25,69 @@ pub struct AppConfig {
     pub bash: BashConfig,
     #[serde(default)]
     pub policies: PolicyConfig,
+    /// Host-only desktop presentation and lifecycle preferences. These fields
+    /// are deliberately excluded from `RuntimeConfigSnapshot`.
+    #[serde(default)]
+    pub desktop: DesktopConfig,
+    /// Future History preferences preserved by the v3 contract. M01 stores
+    /// them but does not activate History behavior.
+    #[serde(default)]
+    pub history: HistoryConfig,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DesktopConfig {
+    #[serde(default = "default_true")]
+    pub approval_notifications: bool,
+    #[serde(default = "default_true")]
+    pub connection_notifications: bool,
+    #[serde(default)]
+    pub background_notice_acknowledged: bool,
+    #[serde(default)]
+    pub auto_start_harness_on_app_launch: bool,
+}
+
+impl Default for DesktopConfig {
+    fn default() -> Self {
+        Self {
+            approval_notifications: true,
+            connection_notifications: true,
+            background_notice_acknowledged: false,
+            auto_start_harness_on_app_launch: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HistoryConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_history_retention_days")]
+    pub retention_days: u32,
+    #[serde(default = "default_history_max_storage_mib")]
+    #[serde(rename = "maxStorageMiB")]
+    #[ts(rename = "maxStorageMiB")]
+    pub max_storage_mib: u32,
+}
+
+fn default_history_retention_days() -> u32 {
+    30
+}
+
+fn default_history_max_storage_mib() -> u32 {
+    256
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            retention_days: 30,
+            max_storage_mib: 256,
+        }
+    }
 }
 
 // Desired Git-for-Windows Bash configuration. `executable_path` is only a

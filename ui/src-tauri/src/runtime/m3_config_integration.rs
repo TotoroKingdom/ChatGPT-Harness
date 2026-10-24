@@ -112,7 +112,7 @@ fn int_01(fixture: &Fixture) -> QaResult<()> {
         .load()
         .map_err(|_| "load INT-01 config")?
         .ok_or_else(|| "INT-01 config missing".to_owned())?;
-    check!(loaded.schema_version == 2);
+    check!(loaded.schema_version == 3);
     check!(loaded.policies.tool_defaults.read_file == PolicyDecision::Allow);
     check!(loaded.policies.tool_defaults.glob == PolicyDecision::Allow);
     check!(loaded.policies.tool_defaults.write == PolicyDecision::Allow);

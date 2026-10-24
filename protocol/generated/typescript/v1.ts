@@ -15,7 +15,19 @@ export type RpcMessage = RpcErrorResponse | RpcResponse | RpcRequest | RpcNotifi
 export type MachineErrorCode = "NOT_INITIALIZED" | "ALREADY_INITIALIZED" | "PROTOCOL_VERSION_MISMATCH" | "RUNTIME_NOT_READY" | "INVALID_ARGUMENT" | "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_RESOLVED" | "APPROVAL_SESSION_GRANT_UNAVAILABLE" | "BASH_UNAVAILABLE" | "BASH_INVALID_COMMAND" | "BASH_COMMAND_TOO_LONG" | "BASH_TIMEOUT" | "BASH_OUTPUT_LIMIT" | "BASH_CONCURRENCY_LIMIT" | "BASH_SPAWN_FAILED" | "BASH_CANCELLED" | "BASH_PROCESS_FAILED" | "INTERNAL_ERROR";
 export type EmptyParams = Record<string, never>;
 export type PolicyDecision = "deny" | "ask" | "allow";
-export type AppConfig = { schemaVersion: number, configRevision: string, workspace: WorkspaceConfig, tunnel: TunnelConfig, security: SecurityConfig, ui: UiConfig, tools: ToolConfig, bash: BashConfig, policies: PolicyConfig, };
+export type AppConfig = { schemaVersion: number, configRevision: string, workspace: WorkspaceConfig, tunnel: TunnelConfig, security: SecurityConfig, ui: UiConfig, tools: ToolConfig, bash: BashConfig, policies: PolicyConfig,
+/**
+ * Host-only desktop presentation and lifecycle preferences. These fields
+ * are deliberately excluded from `RuntimeConfigSnapshot`.
+ */
+desktop: DesktopConfig,
+/**
+ * Future History preferences preserved by the v3 contract. M01 stores
+ * them but does not activate History behavior.
+ */
+history: HistoryConfig, };
+export type DesktopConfig = { approvalNotifications: boolean, connectionNotifications: boolean, backgroundNoticeAcknowledged: boolean, autoStartHarnessOnAppLaunch: boolean, };
+export type HistoryConfig = { enabled: boolean, retentionDays: number, maxStorageMiB: number, };
 export type ToolPolicyDefaults = { readFile: PolicyDecision, glob: PolicyDecision, write: PolicyDecision, edit: PolicyDecision, bash: PolicyDecision, };
 export type PolicyConfig = { toolDefaults: ToolPolicyDefaults, userRules: Array<UserPolicyRuleConfig>, };
 export type ToolEnabledConfig = { enabled: boolean, };

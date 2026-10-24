@@ -6,7 +6,7 @@
 
 use super::m2_e2e::{self, McpClient, RuntimeProcess};
 use super::runtime_config_snapshot;
-use crate::config::{ConfigError, ConfigStore};
+use crate::config::{ConfigError, ConfigStore, CURRENT_SCHEMA_VERSION};
 use harness_control_protocol::{AppConfig, DecimalU64, SecurityMode, UiLanguage};
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
@@ -163,7 +163,7 @@ fn int_01(fixture: &Fixture) -> QaResult<()> {
     )
     .map_err(|error| format!("write INT-01 fixture: {error}"))?;
     let loaded = load(&ConfigStore::new(directory))?;
-    check!(loaded.schema_version == 2);
+    check!(loaded.schema_version == CURRENT_SCHEMA_VERSION);
     check!(loaded.ui.language.is_none());
     check!(loaded.tools.write.enabled == config.tools.write.enabled);
     check!(loaded.workspace == config.workspace);

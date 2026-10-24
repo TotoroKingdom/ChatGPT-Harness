@@ -27,6 +27,17 @@
     "saving": "Saving…",
     "cancel": "Cancel"
   },
+  "desktop": {
+    "backgroundNotice": {
+      "title": "Keep ChatGPT-Harness available in the Tray?",
+      "closeHides": "Closing this window hides ChatGPT-Harness to the Tray.",
+      "continuesRunning": "Harness may continue serving ChatGPT while hidden.",
+      "separateActions": "Stop Harness stops the Harness. Quit exits the application. Both are separate from Close.",
+      "continue": "Continue in background",
+      "quit": "Quit application",
+      "failed": "Could not update desktop lifecycle."
+    }
+  },
   "nav": {
     "mainNavigation": "Main navigation",
     "workspace": "Workspace",
@@ -509,6 +520,15 @@
   },
   "settings": {
     "appearance": "Appearance",
+    "notifications": {
+      "title": "Background & notifications",
+      "approvalTitle": "Approval notifications",
+      "approvalHelp": "Notify when a new Runtime approval is pending.",
+      "connectionTitle": "Connection notifications",
+      "connectionHelp": "Notify once when a Ready connection degrades and once when it recovers.",
+      "fallback": "Windows may block system notifications; Tray and Approval Center remain available.",
+      "saved": "Notification preferences saved."
+    },
     "theme": "Theme",
     "themeHelp": "Choose whether Harness follows the system appearance or uses a fixed theme.",
     "themes": {

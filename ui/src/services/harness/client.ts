@@ -74,6 +74,16 @@ export type RuntimeProcessStatus = {
   phase: RuntimeProcessPhase;
   last_error?: { code: string; message: string } | null;
 };
+export type DesktopNavigationIntent =
+  | { page: "overview" }
+  | { page: "approvals"; objectId: string }
+  | { page: "approvalsUnavailable"; objectId: string };
+export type DesktopPreferencesPatch = {
+  approvalNotifications?: boolean;
+  connectionNotifications?: boolean;
+  backgroundNoticeAcknowledged?: boolean;
+  autoStartHarnessOnAppLaunch?: boolean;
+};
 
 export function overallStatus(components: ComponentStates): OverallStatus {
   const values = Object.values(components);
@@ -121,4 +131,9 @@ export interface HarnessControlClient extends ControlReadClient {
   policiesList(): Promise<PoliciesListResult>;
   approvalsList(params?: ApprovalsListParams): Promise<ApprovalsListResult>;
   approvalsResolve(requestId: string, decision: ApprovalDecision): Promise<ApprovalsResolveResult>;
+  desktopNavigationSubscribe(listener: (intent: DesktopNavigationIntent) => void): Promise<Unsubscribe>;
+  desktopBackgroundNoticeSubscribe(listener: () => void): Promise<Unsubscribe>;
+  desktopPreferencesSet(patch: DesktopPreferencesPatch): Promise<AppConfig>;
+  desktopContinueInBackground(): Promise<void>;
+  desktopQuit(): Promise<void>;
 }

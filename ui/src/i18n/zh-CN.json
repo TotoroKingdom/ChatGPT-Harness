@@ -27,6 +27,17 @@
     "saving": "保存中…",
     "cancel": "取消"
   },
+  "desktop": {
+    "backgroundNotice": {
+      "title": "让 ChatGPT-Harness 保持在系统托盘中？",
+      "closeHides": "关闭窗口会将 ChatGPT-Harness 隐藏到系统托盘。",
+      "continuesRunning": "窗口隐藏后，Harness 仍可能继续为 ChatGPT 提供服务。",
+      "separateActions": "停止 Harness 会停止 Harness；退出会退出应用。两者都不同于关闭窗口。",
+      "continue": "在后台继续运行",
+      "quit": "退出应用",
+      "failed": "无法更新桌面生命周期。"
+    }
+  },
   "nav": {
     "mainNavigation": "主导航",
     "workspace": "工作区",
@@ -509,6 +520,15 @@
   },
   "settings": {
     "appearance": "外观",
+    "notifications": {
+      "title": "后台与通知",
+      "approvalTitle": "审批通知",
+      "approvalHelp": "有新的 Runtime 审批请求等待处理时通知。",
+      "connectionTitle": "连接通知",
+      "connectionHelp": "Ready 连接降级以及恢复时各通知一次。",
+      "fallback": "Windows 可能会阻止系统通知；系统托盘和审批中心仍可使用。",
+      "saved": "通知偏好已保存。"
+    },
     "theme": "主题",
     "themeHelp": "选择跟随系统外观，或使用固定主题。",
     "themes": {

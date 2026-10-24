@@ -21,6 +21,50 @@
       "description": "A non-negative 64-bit integer represented as a decimal string on the JSON wire.\n\nKeeping revisions and cursors as strings avoids JSON number precision loss and\nmakes the representation identical across Tauri and future JSONL transports.",
       "type": "string"
     },
+    "DesktopConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "approvalNotifications": {
+          "default": true,
+          "type": "boolean"
+        },
+        "autoStartHarnessOnAppLaunch": {
+          "default": false,
+          "type": "boolean"
+        },
+        "backgroundNoticeAcknowledged": {
+          "default": false,
+          "type": "boolean"
+        },
+        "connectionNotifications": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "HistoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "maxStorageMiB": {
+          "default": 256,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retentionDays": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "PolicyConfig": {
       "additionalProperties": false,
       "properties": {
@@ -329,6 +373,25 @@
     },
     "configRevision": {
       "$ref": "#/$defs/DecimalU64"
+    },
+    "desktop": {
+      "$ref": "#/$defs/DesktopConfig",
+      "default": {
+        "approvalNotifications": true,
+        "autoStartHarnessOnAppLaunch": false,
+        "backgroundNoticeAcknowledged": false,
+        "connectionNotifications": true
+      },
+      "description": "Host-only desktop presentation and lifecycle preferences. These fields\nare deliberately excluded from `RuntimeConfigSnapshot`."
+    },
+    "history": {
+      "$ref": "#/$defs/HistoryConfig",
+      "default": {
+        "enabled": true,
+        "maxStorageMiB": 256,
+        "retentionDays": 30
+      },
+      "description": "Future History preferences preserved by the v3 contract. M01 stores\nthem but does not activate History behavior."
     },
     "policies": {
       "$ref": "#/$defs/PolicyConfig",

@@ -1,11 +1,18 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "configRevision": "7",
   "workspace": { "rootPath": "<workspace>" },
   "tunnel": { "tunnelId": "example-tunnel-id", "autoDetect": true, "apiKeyRef": { "provider": "os_secret_store", "key": "chatgpt-harness-api-key" } },
   "security": { "mode": "normal", "developerTestMode": false },
   "bash": { "autoDetect": true },
-  "ui": { "theme": "system" }
+  "ui": { "theme": "system" },
+  "desktop": {
+    "approvalNotifications": true,
+    "connectionNotifications": true,
+    "backgroundNoticeAcknowledged": false,
+    "autoStartHarnessOnAppLaunch": false
+  },
+  "history": { "enabled": true, "retentionDays": 30, "maxStorageMiB": 256 }
 }
 
 

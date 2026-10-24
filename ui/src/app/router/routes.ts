@@ -19,7 +19,7 @@ export type PolicyDraftHandoff = {
 export type NavigationOptions = {
   policyDraft?: PolicyDraftHandoff;
   objectId?: string;
-  settingsSection?: "general" | "appearance" | "workspace" | "connection" | "security" | "advanced" | "danger";
+  settingsSection?: "general" | "appearance" | "notifications" | "workspace" | "connection" | "security" | "advanced" | "danger";
 };
 export type Navigate = (page: PageKey, options?: NavigationOptions) => void;
 

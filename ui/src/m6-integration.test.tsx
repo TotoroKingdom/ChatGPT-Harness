@@ -65,7 +65,7 @@ function placeholders(value: string): string[] {
 
 function config(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     configRevision: "7",
     workspace: { rootPath: "C:\\workspace\\project" },
     tunnel: { tunnelId: "tunnel", autoDetect: true },
@@ -83,6 +83,8 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
       toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" },
       userRules: [],
     },
+    desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
+    history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
     ...overrides,
   };
 }
@@ -148,6 +150,9 @@ function makeDataContext(overrides: Partial<HarnessDataFixture> = {}): HarnessDa
     saveConfig: vi.fn().mockResolvedValue({ ok: true }),
     mutateConfig: vi.fn().mockResolvedValue({ ok: true }),
     setUiLanguage: vi.fn().mockResolvedValue({ ok: true }),
+    setDesktopPreferences: vi.fn().mockResolvedValue({ ok: true }),
+    continueInBackground: vi.fn().mockResolvedValue({ ok: true }),
+    quitDesktop: vi.fn().mockResolvedValue({ ok: true }),
     resetConfig: vi.fn().mockResolvedValue({ ok: true }),
     restartHarness: vi.fn().mockResolvedValue({ ok: true }),
     startHarness: vi.fn().mockResolvedValue({ ok: true }),

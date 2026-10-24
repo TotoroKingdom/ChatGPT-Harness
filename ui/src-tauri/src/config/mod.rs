@@ -1,7 +1,8 @@
 use harness_control_protocol::{
-    AppConfig, BashConfig, DecimalU64, PolicyConfig, SecurityConfig, SecurityMode, ToolConfig,
-    TunnelConfig, UiConfig, UiLanguage, WorkspaceConfig,
+    AppConfig, BashConfig, DecimalU64, DesktopConfig, HistoryConfig, PolicyConfig, SecurityConfig,
+    SecurityMode, ToolConfig, TunnelConfig, UiConfig, UiLanguage, WorkspaceConfig,
 };
+use serde::Deserialize;
 use serde::Serialize;
 use std::{
     fs,
@@ -18,11 +19,23 @@ mod m7_qa;
 #[cfg(test)]
 mod m00_contract;
 
+#[cfg(test)]
+mod m01_contract;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigMetadata {
     pub config_directory: String,
     pub config_file: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DesktopPreferencesPatch {
+    pub approval_notifications: Option<bool>,
+    pub connection_notifications: Option<bool>,
+    pub background_notice_acknowledged: Option<bool>,
+    pub auto_start_harness_on_app_launch: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -80,24 +93,22 @@ impl ConfigStore {
             serde_json::from_str(&text).map_err(|_| ConfigError::Invalid("invalid JSON".into()))?;
         let migrated = match raw.get("schemaVersion").and_then(|v| v.as_u64()) {
             Some(1) => true,
-            Some(2) => false,
+            Some(2) => true,
+            Some(3) => false,
             _ => return Err(ConfigError::UnsupportedSchema),
         };
-        let mut config = if migrated {
-            migration::migrate_v1_to_v2(raw)?
-        } else {
-            if ["tools", "policies", "bash"]
-                .iter()
-                .any(|key| raw.get(*key).is_none())
-            {
-                return Err(ConfigError::Invalid("incomplete v2 config".into()));
+        let mut config = match raw.get("schemaVersion").and_then(|v| v.as_u64()) {
+            Some(1) => migration::migrate_v1_to_v3(raw)?,
+            Some(2) => migration::migrate_v2_to_v3(raw)?,
+            Some(3) => {
+                migration::validate_v3_shape(&raw)
+                    .map_err(|_| ConfigError::Invalid("invalid v3 shape".into()))?;
+                serde_json::from_value(raw)
+                    .map_err(|_| ConfigError::Invalid("invalid config shape".into()))?
             }
-            migration::validate_shape(&raw)
-                .map_err(|_| ConfigError::Invalid("invalid v2 shape".into()))?;
-            serde_json::from_value(raw)
-                .map_err(|_| ConfigError::Invalid("invalid config shape".into()))?
+            _ => return Err(ConfigError::UnsupportedSchema),
         };
-        validate_v2(&mut config).map_err(|error| {
+        validate_current(&mut config).map_err(|error| {
             if migrated {
                 let _ = error;
                 ConfigError::Migration("validation")
@@ -143,6 +154,8 @@ impl ConfigStore {
             tools: ToolConfig::default(),
             bash: BashConfig::default(),
             policies: PolicyConfig::default(),
+            desktop: harness_control_protocol::DesktopConfig::default(),
+            history: harness_control_protocol::HistoryConfig::default(),
         }
     }
 
@@ -150,7 +163,7 @@ impl ConfigStore {
         if config.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(ConfigError::Invalid("unsupported schemaVersion".into()));
         }
-        validate_v2(&mut config)?;
+        validate_current(&mut config)?;
         let previous = self.load()?;
         config.config_revision = match previous {
             None => DecimalU64::new(1),
@@ -181,6 +194,31 @@ impl ConfigStore {
         self.save(config)
     }
 
+    /// Persist only host-owned desktop preferences. The latest configuration
+    /// is read first so a Settings draft cannot overwrite unrelated fields.
+    pub fn set_desktop_preferences(
+        &self,
+        patch: DesktopPreferencesPatch,
+    ) -> Result<AppConfig, ConfigError> {
+        let mut config = match self.load()? {
+            Some(config) => config,
+            None => Self::safe_defaults(),
+        };
+        if let Some(value) = patch.approval_notifications {
+            config.desktop.approval_notifications = value;
+        }
+        if let Some(value) = patch.connection_notifications {
+            config.desktop.connection_notifications = value;
+        }
+        if let Some(value) = patch.background_notice_acknowledged {
+            config.desktop.background_notice_acknowledged = value;
+        }
+        if let Some(value) = patch.auto_start_harness_on_app_launch {
+            config.desktop.auto_start_harness_on_app_launch = value;
+        }
+        self.save(config)
+    }
+
     pub fn reset(&self) -> Result<(), ConfigError> {
         if self.file.exists() {
             fs::remove_file(&self.file).map_err(|e| ConfigError::Io(e.to_string()))?;
@@ -193,7 +231,7 @@ impl ConfigStore {
     }
 }
 
-fn validate_v2(config: &mut AppConfig) -> Result<(), ConfigError> {
+fn validate_current(config: &mut AppConfig) -> Result<(), ConfigError> {
     if config.schema_version != CURRENT_SCHEMA_VERSION {
         return Err(ConfigError::UnsupportedSchema);
     }
@@ -261,6 +299,10 @@ fn same_restart_semantics(a: &AppConfig, b: &AppConfig) -> bool {
     right.config_revision = DecimalU64::ZERO;
     left.ui = UiConfig::default();
     right.ui = UiConfig::default();
+    left.desktop = DesktopConfig::default();
+    right.desktop = DesktopConfig::default();
+    left.history = HistoryConfig::default();
+    right.history = HistoryConfig::default();
     left == right
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -342,6 +384,8 @@ mod tests {
             tools: ToolConfig::default(),
             bash: BashConfig::default(),
             policies: PolicyConfig::default(),
+            desktop: harness_control_protocol::DesktopConfig::default(),
+            history: harness_control_protocol::HistoryConfig::default(),
         }
     }
     #[test]
@@ -1086,7 +1130,7 @@ mod tests {
             }
             fs::write(&store.file, serde_json::to_vec(&raw).unwrap()).unwrap();
             let migrated = store.load().unwrap().unwrap();
-            assert_eq!(migrated.schema_version, 2);
+            assert_eq!(migrated.schema_version, CURRENT_SCHEMA_VERSION);
             assert_eq!(migrated.config_revision, original.config_revision);
             assert_eq!(migrated.workspace, original.workspace);
             assert_eq!(migrated.tunnel, original.tunnel);
@@ -1153,7 +1197,7 @@ mod tests {
         for version in [
             serde_json::Value::Null,
             serde_json::json!(0),
-            serde_json::json!(3),
+            serde_json::json!(4),
             serde_json::json!("1"),
             serde_json::json!(-1),
         ] {
@@ -1310,7 +1354,7 @@ mod tests {
                 assert!(!error.message().contains("FAKE_SECRET_SENTINEL"));
             } else {
                 let config = result.unwrap().unwrap();
-                assert_eq!(config.schema_version, 2);
+                assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
                 assert_eq!(config.config_revision, DecimalU64::new(41));
                 assert_eq!(config.workspace, original.workspace);
                 assert_eq!(config.tunnel, original.tunnel);
@@ -1323,7 +1367,12 @@ mod tests {
                 let after = fs::read(&store.file).unwrap();
                 assert!(!String::from_utf8_lossy(&after).contains("FAKE_SECRET_SENTINEL"));
                 if name == "v2-current" {
-                    assert_eq!(after, before);
+                    assert_ne!(after, before);
+                    assert_eq!(
+                        serde_json::from_slice::<serde_json::Value>(&after).unwrap()
+                            ["schemaVersion"],
+                        CURRENT_SCHEMA_VERSION
+                    );
                 }
                 let modified = fs::metadata(&store.file).unwrap().modified().unwrap();
                 assert_eq!(store.load().unwrap().unwrap(), config);

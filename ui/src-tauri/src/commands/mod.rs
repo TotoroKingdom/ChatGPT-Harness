@@ -2,7 +2,10 @@ mod control_read;
 pub use control_read::*;
 
 use crate::{
-    config::{ConfigError, ConfigMetadata, ConfigStore, CURRENT_SCHEMA_VERSION},
+    config::{
+        ConfigError, ConfigMetadata, ConfigStore, DesktopPreferencesPatch, CURRENT_SCHEMA_VERSION,
+    },
+    desktop::DesktopLifecycleCoordinator,
     harness::{HarnessController, HarnessStatus},
     runtime::{RuntimeProcessStatus, RuntimeSupervisor, SupervisorError},
     secrets::{api_key_ref, SecretStore},
@@ -133,6 +136,36 @@ pub fn ui_language_set(
     language: Option<UiLanguage>,
 ) -> Result<AppConfig, ControlError> {
     store(&app)?.set_ui_language(language).map_err(Into::into)
+}
+
+/// Persist one or more host-only desktop preferences without accepting a
+/// caller-provided full AppConfig draft.
+#[tauri::command]
+pub fn desktop_preferences_set(
+    app: AppHandle,
+    patch: DesktopPreferencesPatch,
+) -> Result<AppConfig, ControlError> {
+    store(&app)?
+        .set_desktop_preferences(patch)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn desktop_continue_in_background(
+    app: AppHandle,
+    coordinator: State<'_, DesktopLifecycleCoordinator>,
+) -> Result<(), ControlError> {
+    let config_store = store(&app)?;
+    coordinator.acknowledge_and_hide(&app, &config_store)
+}
+
+#[tauri::command]
+pub fn desktop_quit(
+    app: AppHandle,
+    coordinator: State<'_, DesktopLifecycleCoordinator>,
+) -> Result<(), ControlError> {
+    coordinator.quit(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -625,7 +658,14 @@ pub fn harness_start(
     app: AppHandle,
     controller: State<'_, HarnessController>,
     state: State<'_, Mutex<BackendState>>,
+    desktop: State<'_, DesktopLifecycleCoordinator>,
 ) -> Result<HarnessStatus, ControlError> {
+    if !desktop.start_allowed() {
+        return Err(ControlError {
+            code: "LIFECYCLE_CONFLICT".into(),
+            message: "Harness is already running, changing state, or quitting.".into(),
+        });
+    }
     controller.start(&app, &state)
 }
 
@@ -638,7 +678,9 @@ pub fn harness_status(controller: State<'_, HarnessController>) -> HarnessStatus
 pub fn harness_stop(
     app: AppHandle,
     controller: State<'_, HarnessController>,
+    desktop: State<'_, DesktopLifecycleCoordinator>,
 ) -> Result<HarnessStatus, ControlError> {
+    desktop.mark_intentional_stop();
     controller.stop(&app)
 }
 
@@ -647,7 +689,9 @@ pub fn harness_restart(
     app: AppHandle,
     controller: State<'_, HarnessController>,
     state: State<'_, Mutex<BackendState>>,
+    desktop: State<'_, DesktopLifecycleCoordinator>,
 ) -> Result<HarnessStatus, ControlError> {
+    desktop.mark_intentional_stop();
     controller.restart(&app, &state)
 }
 
@@ -680,6 +724,8 @@ mod validation_tests {
             tools: ToolConfig::default(),
             bash: harness_control_protocol::BashConfig::default(),
             policies: PolicyConfig::default(),
+            desktop: harness_control_protocol::DesktopConfig::default(),
+            history: harness_control_protocol::HistoryConfig::default(),
         }
     }
 

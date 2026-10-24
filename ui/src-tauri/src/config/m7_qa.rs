@@ -247,11 +247,11 @@ fn assert_original_unchanged(
 }
 
 fn int_01(fixture: &Fixture) -> QaResult<String> {
-    if CURRENT_SCHEMA_VERSION != 2 {
+    if CURRENT_SCHEMA_VERSION != 3 {
         return Err(format!("CURRENT_SCHEMA_VERSION={CURRENT_SCHEMA_VERSION}"));
     }
     let defaults = ConfigStore::safe_defaults();
-    if defaults.schema_version != 2
+    if defaults.schema_version != 3
         || defaults.tools != ToolConfig::default()
         || defaults.policies != PolicyConfig::default()
         || defaults.bash != BashConfig::default()
@@ -263,10 +263,10 @@ fn int_01(fixture: &Fixture) -> QaResult<String> {
         .load_or_create_defaults()
         .map_err(|error| format!("default load failed: {}", error.code()))?;
     let wire_protocol = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../protocol/src/v1");
-    if loaded.schema_version != 2 || !wire_protocol.is_dir() {
+    if loaded.schema_version != 3 || !wire_protocol.is_dir() {
         return Err("schema/protocol boundary assertion failed".into());
     }
-    Ok("CURRENT_SCHEMA_VERSION=2, default schemaVersion=2, V3 defaults complete, wire=protocol/src/v1".into())
+    Ok("CURRENT_SCHEMA_VERSION=3, default schemaVersion=3, V3 defaults complete, wire=protocol/src/v1".into())
 }
 
 fn int_02(fixture: &Fixture) -> QaResult<String> {
@@ -278,7 +278,7 @@ fn int_02(fixture: &Fixture) -> QaResult<String> {
         .map_err(|error| format!("migration failed: {}", error.code()))?
         .ok_or_else(|| "migrated config missing".to_owned())?;
     let expected: AppConfig = serde_json::from_value(raw).map_err(|error| error.to_string())?;
-    if loaded.schema_version != 2
+    if loaded.schema_version != 3
         || loaded.config_revision != DecimalU64::new(41)
         || loaded.workspace != expected.workspace
         || loaded.tunnel != expected.tunnel
@@ -288,7 +288,7 @@ fn int_02(fixture: &Fixture) -> QaResult<String> {
         || loaded.policies != PolicyConfig::default()
         || loaded.bash != BashConfig::default()
         || loaded.ui.language.is_some()
-        || schema(&store)? != 2
+        || schema(&store)? != 3
         || temp_residue(&store)
     {
         return Err("pure V2-era migration preservation/default assertion failed".into());
@@ -299,7 +299,7 @@ fn int_02(fixture: &Fixture) -> QaResult<String> {
         return Err("migration did not atomically persist a v2 representation".into());
     }
     Ok(format!(
-        "fixture=v1-v2-era, schema=1→2, revision=41→41, preserved workspace/tunnel/security/theme, defaults applied, sourceByteDigest={}, persistedByteDigest={}",
+        "fixture=v1-v2-era, schema=1→3, revision=41→41, preserved workspace/tunnel/security/theme, defaults applied, sourceByteDigest={}, persistedByteDigest={}",
         byte_digest(&original),
         byte_digest(&read_file(&store)?)
     ))
@@ -323,7 +323,7 @@ fn int_03(fixture: &Fixture) -> QaResult<String> {
             .load()
             .map_err(|error| format!("{name} transitional migration failed: {}", error.code()))?
             .ok_or_else(|| format!("{name} transitional config missing"))?;
-        if loaded.schema_version != 2
+        if loaded.schema_version != 3
             || loaded.config_revision != expected.config_revision
             || loaded.tools != expected.tools
             || loaded.policies != expected.policies
@@ -502,7 +502,7 @@ fn int_10(fixture: &Fixture) -> QaResult<String> {
     let base = source_fixture("v1-v2-era")?;
     let cases = [
         ("zero", Some(json!(0))),
-        ("future", Some(json!(3))),
+        ("future", Some(json!(4))),
         ("missing", None),
         ("wrong-type", Some(json!("1"))),
     ];
@@ -570,9 +570,9 @@ fn int_12(fixture: &Fixture) -> QaResult<String> {
         let persisted = read_file(&store)?;
         let persisted_json: Value =
             serde_json::from_slice(&persisted).map_err(|error| error.to_string())?;
-        if message.contains("SECRET_SENTINEL") || persisted_json["schemaVersion"] == json!(2) {
+        if message.contains("SECRET_SENTINEL") || persisted_json["schemaVersion"] == json!(3) {
             return Err(format!(
-                "{name} raw secret sentinel leaked through error or a v2 replacement was written"
+                "{name} raw secret sentinel leaked through error or a v3 replacement was written"
             ));
         }
     }
@@ -600,13 +600,13 @@ fn int_13(fixture: &Fixture) -> QaResult<String> {
         let bytes = read_file(&store)?;
         let parsed: AppConfig =
             serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-        if parsed != loaded || schema(&store)? != 2 || temp_residue(&store) {
-            return Err(format!("{name} persisted result is not complete valid v2"));
+        if parsed != loaded || schema(&store)? != 3 || temp_residue(&store) {
+            return Err(format!("{name} persisted result is not complete valid v3"));
         }
         digests.push(format!("{name}={}", byte_digest(&bytes)));
     }
     Ok(format!(
-        "all six positive historical fixtures atomically persisted valid v2 with no temp residue: {}",
+        "all six positive historical fixtures atomically persisted valid v3 with no temp residue: {}",
         digests.join(", ")
     ))
 }
@@ -668,6 +668,8 @@ fn int_16(fixture: &Fixture) -> QaResult<String> {
     let baseline = source_fixture("v2-current")?;
     let baseline_config: AppConfig =
         serde_json::from_value(baseline).map_err(|error| error.to_string())?;
+    let mut baseline_config = baseline_config;
+    baseline_config.schema_version = CURRENT_SCHEMA_VERSION;
     let mut details = Vec::new();
 
     {
@@ -795,7 +797,7 @@ fn int_36(fixture: &Fixture) -> QaResult<String> {
         .load()
         .map_err(|error| format!("migration failed: {}", error.code()))?
         .ok_or_else(|| "migrated config missing".to_owned())?;
-    expected.schema_version = 2;
+    expected.schema_version = 3;
     expected.security.developer_test_mode = true;
     if migrated.config_revision != revision_before
         || runtime_projection(&migrated) != runtime_projection(&expected)

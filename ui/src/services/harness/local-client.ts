@@ -26,6 +26,8 @@ import type {
   HarnessControlClient,
   HarnessAdapterKind,
   HarnessStatus,
+  DesktopNavigationIntent,
+  DesktopPreferencesPatch,
   RuntimeProcessEvent,
   RuntimeProcessStatus,
   Unsubscribe,
@@ -381,6 +383,26 @@ export class TauriHarnessControlClient implements HarnessControlClient {
     return this.call<ApprovalsResolveResult>("runtime_approvals_resolve", {
       params: { requestId, decision },
     });
+  }
+
+  async desktopNavigationSubscribe(listener: (intent: DesktopNavigationIntent) => void) {
+    return listen<DesktopNavigationIntent>("desktop:navigation", (event) => listener(event.payload));
+  }
+
+  async desktopBackgroundNoticeSubscribe(listener: () => void) {
+    return listen("desktop:background-notice", () => listener());
+  }
+
+  desktopPreferencesSet(patch: DesktopPreferencesPatch) {
+    return this.call<AppConfig>("desktop_preferences_set", { patch });
+  }
+
+  desktopContinueInBackground() {
+    return this.call<void>("desktop_continue_in_background");
+  }
+
+  desktopQuit() {
+    return this.call<void>("desktop_quit");
   }
 }
 

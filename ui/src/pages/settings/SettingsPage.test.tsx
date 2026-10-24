@@ -13,7 +13,7 @@ vi.mock("@/app/providers/HarnessDataProvider", () => ({
 
 function config(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     configRevision: "7",
     workspace: { rootPath: "D:\\workspace" },
     tunnel: { tunnelId: "tunnel", autoDetect: true },
@@ -22,6 +22,8 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
     bash: { autoDetect: true },
     policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
+    desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
+    history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
     ...overrides,
   };
 }
@@ -50,6 +52,9 @@ function makeContext(overrides: Record<string, unknown> = {}) {
     refreshConfig: vi.fn().mockResolvedValue(undefined),
     mutateConfig: vi.fn().mockResolvedValue({ ok: true }),
     setUiLanguage: vi.fn().mockResolvedValue({ ok: true }),
+    setDesktopPreferences: vi.fn().mockResolvedValue({ ok: true }),
+    continueInBackground: vi.fn().mockResolvedValue({ ok: true }),
+    quitDesktop: vi.fn().mockResolvedValue({ ok: true }),
     resetConfig: vi.fn().mockResolvedValue({ ok: true }),
     restartHarness: vi.fn().mockResolvedValue({ ok: true }),
     runDiagnostics: vi.fn().mockResolvedValue({ checks: [] }),
@@ -79,10 +84,23 @@ afterEach(() => {
 describe("M8 Settings section/list workflow", () => {
   it("renders the six settings sections without a page-level Save action", () => {
     render(<SettingsPage />);
-    ["general", "workspace", "connection", "security", "advanced", "danger"].forEach((name) => {
+    ["general", "notifications", "workspace", "connection", "security", "advanced", "danger"].forEach((name) => {
       expect(document.getElementById(`settings-section-${name}`)).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Save Changes" })).not.toBeInTheDocument();
+  });
+
+  it("saves approval and connection notification toggles independently", async () => {
+    const setDesktopPreferences = vi.fn().mockResolvedValue({ ok: true });
+    state.context = makeContext({ setDesktopPreferences });
+    render(<SettingsPage />);
+    const approval = screen.getByRole("checkbox", { name: "Approval notifications" });
+    const connection = screen.getByRole("checkbox", { name: "Connection notifications" });
+    fireEvent.click(approval);
+    await waitFor(() => expect(setDesktopPreferences).toHaveBeenCalledWith({ approvalNotifications: false }));
+    fireEvent.click(connection);
+    await waitFor(() => expect(setDesktopPreferences).toHaveBeenCalledWith({ connectionNotifications: false }));
+    expect(state.context.restartHarness).not.toHaveBeenCalled();
   });
 
   it("applies Language immediately and rolls back locale on persistence failure", async () => {

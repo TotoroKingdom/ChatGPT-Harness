@@ -38,6 +38,7 @@ pub(crate) trait RuntimeEventSink: Send + Sync {
 
 struct TauriProcessEventSink<R: Runtime> {
     app: AppHandle<R>,
+    activity_sink: Option<Arc<dyn Fn(ActivityEvent) + Send + Sync>>,
 }
 
 impl<R: Runtime> ProcessEventSink for TauriProcessEventSink<R> {
@@ -46,7 +47,10 @@ impl<R: Runtime> ProcessEventSink for TauriProcessEventSink<R> {
     }
 
     fn emit_activity(&self, event: ActivityEvent) {
-        let _ = self.app.emit("runtime:activity", event);
+        let _ = self.app.emit("runtime:activity", event.clone());
+        if let Some(sink) = &self.activity_sink {
+            sink(event);
+        }
     }
 }
 
@@ -205,6 +209,7 @@ struct SupervisorInner {
     active_generation: Option<uuid::Uuid>,
     last_identity: Option<RuntimeProcessIdentity>,
     observer: Option<Arc<dyn RuntimeEventSink>>,
+    activity_sink: Option<Arc<dyn Fn(ActivityEvent) + Send + Sync>>,
 }
 
 pub struct RuntimeSupervisor {
@@ -254,6 +259,7 @@ impl RuntimeSupervisor {
                 active_generation: None,
                 last_identity: None,
                 observer: None,
+                activity_sink: None,
             })),
             #[cfg(test)]
             test_command: None,
@@ -265,6 +271,12 @@ impl RuntimeSupervisor {
     pub(crate) fn set_event_sink(&self, sink: Arc<dyn RuntimeEventSink>) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.observer = Some(sink);
+        }
+    }
+
+    pub(crate) fn set_activity_sink(&self, sink: Arc<dyn Fn(ActivityEvent) + Send + Sync>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.activity_sink = Some(sink);
         }
     }
 
@@ -280,7 +292,18 @@ impl RuntimeSupervisor {
         app: &AppHandle<R>,
         config: &AppConfig,
     ) -> Result<RuntimeState, SupervisorError> {
-        self.start_with_sink(Arc::new(TauriProcessEventSink { app: app.clone() }), config)
+        let activity_sink = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.activity_sink.clone());
+        self.start_with_sink(
+            Arc::new(TauriProcessEventSink {
+                app: app.clone(),
+                activity_sink,
+            }),
+            config,
+        )
     }
 
     #[cfg(test)]
@@ -425,7 +448,15 @@ impl RuntimeSupervisor {
         &self,
         app: &AppHandle<R>,
     ) -> Result<RuntimeStopResult, SupervisorError> {
-        self.stop_with_sink(Arc::new(TauriProcessEventSink { app: app.clone() }))
+        let activity_sink = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.activity_sink.clone());
+        self.stop_with_sink(Arc::new(TauriProcessEventSink {
+            app: app.clone(),
+            activity_sink,
+        }))
     }
 
     #[cfg(test)]
@@ -1264,7 +1295,7 @@ mod tests {
 
     fn config(revision: u64) -> AppConfig {
         AppConfig {
-            schema_version: 2,
+            schema_version: harness_control_protocol::CURRENT_SCHEMA_VERSION,
             config_revision: DecimalU64::new(revision),
             workspace: WorkspaceConfig {
                 root_path: format!("D:/workspace-{revision}"),
@@ -1284,6 +1315,8 @@ mod tests {
             tools: ToolConfig::default(),
             bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
+            desktop: harness_control_protocol::DesktopConfig::default(),
+            history: harness_control_protocol::HistoryConfig::default(),
         }
     }
 
@@ -1588,6 +1621,7 @@ mod tests {
             active_generation: Some(active_generation),
             last_identity: None,
             observer: None,
+            activity_sink: None,
         };
 
         assert!(transition_process_exit(&mut inner, stale_generation, None, None).is_none());

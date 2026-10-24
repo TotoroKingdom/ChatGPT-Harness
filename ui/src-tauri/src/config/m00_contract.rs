@@ -13,10 +13,7 @@ use serde_json::{json, Map, Value};
 use std::fs;
 use tempfile::tempdir;
 
-const FIXTURE_ROOT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../fixtures/v4/m00/config/"
-);
+const FIXTURE_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/v4/m00/config/");
 
 fn fixture(name: &str) -> Value {
     let path = format!("{FIXTURE_ROOT}{name}.json");
@@ -156,16 +153,16 @@ fn unsupported_future_schema_is_rejected_without_rewriting_source_bytes() {
 }
 
 #[test]
-fn production_config_and_runtime_snapshot_remain_v2_and_protocol_v1() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 2);
+fn production_config_is_v3_and_wire_protocol_remains_v1() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 3);
     assert_eq!(harness_control_protocol::PROTOCOL_VERSION, 1);
     let directory = tempdir().unwrap();
     let store = ConfigStore::new(directory.path().to_path_buf());
     let saved = store.save(ConfigStore::safe_defaults()).unwrap();
-    assert_eq!(saved.schema_version, 2);
+    assert_eq!(saved.schema_version, 3);
     let persisted: Value =
         serde_json::from_slice(&fs::read(directory.path().join("config.json")).unwrap()).unwrap();
-    assert_eq!(persisted["schemaVersion"], 2);
+    assert_eq!(persisted["schemaVersion"], 3);
 
     let config = current_v2("v2-representative");
     let snapshot = RuntimeConfigSnapshot {

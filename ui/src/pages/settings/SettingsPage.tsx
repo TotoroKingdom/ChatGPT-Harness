@@ -11,6 +11,7 @@ import { presentError, securityModeKey, type ErrorPresentation, type Translation
 import { useDraftGuard, useDraftNavigation } from "@/app/router/DraftNavigation";
 import type { NavigationOptions } from "@/app/router/routes";
 import { assertUnchanged } from "@/app/providers/config-mutations";
+import type { DesktopPreferencesPatch } from "@/services/harness/client";
 import { validateControlPlaneProxy } from "./configuration";
 import { normalizeThemePreference, type ThemePreference } from "@/theme/theme";
 
@@ -75,6 +76,8 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
   const [languageFeedback, setLanguageFeedback] = useState<Feedback | null>(null);
   const [themeSaving, setThemeSaving] = useState(false);
   const [themeFeedback, setThemeFeedback] = useState<Feedback | null>(null);
+  const [notificationSaving, setNotificationSaving] = useState(false);
+  const [notificationFeedback, setNotificationFeedback] = useState<Feedback | null>(null);
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [workspaceFeedback, setWorkspaceFeedback] = useState<Feedback | null>(null);
   const [connectionOpen, setConnectionOpen] = useState(false);
@@ -178,6 +181,22 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
       setThemeFeedback(errorFeedback(error));
     } finally {
       setThemeSaving(false);
+    }
+  };
+
+  const changeDesktopPreferences = async (patch: DesktopPreferencesPatch) => {
+    if (notificationSaving || resetting || !data.config) return;
+    setNotificationSaving(true);
+    setNotificationFeedback(null);
+    try {
+      const result = await data.setDesktopPreferences(patch);
+      setNotificationFeedback(result.ok
+        ? { kind: "success", key: "settings.notifications.saved" }
+        : saveError(result));
+    } catch (error) {
+      setNotificationFeedback(errorFeedback(error));
+    } finally {
+      setNotificationSaving(false);
     }
   };
 
@@ -383,6 +402,33 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
         />} />
         {themeSaving && <InlineFeedback>{t("settings.themeSaving")}</InlineFeedback>}
         {themeFeedback && <FeedbackNotice feedback={themeFeedback} />}
+      </Section>)}
+
+      {section("notifications", <Section title={t("settings.notifications.title")}>
+        <Row
+          title={t("settings.notifications.approvalTitle")}
+          summary={t("settings.notifications.approvalHelp")}
+          controls={<input
+            type="checkbox"
+            aria-label={t("settings.notifications.approvalTitle")}
+            checked={currentConfig?.desktop.approvalNotifications ?? true}
+            onChange={(event) => void changeDesktopPreferences({ approvalNotifications: event.target.checked })}
+            disabled={notificationSaving || resetting || !data.config}
+          />}
+        />
+        <Row
+          title={t("settings.notifications.connectionTitle")}
+          summary={t("settings.notifications.connectionHelp")}
+          controls={<input
+            type="checkbox"
+            aria-label={t("settings.notifications.connectionTitle")}
+            checked={currentConfig?.desktop.connectionNotifications ?? true}
+            onChange={(event) => void changeDesktopPreferences({ connectionNotifications: event.target.checked })}
+            disabled={notificationSaving || resetting || !data.config}
+          />}
+        />
+        <InlineFeedback>{t("settings.notifications.fallback")}</InlineFeedback>
+        {notificationFeedback && <FeedbackNotice feedback={notificationFeedback} />}
       </Section>)}
 
       {section("workspace", <Section title={t("m8Settings.workspace")}>

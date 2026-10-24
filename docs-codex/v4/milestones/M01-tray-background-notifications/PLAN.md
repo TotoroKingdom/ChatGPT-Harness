@@ -1,11 +1,11 @@
 # M01 PLAN — Tray, Background Lifecycle and Notifications
 
-> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。M01 六份里程碑文档现已齐全；三份验证/验收计划已在实现前冻结。M00 当前仍未完成最终验收，M01 实现继续受 M00 ACCEPTED / FROZEN Gate（验收通过 / 冻结门槛）约束；M00 若修订上游契约，必须先同步更新并重新冻结 M01 文档。报告更新既有证据记录，不逐次新建总结报告。
+> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。M01 六份里程碑文档现已齐全；三份验证/验收计划已在实现前冻结。M00 已按当前仓库正式文档 ACCEPTED / FROZEN；M01 已完成针对 M00 的契约 rebase。报告更新既有证据记录，不逐次新建总结报告。
 
 > Input: SPEC.md  
-> Status: DRAFT / DESIGN READY — IMPLEMENTATION BLOCKED BY M00 ACCEPTANCE  
+> Status: SPEC_READY / IMPLEMENTATION UNLOCKED AFTER M00 ACCEPTED / FROZEN REBASE
 > Goal: implement F01/F03/F04 as one Tauri-owned desktop continuity subsystem without duplicating Harness or Runtime authority.  
-> Rule: implementation begins only after M00 ACCEPTED / FROZEN and M01 is rebased to the final M00 contract.
+> Rule: M00 acceptance and the M01 contract rebase are complete; implementation follows the frozen T1–T6 order.
 
 ---
 
@@ -49,7 +49,7 @@ Before coding:
 4. update this milestone if M00 changed IDs or config ownership;
 5. mark M01 SPEC_READY only after this reconciliation.
 
-If M00 is BLOCKED, stop.
+The current M00 documents record ACCEPTED / FROZEN. If an implementation check discovers a contradiction with that contract, stop the affected Task and reconcile the contract before continuing.
 
 ---
 

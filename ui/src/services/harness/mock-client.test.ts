@@ -39,7 +39,7 @@ describe("MockHarnessControlClient", () => {
 
 
 const testConfig = (): AppConfig => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   configRevision: "0",
   workspace: { rootPath: "D:\\workspace" },
   tunnel: { tunnelId: "tunnel", tunnelClientPath: "D:\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } },
@@ -48,6 +48,8 @@ const testConfig = (): AppConfig => ({
   tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
   bash: { autoDetect: true },
   policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
+  desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
+  history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
 });
 
 afterEach(() => {

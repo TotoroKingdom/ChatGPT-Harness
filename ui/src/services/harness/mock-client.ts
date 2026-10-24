@@ -1,7 +1,7 @@
 import type { ActivityEntry, RuntimeDiagnostics, ToolDiagnostic } from "./control-read";
 import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, ToolDescriptor, ToolsListResult, UiLanguage } from "@protocol/v1";
 import { HarnessClientError } from "./errors";
-import type { ActivityEventListener, ComponentStates, ComponentStatesListener, HarnessControlClient, HarnessStatus, RuntimeProcessStatus, Unsubscribe } from "./client";
+import type { ActivityEventListener, ComponentStates, ComponentStatesListener, DesktopNavigationIntent, DesktopPreferencesPatch, HarnessControlClient, HarnessStatus, RuntimeProcessStatus, Unsubscribe } from "./client";
 export type MockScenario = "ready" | "disconnected" | "empty" | "error";
 const delay = (ms=120) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 const MAX_DECIMAL_U64 = "18446744073709551615";
@@ -24,7 +24,7 @@ function decrementDecimal(value: string): string {
   }
   return "0";
 }
-const completeConfig = (): AppConfig => ({ schemaVersion: 2, configRevision: "7", workspace: { rootPath: "D:\\example-project" }, tunnel: { tunnelId: "mock-tunnel", tunnelClientPath: "D:\\example-project\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] } });
+const completeConfig = (): AppConfig => ({ schemaVersion: 3, configRevision: "7", workspace: { rootPath: "D:\\example-project" }, tunnel: { tunnelId: "mock-tunnel", tunnelClientPath: "D:\\example-project\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] }, desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false }, history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 } });
 const safeConfig = (): AppConfig => {
  const config = completeConfig();
  return {
@@ -149,5 +149,15 @@ export class MockHarnessControlClient implements HarnessControlClient {
   item.resolvedAt = "2026-09-02T00:04:00Z";
   return this.respond({ approval: { ...item } });
  }
+ desktopNavigationSubscribe(_listener: (intent: DesktopNavigationIntent) => void) { return Promise.resolve(() => undefined); }
+ desktopBackgroundNoticeSubscribe(_listener: () => void) { return Promise.resolve(() => undefined); }
+ async desktopPreferencesSet(patch: DesktopPreferencesPatch) {
+  const base = this.config ?? safeConfig();
+  const next = { ...base, desktop: { ...base.desktop, ...patch }, configRevision: base.configRevision };
+  this.config = await this.respond(next);
+  return this.config;
+ }
+ desktopContinueInBackground() { return this.respond(undefined); }
+ desktopQuit() { return this.respond(undefined); }
 }
 

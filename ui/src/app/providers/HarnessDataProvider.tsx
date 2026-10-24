@@ -20,6 +20,7 @@ import type {
   HarnessControlClient,
   HarnessStatus,
   OverallStatus,
+  DesktopPreferencesPatch,
   Unsubscribe,
 } from "@/services/harness/client";
 import { overallStatus } from "@/services/harness/client";
@@ -70,6 +71,9 @@ type ContextValue = ResourceState & {
   saveConfig: (config: AppConfig, apiKey?: string) => Promise<SaveResult>;
   mutateConfig: (intent: ConfigIntent, apiKey?: string, initial?: AppConfig) => Promise<SaveResult>;
   setUiLanguage: (language: UiLanguage | null) => Promise<SaveResult>;
+  setDesktopPreferences: (patch: DesktopPreferencesPatch) => Promise<SaveResult>;
+  continueInBackground: () => Promise<SaveResult>;
+  quitDesktop: () => Promise<SaveResult>;
   themePreference: ThemePreference;
   effectiveTheme: EffectiveTheme;
   setThemePreference: (preference: ThemePreference) => void;
@@ -439,6 +443,31 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     }), [client],
   );
 
+  const setDesktopPreferences = useCallback(
+    (patch: DesktopPreferencesPatch): Promise<SaveResult> => mutations.current.run(async () => {
+      try {
+        const saved = await client.desktopPreferencesSet(patch);
+        persistedVersion.current += 1;
+        setConfig(saved); setConfigError(null);
+        return { ok: true };
+      } catch (error) { return { ok: false, error: toClientError(error) }; }
+    }), [client],
+  );
+
+  const continueInBackground = useCallback((): Promise<SaveResult> => mutations.current.run(async () => {
+    try {
+      await client.desktopContinueInBackground();
+      return { ok: true };
+    } catch (error) { return { ok: false, error: toClientError(error) }; }
+  }), [client]);
+
+  const quitDesktop = useCallback((): Promise<SaveResult> => mutations.current.run(async () => {
+    try {
+      await client.desktopQuit();
+      return { ok: true };
+    } catch (error) { return { ok: false, error: toClientError(error) }; }
+  }), [client]);
+
   const resetConfig = useCallback((): Promise<SaveResult> => mutations.current.run(async () => {
     try {
       await client.configReset();
@@ -613,6 +642,9 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       saveConfig,
       mutateConfig,
       setUiLanguage,
+      setDesktopPreferences,
+      continueInBackground,
+      quitDesktop,
       deleteApiKey: () => mutations.current.run(async () => {
         await client.apiKeyDelete();
         persistedVersion.current += 1;
@@ -659,6 +691,9 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       saveConfig,
       mutateConfig,
       setUiLanguage,
+      setDesktopPreferences,
+      continueInBackground,
+      quitDesktop,
       setThemePreference,
       startHarness,
       stopHarness,

@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
+import { MockHarnessControlClient } from "@/services/harness/mock-client";
+import type { DesktopNavigationIntent } from "@/services/harness/client";
 
 const pages = [
   ["Tools", "Tools"],
@@ -12,6 +14,7 @@ const nav = (name: string) => screen.getByRole("button", { name: new RegExp(`${n
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   window.history.replaceState({}, "", "/");
 });
 
@@ -51,6 +54,41 @@ describe("M1 application shell", () => {
     window.history.replaceState({}, "", "/?mock=error");
     render(<App />);
     expect(await screen.findByText(/Runtime unavailable/)).toBeInTheDocument();
+  });
+
+  it("routes typed Host navigation intents to Overview and Approvals", async () => {
+    let navigation: ((intent: DesktopNavigationIntent) => void) | undefined;
+    vi.spyOn(MockHarnessControlClient.prototype, "desktopNavigationSubscribe").mockImplementation(async (listener) => {
+      navigation = listener;
+      return () => undefined;
+    });
+    vi.spyOn(MockHarnessControlClient.prototype, "desktopBackgroundNoticeSubscribe").mockResolvedValue(() => undefined);
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Overview", level: 1 })).toBeInTheDocument();
+    await waitFor(() => expect(navigation).toBeDefined());
+    navigation?.({ page: "approvals", objectId: "approval_mock_01" });
+    expect(await screen.findByRole("heading", { name: "Approvals", level: 1 })).toBeInTheDocument();
+    navigation?.({ page: "overview" });
+    expect(await screen.findByRole("heading", { name: "Overview", level: 1 })).toBeInTheDocument();
+  });
+
+  it("shows first-close education and Continue calls background command without Stop", async () => {
+    let notice: (() => void) | undefined;
+    vi.spyOn(MockHarnessControlClient.prototype, "desktopNavigationSubscribe").mockResolvedValue(() => undefined);
+    vi.spyOn(MockHarnessControlClient.prototype, "desktopBackgroundNoticeSubscribe").mockImplementation(async (listener) => {
+      notice = listener;
+      return () => undefined;
+    });
+    const continueInBackground = vi.spyOn(MockHarnessControlClient.prototype, "desktopContinueInBackground");
+    const harnessStop = vi.spyOn(MockHarnessControlClient.prototype, "harnessStop");
+    render(<App />);
+    await screen.findByRole("heading", { name: "Overview", level: 1 });
+    await waitFor(() => expect(notice).toBeDefined());
+    notice?.();
+    expect(await screen.findByRole("heading", { name: "Keep ChatGPT-Harness available in the Tray?", level: 2 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue in background" }));
+    await waitFor(() => expect(continueInBackground).toHaveBeenCalledOnce());
+    expect(harnessStop).not.toHaveBeenCalled();
   });
 });
 

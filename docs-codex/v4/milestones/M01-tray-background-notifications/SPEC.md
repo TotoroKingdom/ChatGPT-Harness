@@ -1,13 +1,13 @@
 # M01 SPEC — Tray, Background Lifecycle and Notifications
 
-> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。M01 六份里程碑文档现已齐全；三份验证/验收计划已在实现前冻结。M00 当前仍未完成最终验收，M01 实现继续受 M00 ACCEPTED / FROZEN Gate（验收通过 / 冻结门槛）约束；M00 若修订上游契约，必须先同步更新并重新冻结 M01 文档。报告更新既有证据记录，不逐次新建总结报告。
+> 布局与测试生命周期遵守 [AGENTS.md](../../../../AGENTS.md)，先复用现有模块及同类测试，不创建独立实验工程或新顶级目录。M01 六份里程碑文档现已齐全；三份验证/验收计划已在实现前冻结。M00 已按当前仓库正式文档 ACCEPTED / FROZEN；M01 已完成针对 M00 的契约 rebase。报告更新既有证据记录，不逐次新建总结报告。
 
-> Status: DRAFT / DESIGN READY — IMPLEMENTATION BLOCKED BY M00 ACCEPTANCE  
+> Status: SPEC_READY / IMPLEMENTATION UNLOCKED AFTER M00 ACCEPTED / FROZEN REBASE
 > Milestone: M01 — Tray, Background Lifecycle and Notifications  
 > Scope: P0 F01 System Tray + F03 Approval Notifications + F04 Disconnect / Recovery Notifications  
 > Depends on: M00 — As-Is Baseline and Architecture Contract Gate  
-> Upstream: V4 PRD / Architecture / Roadmap + M00 implementation-frozen contract once accepted  
-> Important: this document may be reviewed before M00 closes, but no implementation Task may start until M00 is ACCEPTED / FROZEN and any M00 ADR revisions have been rebased into M01.
+> Upstream: V4 PRD / Architecture / Roadmap + M00 implementation-frozen contract
+> Important: M00 acceptance is recorded in the six M00 milestone documents; M01 implementation may proceed only against that frozen contract.
 
 ---
 
@@ -48,7 +48,7 @@ M01 must preserve the existing authority model:
 
 ## 2. Gate from M00
 
-M01 implementation is blocked until M00 is ACCEPTED / FROZEN.
+M01 implementation is gated by M00 ACCEPTED / FROZEN. The gate is satisfied by the current M00 SPEC/PLAN/TASKS/Integration/E2E/Manual documents.
 
 Before T1 implementation begins, rebase this SPEC against M00 outputs and confirm:
 
