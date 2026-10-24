@@ -128,7 +128,14 @@ fn handle_menu_event(app: &AppHandle, coordinator: &DesktopLifecycleCoordinator,
         STOP_ID => {
             let _ = coordinator.dispatch_stop(app);
         }
-        QUIT_ID => coordinator.quit(app),
+        QUIT_ID => {
+            if let Err(error) = coordinator.quit(app) {
+                eprintln!(
+                    "explicit desktop quit cleanup reported {}: {}",
+                    error.code, error.message
+                );
+            }
+        }
         _ => {}
     }
     refresh(app, coordinator);

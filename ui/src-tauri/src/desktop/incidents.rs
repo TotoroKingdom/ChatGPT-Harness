@@ -28,6 +28,10 @@ impl IncidentCoordinator {
         self.intentional_stop_or_quit = true;
     }
 
+    pub fn cancel_intentional_stop(&mut self) {
+        self.intentional_stop_or_quit = false;
+    }
+
     pub fn observe(&mut self, status: &HarnessStatus, app_quitting: bool) -> IncidentTransition {
         if status.active_session_id != self.active_session_id {
             let closed = self.open_incident.take().is_some();

@@ -184,7 +184,8 @@ pub fn route_notification_click(
 mod tests {
     use super::*;
     use harness_control_protocol::{
-        ActivityEventType, ApprovalStatus, BashApprovalDetails, PolicyReason, RiskLevel,
+        ActivityEventType, ApprovalStatus, BashApprovalDetails, BashApprovalSegment,
+        BashClassification, BashRiskFlag, BashWorkingDirectory, PolicyReason, RiskLevel,
     };
 
     fn approval(
@@ -322,12 +323,54 @@ mod tests {
 
     #[test]
     fn formatter_excludes_scope_arguments_paths_and_secret_sentinels() {
-        let pending = approval("runtime-1", "request-1", ApprovalStatus::Pending, "write");
+        let mut pending = approval("runtime-1", "request-1", ApprovalStatus::Pending, "write");
+        pending
+            .sanitized_arguments
+            .insert("apiKey".into(), "M01_RAW_API_KEY_SENTINEL".into());
+        pending
+            .sanitized_arguments
+            .insert("content".into(), "M01_FILE_CONTENT_SENTINEL".into());
+        pending.scope_summary = "M01_PHYSICAL_PATH_SENTINEL".into();
+        pending.matched_rule_ids = vec![
+            "M01_ERROR_DETAIL_SENTINEL".into(),
+            "M01_METADATA_JSON_SENTINEL".into(),
+        ];
+        pending.bash_details = Some(BashApprovalDetails {
+            command_preview: "M01_RAW_BASH_SENTINEL".into(),
+            classification: BashClassification::Classified,
+            normalized_segments: vec![BashApprovalSegment {
+                executable: "M01_RAW_BASH_SENTINEL".into(),
+                argv: vec!["M01_RAW_BASH_SENTINEL".into()],
+                argv_redacted: true,
+            }],
+            risk_flags: vec![BashRiskFlag::Eval],
+            cwd: BashWorkingDirectory::ActiveWorkspace,
+            preview_redacted: true,
+            preview_truncated: false,
+        });
         let content = format_approval_notification(&pending).unwrap();
-        assert!(content.body.contains("write"));
-        assert!(!content.body.contains("SECRET_PATH"));
-        assert!(!content.body.contains("C:\\private"));
-        assert!(!content.body.contains("sanitizedArguments"));
+        let payload = serde_json::json!({
+            "title": content.title,
+            "body": content.body,
+            "runtimeId": content.identity.runtime_id,
+            "requestId": content.identity.request_id,
+        })
+        .to_string();
+        assert!(payload.contains("write"));
+        for sentinel in [
+            "M01_RAW_API_KEY_SENTINEL",
+            "M01_PHYSICAL_PATH_SENTINEL",
+            "M01_RAW_BASH_SENTINEL",
+            "M01_FILE_CONTENT_SENTINEL",
+            "M01_ERROR_DETAIL_SENTINEL",
+            "M01_METADATA_JSON_SENTINEL",
+            "sanitizedArguments",
+        ] {
+            assert!(
+                !payload.contains(sentinel),
+                "notification leaked {sentinel}"
+            );
+        }
     }
 
     #[test]

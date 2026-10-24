@@ -276,7 +276,14 @@ impl RuntimeSupervisor {
 
     pub(crate) fn set_activity_sink(&self, sink: Arc<dyn Fn(ActivityEvent) + Send + Sync>) {
         if let Ok(mut inner) = self.inner.lock() {
-            inner.activity_sink = Some(sink);
+            // Activity notifications are emitted by the Runtime protocol
+            // reader.  Never let a Host-side refresh or notification callback
+            // block that reader, otherwise its synchronous approvals.list
+            // request cannot be routed back to the waiting caller.
+            inner.activity_sink = Some(Arc::new(move |event| {
+                let sink = sink.clone();
+                thread::spawn(move || sink(event));
+            }));
         }
     }
 
@@ -1271,6 +1278,9 @@ fn machine_code(code: &harness_control_protocol::MachineErrorCode) -> &'static s
 
 #[cfg(test)]
 mod m2_e2e;
+
+#[cfg(test)]
+mod m01_integration;
 
 #[cfg(test)]
 mod m3_config_integration;

@@ -58,11 +58,25 @@ pub fn run() {
             let handle_for_activity = handle.clone();
             let runtime_for_activity = runtime.clone();
             runtime.set_activity_sink(std::sync::Arc::new(move |event| {
+                if !matches!(
+                    event.event_type,
+                    harness_control_protocol::ActivityEventType::ApprovalRequested
+                        | harness_control_protocol::ActivityEventType::ApprovalResolved
+                        | harness_control_protocol::ActivityEventType::ApprovalDenied
+                        | harness_control_protocol::ActivityEventType::ApprovalExpired
+                        | harness_control_protocol::ActivityEventType::ApprovalCancelled
+                ) {
+                    return;
+                }
                 let approvals = runtime_for_activity
                     .approvals_list(harness_control_protocol::ApprovalsListParams::default())
                     .map(|result| result.items)
                     .map_err(|_| ());
                 desktop_for_activity.handle_activity(&handle_for_activity, event, approvals);
+                // Approval activity changes the authoritative Pending
+                // projection without necessarily changing Harness lifecycle.
+                // Refresh the Tray here so its count cannot remain stale.
+                crate::desktop::tray::refresh(&handle_for_activity, &desktop_for_activity);
             }));
 
             let desktop_for_click = desktop.clone();

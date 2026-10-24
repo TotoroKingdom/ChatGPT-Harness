@@ -23,6 +23,10 @@ impl DesktopLifecycleState {
         self.education_visible = false;
         true
     }
+
+    pub fn cancel_quit(&mut self) {
+        self.app_quitting = false;
+    }
 }
 
 pub fn close_decision(app_quitting: bool, background_notice_acknowledged: bool) -> CloseDecision {
@@ -88,6 +92,15 @@ mod tests {
             close_decision(state.app_quitting, false),
             CloseDecision::AllowExit
         );
+    }
+
+    #[test]
+    fn failed_quit_cleanup_releases_the_quit_lock_for_retry() {
+        let mut state = DesktopLifecycleState::default();
+        assert!(state.begin_quit());
+        state.cancel_quit();
+        assert!(!state.app_quitting);
+        assert!(state.begin_quit());
     }
 
     #[test]

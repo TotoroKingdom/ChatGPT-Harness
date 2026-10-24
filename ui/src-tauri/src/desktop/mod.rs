@@ -285,26 +285,37 @@ impl DesktopLifecycleCoordinator {
         began
     }
 
+    fn cancel_quit(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.lifecycle.cancel_quit();
+            inner.incidents.cancel_intentional_stop();
+        }
+    }
+
     pub fn mark_intentional_stop(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.incidents.mark_intentional_stop();
         }
     }
 
-    pub fn quit(&self, app: &AppHandle) {
+    pub fn quit(&self, app: &AppHandle) -> Result<(), ControlError> {
         if !self.begin_quit() {
-            return;
+            return Ok(());
         }
         // The flag is set before entering HarnessController's serialized stop
         // path, so a racing Tray Start cannot create a new owned process.
         if let Err(error) = self.harness.stop(app) {
-            eprintln!(
-                "explicit desktop quit cleanup reported {}: {}",
-                error.code, error.message
-            );
+            // Do not exit while Harness reports a cleanup failure: the bounded
+            // stop path may have left an owned child alive. Keep the Host up,
+            // release the quit lock, and let the command surface the error so
+            // the user can retry without creating an orphan.
+            self.cancel_quit();
+            tray::refresh(app, self);
+            return Err(error);
         }
         let _ = app.remove_tray_by_id(tray::TRAY_ID);
         app.exit(0);
+        Ok(())
     }
 
     pub fn acknowledge_and_hide(

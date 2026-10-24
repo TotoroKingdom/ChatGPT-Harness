@@ -164,8 +164,7 @@ pub fn desktop_quit(
     app: AppHandle,
     coordinator: State<'_, DesktopLifecycleCoordinator>,
 ) -> Result<(), ControlError> {
-    coordinator.quit(&app);
-    Ok(())
+    coordinator.quit(&app)
 }
 
 #[tauri::command]
