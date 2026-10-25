@@ -292,13 +292,22 @@ fn startup_and_diagnostic_v1_additions_round_trip_with_unknown_and_safe_fields()
             "summary": "SecretStore is unavailable.",
             "scope": "credential",
             "evidence": [{"key": "error_code", "value": "SECRET_STORE_FAILED"}],
-            "remediation": {"code": "credential_retry", "summary": "Retry later.", "target": "settings_connection"}
+            "remediation": "Retry later.",
+            "remediationDetail": {"code": "credential_retry", "summary": "Retry later.", "target": "settings_connection"}
         }]
     });
     let run: DiagnosticRun = validate(diagnostic);
     assert_eq!(run.overall_status, DiagnosticStatus::Unknown);
     assert_eq!(run.checks[0].scope, Some(DiagnosticScope::Credential));
     assert_eq!(run.checks[0].evidence[0].value, "SECRET_STORE_FAILED");
+    assert_eq!(run.checks[0].remediation.as_deref(), Some("Retry later."));
+    assert_eq!(
+        run.checks[0]
+            .remediation_detail
+            .as_ref()
+            .map(|value| value.code.as_str()),
+        Some("credential_retry")
+    );
 
     let startup = serde_json::json!({
         "attemptId": "attempt-contract",

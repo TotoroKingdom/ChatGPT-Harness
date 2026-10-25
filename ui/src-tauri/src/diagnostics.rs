@@ -69,6 +69,13 @@ impl<'a> DiagnosticsCoordinator<'a> {
         };
         let runtime_readiness =
             runtime_readiness_check(process_status.phase, runtime_state.as_ref());
+        let runtime_diagnostics = if process_status.phase == RuntimeProcessPhase::Running {
+            Some(self.runtime.diagnostics())
+        } else {
+            None
+        };
+        let runtime_diagnostics_check =
+            runtime_diagnostics_check(process_status.phase, runtime_diagnostics.as_ref());
         let mcp_endpoint = mcp_endpoint_check(self.runtime);
 
         let tunnel_distribution = tunnel_distribution_check(config.as_ref());
@@ -89,6 +96,7 @@ impl<'a> DiagnosticsCoordinator<'a> {
             runtime_distribution,
             runtime_process,
             runtime_readiness,
+            runtime_diagnostics_check,
             mcp_endpoint,
             tunnel_distribution,
             tunnel_process,
@@ -314,6 +322,49 @@ fn runtime_readiness_check(
     )
 }
 
+fn runtime_diagnostics_check(
+    process: RuntimeProcessPhase,
+    diagnostics: Option<&Result<DiagnosticRun, crate::runtime::SupervisorError>>,
+) -> DiagnosticCheck {
+    let Some(diagnostics) = diagnostics else {
+        return check(
+            "runtime_diagnostics",
+            DiagnosticScope::Runtime,
+            DiagnosticStatus::Unknown,
+            if process == RuntimeProcessPhase::Stopped {
+                "Runtime diagnostics cannot run while Runtime is stopped."
+            } else {
+                "Runtime diagnostics are not currently observable."
+            },
+            Vec::new(),
+            None,
+        );
+    };
+    match diagnostics {
+        Ok(run) => check(
+            "runtime_diagnostics",
+            DiagnosticScope::Runtime,
+            run.overall_status.clone(),
+            match &run.overall_status {
+                DiagnosticStatus::Pass => "Runtime diagnostics completed successfully.",
+                DiagnosticStatus::Warning => "Runtime diagnostics found a warning.",
+                DiagnosticStatus::Fail => "Runtime diagnostics found a failure.",
+                DiagnosticStatus::Unknown => "Runtime diagnostics could not confirm all facts.",
+            },
+            vec![evidence(DiagnosticEvidenceKey::Configured, "true")],
+            None,
+        ),
+        Err(error) => check(
+            "runtime_diagnostics",
+            DiagnosticScope::Runtime,
+            DiagnosticStatus::Unknown,
+            "Runtime diagnostics returned no current result.",
+            vec![evidence(DiagnosticEvidenceKey::ErrorCode, &error.code)],
+            None,
+        ),
+    }
+}
+
 fn mcp_endpoint_check(runtime: &RuntimeSupervisor) -> DiagnosticCheck {
     match runtime.mcp_endpoint() {
         Ok(_) => check(
@@ -397,10 +448,15 @@ fn tunnel_process_check(
         );
     };
     let (result, summary, phase) = match status.state {
-        TunnelState::Ready | TunnelState::Degraded => (
+        TunnelState::Ready => (
             DiagnosticStatus::Pass,
             "A managed Tunnel process is present.",
             "ready",
+        ),
+        TunnelState::Degraded => (
+            DiagnosticStatus::Warning,
+            "A managed Tunnel process is present but degraded.",
+            "degraded",
         ),
         TunnelState::Stopped => (
             DiagnosticStatus::Warning,
@@ -859,13 +915,15 @@ fn check(
     evidence: Vec<DiagnosticEvidence>,
     remediation: Option<DiagnosticRemediation>,
 ) -> DiagnosticCheck {
+    let legacy_remediation = remediation.as_ref().map(|value| value.summary.clone());
     DiagnosticCheck {
         id: id.into(),
         status,
         summary: summary.into(),
         scope: Some(scope),
         evidence,
-        remediation,
+        remediation: legacy_remediation,
+        remediation_detail: remediation,
     }
 }
 
@@ -1004,5 +1062,20 @@ mod tests {
         let serialized = serde_json::to_string(&check).unwrap();
         assert!(!serialized.contains("raw-secret"));
         assert!(serialized.contains("CONTROL_PLANE_UNAUTHORIZED"));
+    }
+
+    #[test]
+    fn runtime_diagnostics_source_failure_is_unknown_and_bounded() {
+        let error = crate::runtime::SupervisorError {
+            code: "RUNTIME_DIAGNOSTICS_UNAVAILABLE".into(),
+            message: "raw runtime body must not escape".into(),
+        };
+        let diagnostics: Result<DiagnosticRun, crate::runtime::SupervisorError> = Err(error);
+        let check = runtime_diagnostics_check(RuntimeProcessPhase::Running, Some(&diagnostics));
+        assert_eq!(check.status, DiagnosticStatus::Unknown);
+        assert_eq!(check.evidence[0].value, "RUNTIME_DIAGNOSTICS_UNAVAILABLE");
+        assert!(!serde_json::to_string(&check)
+            .unwrap()
+            .contains("raw runtime body"));
     }
 }

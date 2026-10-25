@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { DiagnosticRun, DiagnosticScope, StartupAttempt } from "@protocol/v1";
+import type { DiagnosticCheck, DiagnosticRun, DiagnosticScope, StartupAttempt } from "@protocol/v1";
 import { useTranslation } from "react-i18next";
 import { Button, InlineFeedback, Row, Section, StatusBadge } from "@/components/common/primitives";
 import type { Navigate } from "@/app/router/routes";
@@ -33,6 +33,10 @@ function slowestPhase(startup: StartupAttempt) {
   );
 }
 
+function remediationFor(check: DiagnosticCheck) {
+  return check.remediationDetail ?? (check.remediation ? { code: "legacy", summary: check.remediation } : null);
+}
+
 export function DiagnosticsPanel({ run, startup, running = false, onRun, onNavigate }: Props) {
   const { t } = useTranslation();
   const [copyFeedback, setCopyFeedback] = useState<"copied" | "failed" | null>(null);
@@ -59,7 +63,7 @@ export function DiagnosticsPanel({ run, startup, running = false, onRun, onNavig
           <div className="row-identity"><strong>{check.id}</strong><span className="muted">{t(diagnosticScopeKey((check.scope ?? "lifecycle") as DiagnosticScope))}</span></div>
           <div className="settings-actions"><StatusBadge>{t(diagnosticStatusKey(check.status))}</StatusBadge><span>{check.summary}</span></div>
           {check.evidence.length > 0 && <small className="muted">{t("diagnostics.evidence")}: {check.evidence.map((item) => `${item.key}=${item.value}`).join(", ")}</small>}
-          {check.remediation && <div className="settings-actions"><span className="muted">{t("diagnostics.remediation")}: {check.remediation.summary}</span>{check.remediation.target && settingsTarget[check.remediation.target] && onNavigate && <Button variant="quiet" onClick={() => onNavigate("settings", { settingsSection: settingsTarget[check.remediation!.target!] })}>{t("m8.openSettings")}</Button>}</div>}
+          {remediationFor(check) && <div className="settings-actions"><span className="muted">{t("diagnostics.remediation")}: {remediationFor(check)!.summary}</span>{remediationFor(check)!.target && settingsTarget[remediationFor(check)!.target!] && onNavigate && <Button variant="quiet" onClick={() => onNavigate("settings", { settingsSection: settingsTarget[remediationFor(check)!.target!] })}>{t("m8.openSettings")}</Button>}</div>}
         </div>)}
       </div>
     </>}

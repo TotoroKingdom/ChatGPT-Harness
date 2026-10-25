@@ -507,7 +507,8 @@ pub fn local_diagnostics_run(
             key: DiagnosticEvidenceKey::Exists,
             value: workspace_ok.to_string(),
         }],
-        remediation: (!workspace_ok).then(|| DiagnosticRemediation {
+        remediation: (!workspace_ok).then(|| "Choose an accessible folder in Settings.".into()),
+        remediation_detail: (!workspace_ok).then(|| DiagnosticRemediation {
             code: "workspace_choose".into(),
             summary: "Choose an accessible folder in Settings.".into(),
             target: Some(DiagnosticRemediationTarget::SettingsWorkspace),
@@ -531,7 +532,9 @@ pub fn local_diagnostics_run(
             key: DiagnosticEvidenceKey::Configured,
             value: tunnel_ok.to_string(),
         }],
-        remediation: (!tunnel_ok).then(|| DiagnosticRemediation {
+        remediation: (!tunnel_ok)
+            .then(|| "Configure an external connection in Settings when needed.".into()),
+        remediation_detail: (!tunnel_ok).then(|| DiagnosticRemediation {
             code: "connection_configure".into(),
             summary: "Configure an external connection in Settings when needed.".into(),
             target: Some(DiagnosticRemediationTarget::SettingsConnection),
@@ -561,7 +564,10 @@ pub fn local_diagnostics_run(
             key: DiagnosticEvidenceKey::Exists,
             value: client_ok.to_string(),
         }],
-        remediation: (!client_ok).then(|| DiagnosticRemediation {
+        remediation: (!client_ok).then(|| {
+            "Choose a tunnel-client package folder when external connection is needed.".into()
+        }),
+        remediation_detail: (!client_ok).then(|| DiagnosticRemediation {
             code: "tunnel_client_choose".into(),
             summary: "Choose a tunnel-client package folder when external connection is needed."
                 .into(),
@@ -595,7 +601,9 @@ pub fn local_diagnostics_run(
             key: DiagnosticEvidenceKey::Exists,
             value: api_key_ok.to_string(),
         }],
-        remediation: (!api_key_ok).then(|| DiagnosticRemediation {
+        remediation: (!api_key_ok)
+            .then(|| "Save an API Key when external connection is needed.".into()),
+        remediation_detail: (!api_key_ok).then(|| DiagnosticRemediation {
             code: "credential_save".into(),
             summary: "Save an API Key when external connection is needed.".into(),
             target: Some(DiagnosticRemediationTarget::SettingsConnection),
@@ -623,6 +631,7 @@ pub fn local_diagnostics_run(
             value: security_ok.to_string(),
         }],
         remediation: None,
+        remediation_detail: None,
     });
     let overall_status = if checks
         .iter()

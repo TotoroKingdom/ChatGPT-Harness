@@ -164,7 +164,7 @@ export type DiagnosticEvidence = { key: DiagnosticEvidenceKey,
 value: string, };
 export type DiagnosticRemediationTarget = "overview" | "settings_workspace" | "settings_connection" | "settings_security";
 export type DiagnosticRemediation = { code: string, summary: string, target?: DiagnosticRemediationTarget, };
-export type DiagnosticCheck = { id: string, status: DiagnosticStatus, summary: string, scope?: DiagnosticScope, evidence: Array<DiagnosticEvidence>, remediation?: DiagnosticRemediation, };
+export type DiagnosticCheck = { id: string, status: DiagnosticStatus, summary: string, scope?: DiagnosticScope, evidence: Array<DiagnosticEvidence>, remediation?: string, remediationDetail?: DiagnosticRemediation, };
 export type DiagnosticRun = { runId: string, startedAt: string, finishedAt: string, overallStatus: DiagnosticStatus, checks: Array<DiagnosticCheck>, };
 export type StartupCohort = "cold" | "warm";
 export type StartupOutcome = "ready" | "failed" | "cancelled" | "incomplete";

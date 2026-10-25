@@ -13,7 +13,8 @@ const run: DiagnosticRun = {
     summary: "safe summary",
     scope: "workspace",
     evidence: [{ key: "exists", value: "true" }, { key: "error_code", value: "C:\\private\\secret" }],
-    remediation: { code: "workspace_choose", summary: "safe", target: "settings_workspace" },
+    remediation: "safe",
+    remediationDetail: { code: "workspace_choose", summary: "safe", target: "settings_workspace" },
   }],
 };
 const startup: StartupAttempt = {

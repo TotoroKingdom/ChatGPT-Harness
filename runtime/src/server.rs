@@ -460,6 +460,7 @@ fn handle_request<W: Write>(
                         scope: Some(DiagnosticScope::Runtime),
                         evidence: Vec::new(),
                         remediation: None,
+                        remediation_detail: None,
                     }],
                 },
             )?;

@@ -14,6 +14,12 @@
           "type": "string"
         },
         "remediation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "remediationDetail": {
           "anyOf": [
             {
               "$ref": "#/$defs/DiagnosticRemediation"

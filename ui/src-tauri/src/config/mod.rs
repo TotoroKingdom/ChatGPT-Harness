@@ -424,6 +424,25 @@ mod tests {
     }
 
     #[test]
+    fn inspect_read_only_never_creates_or_migrates_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(directory.path().into());
+        assert_eq!(store.inspect_read_only().unwrap(), None);
+        assert!(!store.file.exists());
+
+        fs::write(
+            &store.file,
+            include_bytes!("../../../../fixtures/config/v1-v2-era.json"),
+        )
+        .unwrap();
+        let before = fs::read(&store.file).unwrap();
+        let inspected = store.inspect_read_only().unwrap().unwrap();
+        assert_eq!(inspected.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(fs::read(&store.file).unwrap(), before);
+        assert!(!store.file.with_extension("json.tmp").exists());
+    }
+
+    #[test]
     fn safe_defaults_enable_m2_tools_and_keep_bash_disabled() {
         let tools = ConfigStore::safe_defaults().tools;
 

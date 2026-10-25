@@ -32,7 +32,8 @@ export function formatDiagnosticCopy(run: DiagnosticRun | null, startup: Startup
       .filter((item) => evidenceKeys.has(item.key))
       .map((item) => `${item.key}=${safeValue(item.value)}`)
       .join(",");
-    const remediation = check.remediation ? ` remediation=${safeValue(check.remediation.code)}` : "";
+    const remediationDetail = check.remediationDetail ?? (check.remediation ? { code: "legacy", summary: check.remediation } : null);
+    const remediation = remediationDetail ? ` remediation=${safeValue(remediationDetail.code)}` : "";
     lines.push(`check=${safeValue(check.id)} status=${check.status} scope=${scope} evidence=${evidence}${remediation}`);
   }
   if (startup) {

@@ -85,7 +85,10 @@ pub struct DiagnosticCheck {
     pub evidence: Vec<DiagnosticEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub remediation: Option<DiagnosticRemediation>,
+    pub remediation: Option<String>,
+    #[serde(rename = "remediationDetail", skip_serializing_if = "Option::is_none")]
+    #[ts(rename = "remediationDetail", optional)]
+    pub remediation_detail: Option<DiagnosticRemediation>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
