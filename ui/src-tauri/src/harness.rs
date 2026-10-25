@@ -123,16 +123,13 @@ impl HarnessController {
     }
 
     pub fn status(&self) -> HarnessStatus {
-        let changed = self.reconcile_tunnel_projection();
+        self.reconcile_tunnel_projection();
         let status = self
             .shared
             .inner
             .lock()
             .map(|inner| inner.status.clone())
             .unwrap_or_else(|_| stopped_status());
-        if changed {
-            self.emit_status(&status);
-        }
         status
     }
 
