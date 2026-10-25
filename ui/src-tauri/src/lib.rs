@@ -132,9 +132,10 @@ pub fn run() {
             crate::desktop::tray::observe_pending(&handle, &desktop, &runtime);
             let desktop_for_status = desktop.clone();
             let runtime_for_status = runtime.clone();
+            let handle_for_status = handle.clone();
             controller.set_status_sink(std::sync::Arc::new(move |status| {
-                let _ = handle.emit("harness:status", status);
-                if desktop_for_status.observe_status_with_app(&handle, status.clone()) {
+                let _ = handle_for_status.emit("harness:status", status);
+                if desktop_for_status.observe_status_with_app(&handle_for_status, status.clone()) {
                     let approvals = runtime_for_status
                         .approvals_list(harness_control_protocol::ApprovalsListParams::default())
                         .map(|result| result.items)
@@ -142,8 +143,9 @@ pub fn run() {
                     desktop_for_status
                         .bootstrap_approvals(status.active_session_id.as_deref(), approvals);
                 }
-                crate::desktop::tray::refresh(&handle, &desktop_for_status);
+                crate::desktop::tray::refresh(&handle_for_status, &desktop_for_status);
             }));
+            let _ = crate::startup_benchmark::maybe_spawn(&handle);
             Ok(())
         })
         .manage(std::sync::Mutex::new(crate::commands::BackendState {
@@ -205,6 +207,7 @@ mod platform;
 mod runtime;
 mod secrets;
 mod startup;
+mod startup_benchmark;
 // M7-B is intentionally internal until a later connection orchestration slice.
 #[allow(dead_code)]
 mod tunnel;
