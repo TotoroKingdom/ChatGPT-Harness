@@ -1,246 +1,533 @@
-# M02 Integration Test Plan — Startup Measurement and One-click Diagnostics
+# M02 Integration Test Plan — Startup Performance and One-click Diagnostics
 
-> 存放规则遵守 AGENTS.md。本目录只保留六份正式文档；执行日志、benchmark archive、独立报告和临时数据不得写入本目录。  
 > Status: VALIDATION BASELINE FROZEN / NOT EXECUTED  
 > Milestone: M02 — Startup Performance and One-click Diagnostics  
 > Inputs: SPEC.md, PLAN.md, TASKS.md  
 > Owner: independent QA / Coding Agent after M02 Development Complete  
-> Scope: Host startup recorder, startup DTOs, DiagnosticsCoordinator, fault mapping, read-only/privacy, Overview/Settings client boundary and packaged regression.
+> Scope: F05 Startup Performance + F06 One-click Diagnostics  
+> Rule: Integration validates real product modules and packaged Host boundaries, but does not replace the real external ChatGPT E2E or human acceptance.  
+> Storage: execution logs and temporary benchmark data use system temporary directories; do not add report/evidence files to this milestone directory.
+
+---
 
 ## 1. Objective
 
-Integration proves that M02 crosses the real protocol → Tauri Host → Runtime/Tunnel → React boundaries without creating a second lifecycle, readiness, Policy or credential authority.
+Integration proves that M02 implementation is internally correct before external E2E:
 
-The required proof chain is:
+- StartupPhaseRecorder measures the existing authoritative startup lifecycle rather than creating a second lifecycle.
+- timing, cold/warm classification, P50/P95 and failure-rate math exactly match SPEC.
+- B0 baseline was captured before optimization and candidate comparison uses the same measurement contract.
+- optimization preserves Runtime/MCP/Tunnel readiness semantics.
+- DiagnosticsCoordinator aggregates existing authorities and returns PASS / WARNING / FAIL / UNKNOWN truthfully.
+- diagnostics are read-only and privacy-safe.
+- Overview and Settings consume the same diagnostic model.
+- M01 Tray/background/notification behavior remains intact.
 
-~~~text
-accepted Harness Start
-  → Host monotonic StartupAttempt
-  → authoritative Runtime/MCP/Tunnel readiness
-  → authoritative Harness Ready
+Integration cases use the real Runtime/Tauri modules and real packaged components where required, but external ChatGPT is reserved for E2E.
 
-read-only Tauri diagnostics command
-  → Config/Workspace/SecretStore presence
-  → Runtime/MCP/Tunnel/control-plane/proxy facts
-  → typed PASS/WARNING/FAIL/UNKNOWN
-  → shared Overview/Settings presentation
-~~~
-
-This plan is frozen before formal Integration execution. A failed or blocked external boundary must remain recorded as such; it must not be replaced with a weaker mock.
+---
 
 ## 2. Entry Criteria
 
-Before Integration execution:
+Before execution:
 
-- M01 is user-accepted and frozen.
-- M02 T1–T6 are Development Complete.
-- B0 SHA and candidate SHA are fixed.
-- Startup recorder exists before the candidate optimization cohort.
-- task-local Rust and frontend tests are PASS.
-- cargo fmt, cargo check, cargo test, npm run typecheck, npm test and npm run build have been run for the same candidate.
-- disposable config, SecretStore fixture and Workspace use system temporary locations; no real user profile is used for fault injection.
+- previous milestone governance gate is satisfied;
+- M02 T1–T6 are Development Complete;
+- exact candidate commit is frozen;
+- B0 exact SHA and summarized baseline statistics exist in the Development Complete output;
+- final candidate benchmark statistics exist and claim all SPEC §8 thresholds PASS;
+- task-local tests are PASS;
+- candidate Portable package exists;
+- benchmark/fault-fixture temporary data is disposable and separate from the real user profile.
 
-Minimum preflight:
+Preflight:
 
 ~~~text
 cargo fmt --all -- --check
 cargo check --workspace
 cargo test --workspace
+
 cd ui
 npm run typecheck
 npm test
 npm run build
 ~~~
 
-If a required packaged/runtime boundary is unavailable:
+If a required candidate/B0 identity is missing, the affected performance cases are BLOCKED, not PASS.
 
-~~~text
-M02 Integration = BLOCKED
-~~~
+---
 
 ## 3. Evidence Header
 
-Every execution record is delivered in the conversation or an existing approved evidence channel and records:
+Record:
 
 ~~~text
-Milestone:
+Milestone: M02
 Candidate commit:
-Branch:
-Dirty state:
-Windows build:
-Power mode:
-Package type:
-App/Runtime/Tunnel versions:
-Package hash:
-Workspace fixture identity:
+B0 instrumentation-only commit:
+Product logic baseline:
+Branch / dirty state:
+Windows version:
+CPU / power mode:
+App version:
+Runtime version:
+Tunnel version:
+Package type / SHA-256:
+Workspace fixture:
 Config revision:
-Proxy source/route mode:
+Tunnel ID identity:
+Proxy source / route mode:
 Network type:
-Execution time:
 QA owner:
-Cleanup:
+Execution time:
 ~~~
 
-No secret, physical Workspace path, credential-bearing proxy URL, raw environment or unrestricted process output may be retained in evidence.
+Never record API Key or SecretStore values.
+
+Each case records:
+
+- Case ID
+- related AC
+- exact command/runner
+- expected
+- actual
+- PASS / FAIL / BLOCKED / INCONCLUSIVE
+- cleanup status
+
+---
 
 ## 4. Required Integration Cases
 
-### M02-INT-01 — Protocol additive startup and diagnostics contract
+### M02-INT-01 — Startup attempt identity and frozen phase lifecycle
 
-**AC:** M02-AC01, AC06, AC08  
-**Task:** T1/T3
+**AC:** M02-AC01  
+**Tasks:** T1
 
-Validate generated TypeScript and JSON Schema against Rust models:
+Exercise a real Host-managed successful Start and focused failure cases.
 
-- all frozen startup phase IDs round-trip;
-- cold/warm and all startup outcomes round-trip;
-- phase status and bounded error code round-trip;
-- DiagnosticStatus includes UNKNOWN;
-- typed scope/evidence/remediation round-trip;
-- old v1 diagnostic fixture remains readable;
-- generated artifacts are current.
+Verify:
 
-**PASS:** protocol v1 remains additive and no raw value is required by the new DTOs.
+- exactly one StartupAttempt for one accepted Start;
+- attemptId is unique;
+- harnessSessionId matches the active Harness session;
+- all frozen phase IDs are present with truthful completed/failed/skipped/incomplete status;
+- startedOffsetMs and durationMs are non-negative and monotonic;
+- totalDurationMs closes only when the same session reaches authoritative Ready;
+- rejected lifecycle conflict does not become a successful latency sample;
+- Stop/Quit during Starting terminalizes as cancelled where appropriate;
+- crash before terminal state is incomplete;
+- old Runtime/Tunnel generation events cannot close a new attempt.
 
-### M02-INT-02 — Successful startup recorder closes only on authoritative Ready
+**PASS:** recorder observes the real lifecycle without inventing state.
 
-**AC:** M02-AC01, AC03, AC06  
+---
+
+### M02-INT-02 — Host monotonic timing and no cross-process clock arithmetic
+
+**AC:** M02-AC01, M02-AC02  
 **Task:** T1
 
-Using the real Host controller integration surface:
+Inspect/execute recorder contract tests proving:
 
-- start an accepted Harness session;
-- observe every frozen phase;
-- delay Tunnel readiness after process launch;
-- verify harness_ready and total duration close only after authoritative HarnessStatus Ready;
-- verify phase offsets/durations are monotonic and latest-attempt returns one snapshot.
+- Start→Ready total is calculated from one Host monotonic clock;
+- Runtime/Tunnel internal timestamps are never subtracted from Host Instant;
+- wall-clock timestamps are display labels only;
+- simultaneous control-plane/MCP-target evidence can close separate phase markers at the same Host observation time without negative duration;
+- failed/skipped phases are never encoded as false zero-duration success.
 
-**PASS:** process exists, Runtime Running or Tunnel process spawn never closes the attempt as Ready.
+**PASS:** latency math is valid and deterministic.
 
-### M02-INT-03 — Startup failure, cancellation and stale-generation isolation
+---
 
-**AC:** M02-AC01, AC03, AC05  
-**Task:** T1/T2
+### M02-INT-03 — Baseline/candidate sample accounting and percentile algorithm
 
-Cover eligibility/config failure, Runtime spawn/initialize/MCP failure, Tunnel resolve/launch failure, Stop while Starting, stale old Runtime generation, stale old Tunnel generation/instance and repeated Ready event.
+**AC:** M02-AC02, M02-AC03  
+**Tasks:** T1/T6
 
-**PASS:** outcome is failed/cancelled/incomplete as applicable, later phases are skipped/incomplete, and old events cannot close a new attempt.
+Use the implementation benchmark/statistics code or independent QA calculator against synthetic raw sample sets.
 
-### M02-INT-04 — Startup instrumentation has no optimization or readiness shortcut
+Verify:
 
-**AC:** M02-AC03, AC05, AC15  
-**Task:** T1/T2/T6
+- 2 primer runs are excluded;
+- 30 counted cold + 30 counted warm are expected;
+- every accepted attempt enters failure-rate denominator;
+- only Ready attempts enter latency percentile set;
+- fewer than 29 Ready in a cohort cannot PASS;
+- P50 and P95 use nearest-rank ceil formula;
+- no averaging of P95;
+- no averaging of phase P95 into total P95;
+- valid slow samples cannot be silently filtered.
 
-Compare B0 and candidate startup call boundaries. Config/Workspace/security validation, SecretStore presence, Runtime version/initialize, MCP endpoint validation, Tunnel distribution/readiness/stale checks and the existing authoritative Harness Ready source must remain present.
+Then verify B0 evidence identity predates T2 optimization changes.
 
-**PASS:** instrumentation and later optimization do not replace a readiness check with process existence or spawn success.
+**PASS:** benchmark math and chronology match the frozen SPEC.
 
-### M02-INT-05 — Diagnostics command is read-only
+---
 
-**AC:** M02-AC07, AC10, AC11  
-**Task:** T3/T4
+### M02-INT-04 — Frozen performance threshold evaluator
 
-Run the aggregate command with call spies/sentinels and assert it never calls config save/reset or migration-writing load, Workspace/client chooser, SecretStore get/set/delete, Harness start/stop/restart, approvals.resolve or filesystem mutation. For a legacy config, verify diagnostic inspection does not rewrite bytes or mtime.
+**AC:** M02-AC04  
+**Tasks:** T2/T6
 
-**PASS:** diagnostics observes current facts only and cannot mutate product state.
+Feed threshold-boundary fixtures into the comparison evaluator.
 
-### M02-INT-06 — Diagnostics healthy state and status precedence
+Required assertions:
 
-**AC:** M02-AC08, AC09  
-**Task:** T3/T4
+- cold P50 > 90% of baseline fails;
+- warm P50 > 85% of baseline fails;
+- either P95 > 105% of baseline fails;
+- at least one cohort P95 must be <=90% baseline;
+- candidate failure rate cannot exceed baseline;
+- baseline zero failure requires candidate zero failure;
+- candidate failure rate cannot exceed 1/30;
+- material-bottleneck clause A or clause B must pass;
+- exact boundary values pass;
+- threshold constants are not read from mutable post-run user configuration.
 
-Exercise all-healthy/Ready plus warning+unknown, unknown only, failure plus warning/unknown and a lifecycle transition while diagnostics runs. Verify exact precedence:
+**PASS:** evaluator implements SPEC §8 exactly.
 
-~~~text
-FAIL > WARNING > UNKNOWN > PASS
-~~~
+---
 
-**PASS:** UNKNOWN is never presented or treated as PASS.
+### M02-INT-05 — Startup optimization preserves authoritative readiness
 
-### M02-INT-07 — Configuration and Workspace fault mapping
+**AC:** M02-AC05  
+**Tasks:** T1/T2
 
-**AC:** M02-AC07, AC09, AC12  
-**Task:** T3/T4
+Run real Host/Runtime/Tunnel integration failures at each boundary:
 
-Cover missing, malformed, unsupported, inaccessible config and missing/inaccessible Workspace. Verify dependent checks become UNKNOWN, no physical path is returned and remediation targets are typed.
+- invalid config / Workspace;
+- missing credential;
+- Runtime distribution/version failure;
+- Runtime initialize failure;
+- MCP endpoint failure;
+- Tunnel distribution/launch failure;
+- control-plane disconnected/stale;
+- MCP target unreachable.
 
-### M02-INT-08 — Runtime and MCP fault mapping
+Verify no case reaches Harness Ready merely because a process spawned or exists.
 
-**AC:** M02-AC07, AC09, AC12  
-**Task:** T3/T4
+Also verify successful Ready still requires the current managed Runtime/MCP/Tunnel conditions.
 
-Cover Runtime distribution missing/incompatible, stopped, crashed, status/diagnostics unavailable, MCP endpoint unavailable and ready. Verify process/readiness/endpoint statuses follow SPEC §12.
+**PASS:** optimization made startup faster without weakening truth.
 
-### M02-INT-09 — Tunnel/control-plane/target fault mapping
+---
 
-**AC:** M02-AC07, AC09, AC12  
-**Task:** T3/T4
+### M02-INT-06 — Optimized preparation does not create stale/cross-session authority
 
-Cover Tunnel distribution missing, stopped, starting, ready, degraded, failed, stale control plane, blocked recovery, target unreachable and recovery to Ready. Verify old readiness evidence cannot make a new instance PASS.
+**AC:** M02-AC05, M02-AC14  
+**Task:** T2
 
-### M02-INT-10 — Proxy and credential privacy-safe mapping
+If PreparedStart or equivalent optimization exists, verify:
 
-**AC:** M02-AC08, AC09, AC11, AC12  
-**Task:** T3/T4
+- data lifetime is one Start operation;
+- config change invalidates/rebuilds preparation;
+- raw secret is not cached across starts;
+- stale Runtime/Tunnel generation cannot reuse a prepared result;
+- Stop/Restart/Quit serialization still uses HarnessController operation mutex;
+- Tray Start calls the same authoritative path;
+- concurrent Start attempts do not duplicate Runtime/Tunnel processes.
 
-Cover direct/configured proxy, observed route, typed proxy failure, no route evidence, credential reference present/missing, SecretStore unavailable, accepted connection, Unauthorized/Forbidden and no live proof.
+If no PreparedStart abstraction exists, prove equivalent invariants for the implemented optimization.
 
-Inject sentinels for API key, credential-bearing proxy URL, Workspace path, raw environment, stdout/stderr and long error bodies. Search serialized result and safe copy output.
+**PASS:** performance cache/preparation never becomes a second source of truth.
 
-**PASS:** only allowlisted bounded facts remain.
+---
 
-### M02-INT-11 — Shared client command and latest startup snapshot
+### M02-INT-07 — DiagnosticsCoordinator required check coverage
 
-**AC:** M02-AC06, AC07, AC13  
+**AC:** M02-AC07, M02-AC09  
+**Task:** T3
+
+Execute aggregate diagnostics against a healthy controlled state.
+
+Verify required IDs are present:
+
+- config
+- workspace
+- runtime_distribution
+- runtime_process
+- runtime_readiness
+- mcp_endpoint
+- tunnel_distribution
+- tunnel_process
+- tunnel_readiness
+- control_plane
+- mcp_target
+- proxy_config
+- proxy_route
+- credential_presence
+- credential_state
+- harness_lifecycle
+
+Existing security check may be additional.
+
+**PASS:** one coordinator returns the complete product diagnostic surface.
+
+---
+
+### M02-INT-08 — Diagnostic aggregation consumes authoritative sources
+
+**AC:** M02-AC07, M02-AC09  
+**Task:** T3
+
+Instrument/spies verify coordinator obtains facts from:
+
+- ConfigStore/platform validation;
+- RuntimeSupervisor/current Runtime diagnostics;
+- current MCP endpoint state;
+- TunnelProcessManager readiness/recovery;
+- HarnessController lifecycle;
+- SecretStore presence/reference.
+
+Verify React does not independently reclassify lifecycle or connection truth.
+
+**PASS:** diagnostics aggregates; it does not reimplement authority.
+
+---
+
+### M02-INT-09 — PASS/WARNING/FAIL/UNKNOWN dependency semantics
+
+**AC:** M02-AC08, M02-AC09  
+**Tasks:** T3/T4
+
+Table-drive states:
+
+- healthy;
+- intentionally Stopped;
+- Starting/Stopping;
+- Runtime missing;
+- Runtime crashed;
+- live Runtime evidence unavailable;
+- Tunnel stopped;
+- Tunnel failed;
+- no current route evidence;
+- missing prerequisite.
+
+Verify:
+
+- PASS only for positively verified facts;
+- WARNING for verified nonfatal/intentional states such as stopped lifecycle;
+- FAIL for verified blocking problems;
+- UNKNOWN when the fact cannot safely be established;
+- UNKNOWN is never omitted or rendered as PASS;
+- overall precedence is FAIL > WARNING > UNKNOWN > PASS.
+
+**PASS:** uncertainty is represented truthfully.
+
+---
+
+### M02-INT-10 — Diagnostic DTO typed scope, bounded evidence and remediation
+
+**AC:** M02-AC08  
+**Tasks:** T3/T4
+
+Verify generated Rust/TS/schema contract includes:
+
+- DiagnosticStatus.UNKNOWN;
+- DiagnosticScope;
+- typed evidence key/value;
+- bounded safe value handling;
+- typed remediation code/target.
+
+Serialize/deserialize representative results.
+
+Verify unknown enum/input fails safely according to current protocol conventions and no protocol/v2 is introduced.
+
+**PASS:** wire/UI contract is additive and typed.
+
+---
+
+### M02-INT-11 — Config / Workspace / Runtime / MCP fault mapping
+
+**AC:** M02-AC09, M02-AC12  
+**Task:** T4
+
+Fixtures:
+
+- valid v3 config;
+- config missing;
+- config malformed/unsupported;
+- Workspace inaccessible;
+- Runtime distribution missing/incompatible;
+- Runtime stopped;
+- Runtime crashed;
+- Runtime status/diagnostics unavailable;
+- MCP endpoint unavailable/unreachable.
+
+Verify exact expected status and remediation family.
+
+Dependent checks with no valid prerequisite must become UNKNOWN, not synthetic FAIL/PASS unless the SPEC explicitly classifies the parent problem.
+
+**PASS:** core local failures are deterministic and actionable.
+
+---
+
+### M02-INT-12 — Tunnel / control-plane / target / proxy fault mapping
+
+**AC:** M02-AC09, M02-AC12  
+**Task:** T4
+
+Fixtures:
+
+- Tunnel distribution missing;
+- Tunnel intentionally stopped;
+- Starting;
+- Ready;
+- Degraded;
+- Failed;
+- recovery blocked;
+- stale control-plane poll;
+- control-plane disconnected;
+- MCP target unreachable;
+- direct route;
+- configured proxy;
+- observed proxy route;
+- typed proxy failure;
+- no live route evidence.
+
+Verify:
+
+- current typed readiness drives classification;
+- stale is not PASS;
+- no evidence is UNKNOWN;
+- proxy route does not expose credential-bearing URL.
+
+**PASS:** network path diagnosis is truthful and safe.
+
+---
+
+### M02-INT-13 — Credential-state fault mapping without secret disclosure
+
+**AC:** M02-AC09, M02-AC11, M02-AC12  
+**Task:** T4
+
+Cases:
+
+- SecretReference + credential exists;
+- reference missing;
+- referenced credential missing;
+- SecretStore unavailable;
+- current control-plane connection proves accepted;
+- current typed Unauthorized/Forbidden;
+- no live acceptance/rejection evidence.
+
+Verify:
+
+- presence and usable-state checks are distinct;
+- no extra credential-validation network request is made solely for diagnostics;
+- UNKNOWN is used when usable state cannot be proven;
+- raw secret never enters DTO/log/test failure output.
+
+**PASS:** credential diagnosis is useful without reading/exposing the secret value.
+
+---
+
+### M02-INT-14 — Running diagnostics is strictly read-only
+
+**AC:** M02-AC10  
+**Tasks:** T3/T4
+
+Use spies/instrumented adapters and filesystem/config snapshots.
+
+Before/after one diagnostics run verify no invocation or state change for:
+
+- config save/reset;
+- choose Workspace/client;
+- SecretStore set/delete;
+- Harness Start/Stop/Restart;
+- approvals.resolve;
+- Tool execution;
+- filesystem write/edit;
+- Policy/Approval/SessionGrant state.
+
+Verify only an explicit later user action may navigate or perform repair.
+
+**PASS:** diagnosis itself has zero product mutation.
+
+---
+
+### M02-INT-15 — Overview/Settings share one diagnostic model and safe-copy surface
+
+**AC:** M02-AC06, M02-AC13  
 **Task:** T5
 
-Verify the real client calls connection_diagnostics_run, latest attempt calls the Host latest-attempt command, Overview and Settings consume the same Provider snapshot, retry replaces the prior immutable result and one attempt is displayed as startup detail, never benchmark PASS.
+Frontend integration verifies:
 
-### M02-INT-12 — Safe copy allowlist
+- Overview visible one-click entry calls aggregate diagnostics;
+- Settings calls the same aggregate API;
+- no duplicate classification table exists in React;
+- four statuses render distinctly;
+- remediation navigation goes only to allowed targets;
+- latest startup attempt renders total/phases/slowest phase/outcome;
+- one startup attempt is not labeled benchmark PASS;
+- en and zh-CN keys exist.
 
-**AC:** M02-AC06, AC11, AC13  
-**Task:** T4/T5
+**PASS:** UI is a presentation layer over the same Host data.
 
-Copy only after explicit user action. Assert output contains only overall/check status/scope/allowlisted evidence/remediation code/startup timing fields. Unknown future DTO fields, raw summaries, paths, URLs and secrets are excluded.
+---
 
-### M02-INT-13 — Overview/Settings/i18n presentation
+### M02-INT-16 — Safe diagnostic copy + M01/V3 regression
 
-**AC:** M02-AC06, AC13  
-**Task:** T5
+**AC:** M02-AC11, M02-AC14  
+**Tasks:** T5/T6
 
-Verify en and zh-CN cover four diagnostic statuses, scopes, startup outcome/phase/status, running/error/retry/copy feedback and remediation navigation. No React code reclassifies or merges checks.
+Inject sentinels:
 
-### M02-INT-14 — M01/V3 regression boundary
+- API key;
+- physical Workspace path;
+- credential-bearing proxy URI;
+- raw environment;
+- raw stdout/stderr;
+- raw long control-plane error;
+- unexpected future DTO field.
 
-**AC:** M02-AC14  
-**Task:** T6
+Verify none appears in copied diagnostic summary.
 
-Run affected Tray, Close/Hide/Quit, connection notification, AppConfig v3 desktop preference, Workspace, Policy/Approval, Bash, SecretStore and Start/Stop/Restart suites. Confirm diagnostics does not mutate lifecycle or authorization.
+Then run affected regression for:
 
-### M02-INT-15 — Packaged candidate wiring
+- Tray Start/Stop/Show/Quit;
+- background continuity;
+- connection notifications;
+- AppConfig v3 desktop prefs;
+- Workspace;
+- Policy/Approval;
+- Bash;
+- SecretStore;
+- Start/Stop/Restart.
 
-**AC:** M02-AC13, AC14  
-**Task:** T6
+**PASS:** M02 adds observability/performance without leaking data or breaking M01/V3.
 
-Use the same packaged candidate for UI/Host integration. Verify the diagnostics command, startup latest command and embedded frontend are present. Record Portable/NSIS capability differences truthfully.
-
-### M02-INT-16 — Cleanup and candidate identity
-
-**AC:** M02-AC02, AC04, AC14  
-**Task:** T6
-
-Verify all test-owned Runtime/Tunnel processes stop, system temp data is removed, candidate hash/manifest remains bound to the evidence and no milestone directory receives per-run artifacts.
+---
 
 ## 5. Verdict Rules
 
-- PASS — executed and all assertions satisfied.
-- FAIL — executed and a required assertion failed.
-- BLOCKED — required packaged/external component is unavailable.
-- INCONCLUSIVE — execution occurred but evidence cannot support the required conclusion.
+Allowed verdicts:
 
-Integration PASS does not mark M02 ACCEPTED/FROZEN.
+- PASS
+- FAIL
+- BLOCKED
+- INCONCLUSIVE
 
-## 6. Exit Gate
+Examples:
 
-M02 Integration is PASS only when M02-INT-01 through M02-INT-16 are PASS, all results bind to one candidate/environment, cleanup is complete and no required case was replaced by a weaker mock.
+- threshold evaluator works but B0 identity is missing → M02-INT-03 BLOCKED.
+- diagnostics omits UNKNOWN child and reports overall PASS → M02-INT-09 FAIL.
+- optimized Start is faster but skips MCP readiness → M02-INT-05 FAIL.
+- clipboard contains physical Workspace path → M02-INT-16 FAIL.
 
+No SKIP is treated as success.
+
+---
+
+## 6. Integration Exit Gate
+
+Integration PASS requires:
+
+- M02-INT-01 through M02-INT-16 all PASS;
+- same candidate identity for all production-behavior cases;
+- B0 chronology proven;
+- no weaker mock replaced a required real component boundary;
+- temp fixtures/processes cleaned;
+- no subsequent production change invalidated evidence.
+
+Integration PASS does not equal M02 ACCEPTED / FROZEN.
