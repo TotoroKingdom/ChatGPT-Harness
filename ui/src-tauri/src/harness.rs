@@ -123,11 +123,67 @@ impl HarnessController {
     }
 
     pub fn status(&self) -> HarnessStatus {
-        self.shared
+        let changed = self.reconcile_tunnel_projection();
+        let status = self
+            .shared
             .inner
             .lock()
             .map(|inner| inner.status.clone())
-            .unwrap_or_else(|_| stopped_status())
+            .unwrap_or_else(|_| stopped_status());
+        if changed {
+            self.emit_status(&status);
+        }
+        status
+    }
+
+    fn reconcile_tunnel_projection(&self) -> bool {
+        let Ok(tunnel_status) = self.tunnel.status() else {
+            return false;
+        };
+        let Ok(mut inner) = self.shared.inner.lock() else {
+            return false;
+        };
+        if inner.status.active_session_id.is_none() {
+            return false;
+        }
+        let previous = inner.status.clone();
+        if let Some(instance) = tunnel_status.instance.as_ref() {
+            inner.tunnel_instance = Some(instance.instance_id.clone());
+        }
+        inner.tunnel_generation = Some(tunnel_status.generation);
+        inner.status.tunnel = match tunnel_status.state {
+            TunnelState::Ready => HarnessComponentStatus::Ready,
+            TunnelState::Degraded => HarnessComponentStatus::Degraded,
+            TunnelState::Failed => HarnessComponentStatus::Error,
+            TunnelState::Stopping => HarnessComponentStatus::Stopping,
+            TunnelState::Stopped => HarnessComponentStatus::Stopped,
+            TunnelState::Starting => HarnessComponentStatus::Starting,
+        };
+        inner.status.tunnel_readiness = tunnel_status.readiness.clone();
+        inner.status.tunnel_health = tunnel_status.health;
+        inner.status.tunnel_recovery = tunnel_status.recovery.clone();
+        if inner.status.runtime == HarnessComponentStatus::Ready
+            && inner.status.mcp == HarnessComponentStatus::Ready
+        {
+            match tunnel_status.state {
+                TunnelState::Ready => {
+                    inner.status.lifecycle = HarnessLifecycle::Ready;
+                    inner.status.last_error = None;
+                }
+                TunnelState::Degraded if inner.status.lifecycle == HarnessLifecycle::Ready => {
+                    inner.status.lifecycle = HarnessLifecycle::Degraded;
+                }
+                TunnelState::Failed if inner.status.lifecycle != HarnessLifecycle::Stopping => {
+                    inner.status.lifecycle = HarnessLifecycle::Error;
+                    inner.status.last_error = tunnel_status
+                        .last_error
+                        .as_ref()
+                        .map(error_summary_from_tunnel);
+                }
+                _ => {}
+            }
+        }
+        harness_status_event_changed(&previous, &inner.status)
     }
 
     pub(crate) fn latest_startup_attempt(
