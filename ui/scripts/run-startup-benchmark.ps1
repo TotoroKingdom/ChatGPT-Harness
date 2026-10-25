@@ -92,7 +92,7 @@ try {
     }
 
     $analyzer = Join-Path $scriptDirectory "analyze-startup-benchmark.ps1"
-    $aggregatePath = Join-Path $benchmarkDirectory ("{0}.ndjson" -f $Mode.ToLowerInvariant())
+    $aggregatePath = Join-Path $benchmarkDirectory ("{0}-aggregate.ndjson" -f $Mode.ToLowerInvariant())
     foreach ($rawPath in $rawPaths) {
         Get-Content -LiteralPath $rawPath | Add-Content -LiteralPath $aggregatePath -Encoding utf8
     }
