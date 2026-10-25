@@ -125,6 +125,31 @@ impl ConfigStore {
         }
         Ok(Some(config))
     }
+
+    /// Read and validate the current configuration without migrating or
+    /// writing anything. Diagnostics must use this boundary so a missing or
+    /// legacy config cannot be changed as a side effect of observation.
+    pub(crate) fn inspect_read_only(&self) -> Result<Option<AppConfig>, ConfigError> {
+        if !self.file.exists() {
+            return Ok(None);
+        }
+        let text = fs::read_to_string(&self.file).map_err(|e| ConfigError::Io(e.to_string()))?;
+        let raw: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| ConfigError::Invalid("invalid JSON".into()))?;
+        let mut config = match raw.get("schemaVersion").and_then(|v| v.as_u64()) {
+            Some(1) => migration::migrate_v1_to_v3(raw)?,
+            Some(2) => migration::migrate_v2_to_v3(raw)?,
+            Some(3) => {
+                migration::validate_v3_shape(&raw)
+                    .map_err(|_| ConfigError::Invalid("invalid v3 shape".into()))?;
+                serde_json::from_value(raw)
+                    .map_err(|_| ConfigError::Invalid("invalid config shape".into()))?
+            }
+            _ => return Err(ConfigError::UnsupportedSchema),
+        };
+        validate_current(&mut config)?;
+        Ok(Some(config))
+    }
     pub fn load_or_create_defaults(&self) -> Result<AppConfig, ConfigError> {
         match self.load()? {
             Some(config) => Ok(config),

@@ -1,0 +1,150 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "StartupCohort": {
+      "description": "The startup cohort is assigned by the Host process. `cold` means the first\naccepted start in the current desktop process; `warm` means a later start\nin the same process after a previous lifecycle attempt.",
+      "enum": [
+        "cold",
+        "warm"
+      ],
+      "type": "string"
+    },
+    "StartupOutcome": {
+      "enum": [
+        "ready",
+        "failed",
+        "cancelled",
+        "incomplete"
+      ],
+      "type": "string"
+    },
+    "StartupPhase": {
+      "description": "Frozen Host-owned startup phase identifiers. Keep this enum additive and\nordered; phase order is part of the measurement contract.",
+      "enum": [
+        "eligibility_prepare",
+        "runtime_spawn",
+        "runtime_initialize",
+        "mcp_endpoint_ready",
+        "tunnel_resolve",
+        "tunnel_launch",
+        "control_plane_connected",
+        "mcp_target_ready",
+        "harness_ready"
+      ],
+      "type": "string"
+    },
+    "StartupPhaseStatus": {
+      "enum": [
+        "completed",
+        "failed",
+        "skipped",
+        "incomplete"
+      ],
+      "type": "string"
+    },
+    "StartupPhaseTiming": {
+      "properties": {
+        "durationMs": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase": {
+          "$ref": "#/$defs/StartupPhase"
+        },
+        "safeErrorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedOffsetMs": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/StartupPhaseStatus"
+        }
+      },
+      "required": [
+        "phase",
+        "startedOffsetMs",
+        "durationMs",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "appVersion": {
+      "type": "string"
+    },
+    "attemptId": {
+      "type": "string"
+    },
+    "cohort": {
+      "$ref": "#/$defs/StartupCohort"
+    },
+    "failureCode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finishedAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "harnessSessionId": {
+      "type": "string"
+    },
+    "outcome": {
+      "$ref": "#/$defs/StartupOutcome"
+    },
+    "phases": {
+      "items": {
+        "$ref": "#/$defs/StartupPhaseTiming"
+      },
+      "type": "array"
+    },
+    "runtimeVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "startedAt": {
+      "description": "RFC3339 UTC wall-clock timestamp for display and correlation only.",
+      "type": "string"
+    },
+    "totalDurationMs": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "tunnelVersion": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "attemptId",
+    "harnessSessionId",
+    "cohort",
+    "startedAt",
+    "outcome",
+    "phases",
+    "appVersion"
+  ],
+  "title": "StartupAttempt",
+  "type": "object"
+}

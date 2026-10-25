@@ -36,6 +36,22 @@ pub(crate) trait RuntimeEventSink: Send + Sync {
     );
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeStartupPhase {
+    Spawned,
+    Initialized,
+    McpEndpointReady,
+}
+
+pub(crate) trait RuntimeStartupSink: Send + Sync {
+    fn runtime_startup_event(
+        &self,
+        generation: uuid::Uuid,
+        phase: RuntimeStartupPhase,
+        error: Option<&SupervisorError>,
+    );
+}
+
 struct TauriProcessEventSink<R: Runtime> {
     app: AppHandle<R>,
     activity_sink: Option<Arc<dyn Fn(ActivityEvent) + Send + Sync>>,
@@ -209,6 +225,7 @@ struct SupervisorInner {
     active_generation: Option<uuid::Uuid>,
     last_identity: Option<RuntimeProcessIdentity>,
     observer: Option<Arc<dyn RuntimeEventSink>>,
+    startup_observer: Option<Arc<dyn RuntimeStartupSink>>,
     activity_sink: Option<Arc<dyn Fn(ActivityEvent) + Send + Sync>>,
 }
 
@@ -259,6 +276,7 @@ impl RuntimeSupervisor {
                 active_generation: None,
                 last_identity: None,
                 observer: None,
+                startup_observer: None,
                 activity_sink: None,
             })),
             #[cfg(test)]
@@ -271,6 +289,12 @@ impl RuntimeSupervisor {
     pub(crate) fn set_event_sink(&self, sink: Arc<dyn RuntimeEventSink>) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.observer = Some(sink);
+        }
+    }
+
+    pub(crate) fn set_startup_sink(&self, sink: Arc<dyn RuntimeStartupSink>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.startup_observer = Some(sink);
         }
     }
 
@@ -392,6 +416,7 @@ impl RuntimeSupervisor {
                 .map(|identity| identity.clone());
             inner.process = Some(process);
         }
+        self.notify_startup_observer(generation, RuntimeStartupPhase::Spawned, None);
         let waiter_process = self.process_for_generation(generation)?;
         spawn_waiter(
             waiter_process.child.clone(),
@@ -649,6 +674,7 @@ impl RuntimeSupervisor {
             identity.runtime_id = result.runtime_id;
             identity.runtime_version = result.server_info.version;
         }
+        self.notify_startup_observer(process.generation, RuntimeStartupPhase::Initialized, None);
         self.notify_on_process(process, "initialized", json!({}))?;
         let endpoint: McpEndpointResult =
             self.request_on_process(process, "mcp.endpoint.get", json!({}))?;
@@ -656,7 +682,28 @@ impl RuntimeSupervisor {
         if let Ok(mut active_endpoint) = process.mcp_endpoint.lock() {
             *active_endpoint = Some(endpoint.url);
         }
+        self.notify_startup_observer(
+            process.generation,
+            RuntimeStartupPhase::McpEndpointReady,
+            None,
+        );
         self.request_on_process(process, "runtime.status", json!({}))
+    }
+
+    fn notify_startup_observer(
+        &self,
+        generation: uuid::Uuid,
+        phase: RuntimeStartupPhase,
+        error: Option<&SupervisorError>,
+    ) {
+        let observer = self
+            .inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.startup_observer.clone());
+        if let Some(observer) = observer {
+            observer.runtime_startup_event(generation, phase, error);
+        }
     }
 
     fn spawn_process(
@@ -1834,6 +1881,7 @@ mod tests {
             active_generation: Some(active_generation),
             last_identity: None,
             observer: None,
+            startup_observer: None,
             activity_sink: None,
         };
 

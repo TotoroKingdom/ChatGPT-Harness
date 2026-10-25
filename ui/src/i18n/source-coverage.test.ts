@@ -12,7 +12,7 @@ const dirs = ["pages", "components"];
 const allowedIdentity = new Set(["H", "Harness", "ChatGPT Harness", "MCP", "Runtime", "Tunnel"]);
 const allowedExamples = new Set(["http://127.0.0.1:7897", "git", '["status", "--short"]']);
 const visibleAttributes = new Set(["title", "label", "aria-label", "placeholder", "description", "eyebrow"]);
-const keyPattern = /^(?:app|common|nav|status|enum|overview|tools|policies|activity|approvals|settings|firstRun|errors|policy|bash|validation|m7|m8[A-Za-z]*)\./;
+const keyPattern = /^(?:app|common|nav|status|enum|overview|diagnostics|tools|policies|activity|approvals|settings|firstRun|errors|policy|bash|validation|m7|m8[A-Za-z]*)\./;
 function files(directory: string): string[] {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const file = path.join(directory, entry.name);

@@ -97,6 +97,24 @@ describe("TauriHarnessControlClient", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("runtime_process_status", undefined);
   });
 
+  it("uses the aggregate diagnostics and latest startup commands", async () => {
+    const diagnostics = {
+      runId: "diagnostic-1",
+      startedAt: "2026-10-25T00:00:00Z",
+      finishedAt: "2026-10-25T00:00:01Z",
+      overallStatus: "unknown" as const,
+      checks: [],
+    };
+    const startup = { attemptId: "attempt-1" };
+    tauri.invoke.mockResolvedValueOnce(diagnostics).mockResolvedValueOnce(startup);
+    const client = new TauriHarnessControlClient();
+
+    await expect(client.connectionDiagnosticsRun()).resolves.toEqual(diagnostics);
+    await expect(client.startupLatest()).resolves.toEqual(startup);
+    expect(tauri.invoke).toHaveBeenNthCalledWith(1, "connection_diagnostics_run", undefined);
+    expect(tauri.invoke).toHaveBeenNthCalledWith(2, "harness_startup_latest", undefined);
+  });
+
   it("persists the isolated UI language command without using configSave", async () => {
     const persisted = { schemaVersion: 2, configRevision: "7", ui: { language: "zh-CN" } };
     tauri.invoke.mockResolvedValue(persisted);

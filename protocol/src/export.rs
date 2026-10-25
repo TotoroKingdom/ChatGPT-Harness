@@ -111,8 +111,19 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         ApprovalsResolveParams,
         ApprovalsResolveResult,
         DiagnosticStatus,
+        DiagnosticScope,
+        DiagnosticEvidenceKey,
+        DiagnosticEvidence,
+        DiagnosticRemediationTarget,
+        DiagnosticRemediation,
         DiagnosticCheck,
         DiagnosticRun,
+        StartupCohort,
+        StartupOutcome,
+        StartupPhase,
+        StartupPhaseStatus,
+        StartupPhaseTiming,
+        StartupAttempt,
     );
     write(root.join("generated/typescript/v1.ts"), content)
 }
@@ -140,6 +151,7 @@ pub fn generate_json_schema(root: &Path) -> io::Result<()> {
         "approvals-list-result.schema.json" => ApprovalsListResult,
         "approvals-resolve-params.schema.json" => ApprovalsResolveParams,
         "diagnostic-run.schema.json" => DiagnosticRun,
+        "startup-attempt.schema.json" => StartupAttempt,
     );
     Ok(())
 }

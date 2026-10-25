@@ -1,4 +1,5 @@
 import { ConfigRecovery } from "@/components/status/ConfigRecovery";
+import { DiagnosticsPanel } from "@/components/status/DiagnosticsPanel";
 import { ConfigRevisionStatus } from "@/components/status/ConfigRevisionStatus";
 import { useEffect, useState, type ReactNode } from "react";
 import type { SecurityMode, TunnelConfig, UiLanguage } from "@protocol/v1";
@@ -9,7 +10,7 @@ import { i18n } from "@/i18n";
 import { resolveLanguage, systemLocales } from "@/i18n/resolve-language";
 import { presentError, securityModeKey, type ErrorPresentation, type TranslationKey } from "@/i18n/presentation";
 import { useDraftGuard, useDraftNavigation } from "@/app/router/DraftNavigation";
-import type { NavigationOptions } from "@/app/router/routes";
+import type { Navigate, NavigationOptions } from "@/app/router/routes";
 import { assertUnchanged } from "@/app/providers/config-mutations";
 import type { DesktopPreferencesPatch } from "@/services/harness/client";
 import { validateControlPlaneProxy } from "./configuration";
@@ -66,7 +67,7 @@ function currentLocale(): UiLanguage {
   return i18n.resolvedLanguage === "zh-CN" ? "zh-CN" : "en";
 }
 
-export function SettingsPage({ initialSection }: { initialSection?: NavigationOptions["settingsSection"] } = {}) {
+export function SettingsPage({ initialSection, onNavigate }: { initialSection?: NavigationOptions["settingsSection"]; onNavigate?: Navigate } = {}) {
   const { t } = useTranslation();
   const data = useHarnessData();
   const { requestLeave, finishDraft } = useDraftNavigation();
@@ -93,8 +94,6 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
   const [resetConfirmation, setResetConfirmation] = useState(false);
   const [resetFeedback, setResetFeedback] = useState<Feedback | null>(null);
   const [resetting, setResetting] = useState(false);
-  const [diagnostic, setDiagnostic] = useState<Awaited<ReturnType<typeof data.runDiagnostics>> | null>(null);
-  const [diagnosticRunning, setDiagnosticRunning] = useState(false);
 
   useEffect(() => {
     if (!languageSaving) setLanguageSelection(data.config?.ui.language ?? "");
@@ -326,14 +325,6 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
     });
   };
 
-  const runDiagnostics = async () => {
-    if (diagnosticRunning) return;
-    setDiagnosticRunning(true);
-    try { setDiagnostic(await data.runDiagnostics()); }
-    catch (error) { setSecurityFeedback(errorFeedback(error)); }
-    finally { setDiagnosticRunning(false); }
-  };
-
   const requestReset = () => requestLeave(() => {
     setResetFeedback(null);
     setResetConfirmation(true);
@@ -461,10 +452,7 @@ export function SettingsPage({ initialSection }: { initialSection?: NavigationOp
             <div><dt>{t("m7.revision.title")}</dt><dd><code>{currentConfig?.configRevision ?? t("m8.unknown")}</code></dd></div>
           </dl>
         </Disclosure>
-        <Disclosure title={t("overview.diagnosticsHelp")}>
-          <Button variant="secondary" onClick={() => void runDiagnostics()} disabled={diagnosticRunning}>{diagnosticRunning ? t("common.loading") : t("common.refresh")}</Button>
-          {diagnostic && <div className="detail-list">{diagnostic.checks.map((check) => <div key={check.id}><span>{check.id}</span><span>{check.status}: {check.summary}{check.remediation ? ` — ${check.remediation}` : ""}</span></div>)}</div>}
-        </Disclosure>
+        <DiagnosticsPanel run={data.lastDiagnostics} startup={data.latestStartupAttempt ?? null} onRun={data.runDiagnostics} onNavigate={onNavigate} />
       </Section>)}
 
       {section("danger", <Section title={t("m8Settings.dangerZone")}>

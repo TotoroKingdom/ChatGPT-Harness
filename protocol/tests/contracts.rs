@@ -278,3 +278,44 @@ fn generated_typescript_uses_strings_for_revision_and_sequence_fields() {
     assert!(generated.contains("afterSequence?: string"));
     assert!(generated.contains("latestSequence: string"));
 }
+
+#[test]
+fn startup_and_diagnostic_v1_additions_round_trip_with_unknown_and_safe_fields() {
+    let diagnostic = serde_json::json!({
+        "runId": "diagnostic-contract",
+        "startedAt": "2026-10-25T00:00:00Z",
+        "finishedAt": "2026-10-25T00:00:01Z",
+        "overallStatus": "unknown",
+        "checks": [{
+            "id": "credential_presence",
+            "status": "unknown",
+            "summary": "SecretStore is unavailable.",
+            "scope": "credential",
+            "evidence": [{"key": "error_code", "value": "SECRET_STORE_FAILED"}],
+            "remediation": {"code": "credential_retry", "summary": "Retry later.", "target": "settings_connection"}
+        }]
+    });
+    let run: DiagnosticRun = validate(diagnostic);
+    assert_eq!(run.overall_status, DiagnosticStatus::Unknown);
+    assert_eq!(run.checks[0].scope, Some(DiagnosticScope::Credential));
+    assert_eq!(run.checks[0].evidence[0].value, "SECRET_STORE_FAILED");
+
+    let startup = serde_json::json!({
+        "attemptId": "attempt-contract",
+        "harnessSessionId": "session-contract",
+        "cohort": "cold",
+        "startedAt": "2026-10-25T00:00:00Z",
+        "outcome": "ready",
+        "totalDurationMs": 42,
+        "phases": [{
+            "phase": "harness_ready",
+            "startedOffsetMs": 42,
+            "durationMs": 0,
+            "status": "completed"
+        }],
+        "appVersion": "0.1.3"
+    });
+    let attempt: StartupAttempt = validate(startup);
+    assert_eq!(attempt.outcome, StartupOutcome::Ready);
+    assert_eq!(attempt.phases[0].phase, StartupPhase::HarnessReady);
+}

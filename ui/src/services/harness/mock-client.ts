@@ -1,5 +1,5 @@
 import type { ActivityEntry, RuntimeDiagnostics, ToolDiagnostic } from "./control-read";
-import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, ToolDescriptor, ToolsListResult, UiLanguage } from "@protocol/v1";
+import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, StartupAttempt, ToolsListResult, ToolDescriptor, UiLanguage } from "@protocol/v1";
 import { HarnessClientError } from "./errors";
 import type { ActivityEventListener, ComponentStates, ComponentStatesListener, DesktopNavigationIntent, DesktopPreferencesPatch, HarnessControlClient, HarnessStatus, RuntimeProcessStatus, Unsubscribe } from "./client";
 export type MockScenario = "ready" | "disconnected" | "empty" | "error";
@@ -124,7 +124,21 @@ export class MockHarnessControlClient implements HarnessControlClient {
   return this.respond({ status: "ready_to_start", canStart: true, message: "Local Runtime is ready to start." });
  }
  harnessStartEligibility(): Promise<StartEligibility> { return this.runtimeStartEligibility(); }
- localDiagnosticsRun():Promise<DiagnosticRun>{const checks=[{id:"workspace",status:"pass" as const,summary:"Workspace folder is accessible."},{id:"tunnel_id",status:"pass" as const,summary:"Tunnel ID is configured."},{id:"tunnel_client",status:this.config?.tunnel.tunnelClientPath?"pass" as const:"warning" as const,summary:this.config?.tunnel.tunnelClientPath?"Tunnel client found":"Choose or detect a tunnel-client package folder."},{id:"api_key",status:this.configured?"pass" as const:"warning" as const,summary:this.configured?"API Key is configured in the OS credential store.":"API Key is not configured."},{id:"security",status:"pass" as const,summary:"Security settings are consistent."}]; return this.respond({runId:"diagnostic_mock",startedAt:"2026-09-02T00:00:00Z",finishedAt:"2026-09-02T00:00:01Z",overallStatus:"warning",checks});}
+ private mockDiagnostics(): DiagnosticRun {
+  const checks = [
+   { id: "workspace", status: "pass" as const, summary: "Workspace folder is accessible.", scope: "workspace" as const, evidence: [{ key: "exists" as const, value: "true" }] },
+   { id: "runtime_process", status: this.components.runtime === "ready" ? "pass" as const : "warning" as const, summary: this.components.runtime === "ready" ? "Runtime process is running." : "Runtime process is not ready.", scope: "runtime" as const, evidence: [{ key: "process_phase" as const, value: this.components.runtime }] },
+   { id: "credential_presence", status: this.configured ? "pass" as const : "fail" as const, summary: this.configured ? "The referenced credential is present." : "The referenced credential is missing.", scope: "credential" as const, evidence: [{ key: "exists" as const, value: String(this.configured) }] },
+  ];
+  return { runId: "diagnostic_mock", startedAt: "2026-09-02T00:00:00Z", finishedAt: "2026-09-02T00:00:01Z", overallStatus: checks.some((check) => check.status === "fail") ? "fail" : checks.some((check) => check.status === "warning") ? "warning" : "pass", checks };
+ }
+ localDiagnosticsRun(): Promise<DiagnosticRun> { return this.connectionDiagnosticsRun(); }
+ connectionDiagnosticsRun(): Promise<DiagnosticRun> { return this.respond(this.mockDiagnostics()); }
+ startupLatest(): Promise<StartupAttempt | null> {
+  if (this.getHarnessStatus().lifecycle === "stopped") return this.respond(null);
+  const phases = ["eligibility_prepare", "runtime_spawn", "runtime_initialize", "mcp_endpoint_ready", "tunnel_resolve", "tunnel_launch", "control_plane_connected", "mcp_target_ready", "harness_ready"] as const;
+  return this.respond({ attemptId: "startup_mock", harnessSessionId: "mock-session", cohort: "warm", startedAt: "2026-09-02T00:00:00Z", finishedAt: "2026-09-02T00:00:01Z", outcome: "ready", totalDurationMs: 1000, phases: phases.map((phase, index) => ({ phase, startedOffsetMs: index * 100, durationMs: 100, status: "completed" as const })), appVersion: "0.1.3" });
+ }
  private runtime():RuntimeState{return {runtimeId:"runtime_mock_01",startedAt:"2026-09-02T00:00:00Z",lifecycle:this.components.runtime==="ready"?"ready":this.components.runtime==="stopping"?"stopping":"initializing",readiness:this.components.runtime==="ready"?"ready":this.components.runtime==="degraded"?"degraded":"not_ready",configRevision:this.activeRevision,activeWorkspace:this.config?.workspace.rootPath ?? "",securityMode:this.config?.security.mode ?? "normal",exposedToolCatalog:this.toolCatalog().filter(t=>t.exposed),activeRequests:0,pendingApprovals:approvals.filter((item) => item.status === "pending").length,runningExecutions:0};}
  async runtimeStart(){this.components={runtime:"starting",tunnel:"stopped",mcp:"stopped"}; await delay(90); this.components={runtime:"ready",tunnel:"starting",mcp:"stopped"}; await delay(90); this.components={runtime:"ready",tunnel:"ready",mcp:"starting"}; await delay(90); this.components={runtime:"ready",tunnel:"ready",mcp:"ready"}; this.activeTools=this.config?.tools ?? completeConfig().tools; this.activePolicies=this.config?.policies ?? completeConfig().policies; this.activeRevision=this.config?.configRevision??"1"; this.recordActivity("runtime_started","Runtime started in mock mode."); return this.respond(this.runtime());}
  runtimeStatus(){return this.respond(this.runtime());}

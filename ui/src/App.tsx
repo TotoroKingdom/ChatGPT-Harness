@@ -62,7 +62,7 @@ function RoutedContent() {
       void data.refreshConfig();
     }} />;
   }
-  const content = page === "overview" ? <OverviewPage onNavigate={navigate} /> : page === "tools" ? <ToolsPage /> : page === "policies" ? <PoliciesPage initialDraft={policyDraft} initialRuleId={context.objectId} onNavigate={navigate} /> : page === "activity" ? <ActivityPage onNavigate={navigate} /> : page === "approvals" ? <ApprovalsPage onNavigate={navigate} initialRequestId={context.objectId} /> : <SettingsPage initialSection={context.settingsSection} />;
+  const content = page === "overview" ? <OverviewPage onNavigate={navigate} /> : page === "tools" ? <ToolsPage /> : page === "policies" ? <PoliciesPage initialDraft={policyDraft} initialRuleId={context.objectId} onNavigate={navigate} /> : page === "activity" ? <ActivityPage onNavigate={navigate} /> : page === "approvals" ? <ApprovalsPage onNavigate={navigate} initialRequestId={context.objectId} /> : <SettingsPage initialSection={context.settingsSection} onNavigate={navigate} />;
   return <>
     <AppShell page={page} onNavigate={navigate}>{configBlocked && page !== "settings" && <RecoveryInWorkspace />}{content}</AppShell>
     <BackgroundContinuityDialog open={backgroundNoticeOpen} onClose={() => setBackgroundNoticeOpen(false)} />

@@ -1,13 +1,16 @@
 use crate::{
     config::{ConfigStore, CURRENT_SCHEMA_VERSION},
     runtime::{RuntimeEventSink, RuntimeProcessPhase, RuntimeSupervisor, SupervisorError},
+    startup::StartupPhaseRecorder,
     tunnel::{
         resolve_tunnel, TunnelEventSink, TunnelHealth, TunnelLaunch, TunnelProcessError,
         TunnelProcessManager, TunnelReadinessEvidence, TunnelRecoveryStatus, TunnelState,
         TunnelStatus,
     },
 };
-use harness_control_protocol::{AppConfig, SecurityMode, StartEligibility, StartEligibilityStatus};
+use harness_control_protocol::{
+    AppConfig, SecurityMode, StartEligibility, StartEligibilityStatus, StartupCohort, StartupPhase,
+};
 use serde::Serialize;
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use tauri::{AppHandle, Manager};
@@ -62,6 +65,7 @@ struct HarnessInner {
     runtime_generation: Option<Uuid>,
     tunnel_generation: Option<u64>,
     tunnel_instance: Option<String>,
+    startup_seen: bool,
 }
 
 struct HarnessShared {
@@ -74,6 +78,7 @@ pub struct HarnessController {
     shared: Arc<HarnessShared>,
     runtime: RuntimeSupervisor,
     tunnel: TunnelProcessManager,
+    startup: StartupPhaseRecorder,
 }
 
 impl Clone for HarnessController {
@@ -82,6 +87,7 @@ impl Clone for HarnessController {
             shared: self.shared.clone(),
             runtime: self.runtime.clone(),
             tunnel: self.tunnel.clone(),
+            startup: self.startup.clone(),
         }
     }
 }
@@ -95,12 +101,14 @@ impl HarnessController {
                     runtime_generation: None,
                     tunnel_generation: None,
                     tunnel_instance: None,
+                    startup_seen: false,
                 }),
                 operation: Mutex::new(()),
                 status_sink: Mutex::new(None),
             }),
             runtime,
             tunnel,
+            startup: StartupPhaseRecorder::new(),
         }
     }
 
@@ -120,6 +128,12 @@ impl HarnessController {
             .lock()
             .map(|inner| inner.status.clone())
             .unwrap_or_else(|_| stopped_status())
+    }
+
+    pub(crate) fn latest_startup_attempt(
+        &self,
+    ) -> Option<harness_control_protocol::StartupAttempt> {
+        self.startup.latest()
     }
 
     pub fn start_eligibility(
@@ -270,13 +284,56 @@ impl HarnessController {
                 message: "Application shutdown is in progress; Harness cannot start.".into(),
             });
         }
-        let eligibility = self.start_eligibility(app, secrets)?;
+        let session_id = Uuid::new_v4().to_string();
+        let cohort = self
+            .shared
+            .inner
+            .lock()
+            .map(|mut inner| {
+                let cohort = if inner.startup_seen {
+                    StartupCohort::Warm
+                } else {
+                    StartupCohort::Cold
+                };
+                inner.startup_seen = true;
+                cohort
+            })
+            .unwrap_or(StartupCohort::Warm);
+        self.startup.begin(session_id.clone(), cohort);
+        self.startup
+            .start_phase(&session_id, StartupPhase::EligibilityPrepare);
+        let eligibility = match self.start_eligibility(app, secrets) {
+            Ok(value) => value,
+            Err(error) => {
+                self.startup.fail_active(&session_id, &error.code);
+                return Err(error);
+            }
+        };
         if !eligibility.can_start {
+            self.startup.fail_phase(
+                &session_id,
+                StartupPhase::EligibilityPrepare,
+                "ELIGIBILITY_REJECTED",
+            );
+            self.startup
+                .fail_active(&session_id, "ELIGIBILITY_REJECTED");
             return Err(lifecycle_error(eligibility.message));
         }
-        let config = load_config(app)?
-            .ok_or_else(|| lifecycle_error("Save configuration before starting Harness."))?;
-        let session_id = Uuid::new_v4().to_string();
+        self.startup
+            .complete_phase(&session_id, StartupPhase::EligibilityPrepare);
+        let config = match load_config(app) {
+            Ok(Some(config)) => config,
+            Ok(None) => {
+                self.startup.fail_active(&session_id, "CONFIG_NOT_FOUND");
+                return Err(lifecycle_error(
+                    "Save configuration before starting Harness.",
+                ));
+            }
+            Err(error) => {
+                self.startup.fail_active(&session_id, &error.code);
+                return Err(error);
+            }
+        };
         self.update(|inner| {
             inner.status = HarnessStatus {
                 lifecycle: HarnessLifecycle::Starting,
@@ -295,25 +352,49 @@ impl HarnessController {
             inner.tunnel_instance = None;
         });
 
+        self.startup
+            .start_phase(&session_id, StartupPhase::RuntimeSpawn);
         let runtime_state = match self.runtime.start(app, &config) {
             Ok(state) => state,
             Err(error) => return Err(self.fail_start(app, error.into(), false)),
         };
+        // RuntimeSupervisor emits finer-grained hooks in production. These
+        // idempotent completions keep direct/unit construction deterministic.
+        self.startup
+            .complete_phase(&session_id, StartupPhase::RuntimeSpawn);
+        self.startup
+            .start_phase(&session_id, StartupPhase::RuntimeInitialize);
+        self.startup
+            .complete_phase(&session_id, StartupPhase::RuntimeInitialize);
+        self.startup
+            .start_phase(&session_id, StartupPhase::McpEndpointReady);
         let runtime_generation = self.runtime.active_generation();
         let endpoint = match self.runtime.mcp_endpoint() {
             Ok(endpoint) => endpoint,
             Err(error) => return Err(self.fail_start(app, error.into(), true)),
         };
+        self.startup
+            .complete_phase(&session_id, StartupPhase::McpEndpointReady);
+        if let Some(identity) = self.runtime.identity() {
+            self.startup
+                .set_runtime_version(&session_id, identity.runtime_version);
+        }
         self.update(|inner| {
             inner.runtime_generation = runtime_generation;
             inner.status.runtime = HarnessComponentStatus::Ready;
             inner.status.mcp = HarnessComponentStatus::Ready;
         });
 
+        self.startup
+            .start_phase(&session_id, StartupPhase::TunnelResolve);
         let resolved = match resolve_tunnel(&config) {
             Ok(value) => value,
             Err(error) => return Err(self.fail_start(app, control_error_from_tunnel(error), true)),
         };
+        self.startup
+            .complete_phase(&session_id, StartupPhase::TunnelResolve);
+        self.startup
+            .set_tunnel_version(&session_id, resolved.version.clone());
         let reference = config
             .tunnel
             .api_key_ref
@@ -323,13 +404,16 @@ impl HarnessController {
             Ok(reference) => reference,
             Err(error) => return Err(self.fail_start(app, error, true)),
         };
-        let api_key = match secrets
-            .lock()
-            .map_err(|_| secret_error("Secret store unavailable."))?
-            .secrets
-            .get(&reference.key)
-            .map_err(secret_error)?
-        {
+        let secret = match secrets.lock() {
+            Ok(backend) => match backend.secrets.get(&reference.key) {
+                Ok(value) => value,
+                Err(error) => return Err(self.fail_start(app, secret_error(error), true)),
+            },
+            Err(_) => {
+                return Err(self.fail_start(app, secret_error("Secret store unavailable."), true))
+            }
+        };
+        let api_key = match secret {
             Some(value) => value,
             None => {
                 return Err(self.fail_start(
@@ -347,10 +431,14 @@ impl HarnessController {
         if let Ok(directory) = app.path().app_data_dir() {
             launch = launch.with_log_file(directory.join("logs").join("tunnel-supervisor.ndjson"));
         }
+        self.startup
+            .start_phase(&session_id, StartupPhase::TunnelLaunch);
         let tunnel_status = match self.tunnel.start(launch) {
             Ok(status) => status,
             Err(error) => return Err(self.fail_start(app, control_error_from_tunnel(error), true)),
         };
+        self.startup
+            .complete_phase(&session_id, StartupPhase::TunnelLaunch);
         let Some(instance) = tunnel_status.instance.as_ref() else {
             return Err(self.fail_start(
                 app,
@@ -369,6 +457,7 @@ impl HarnessController {
             apply_tunnel_start_snapshot_if_pending(inner, &instance_id, &tunnel_status);
         });
         let status = self.status();
+        self.observe_startup_readiness(&session_id, &status);
         let _ = runtime_state;
         self.emit_status(&status);
         Ok(status)
@@ -378,6 +467,9 @@ impl HarnessController {
         let current = self.status();
         if current.lifecycle == HarnessLifecycle::Stopped && current.active_session_id.is_none() {
             return Ok(current);
+        }
+        if let Some(session_id) = current.active_session_id.as_deref() {
+            self.startup.cancel(session_id);
         }
         self.update(|inner| {
             inner.status.lifecycle = HarnessLifecycle::Stopping;
@@ -423,6 +515,7 @@ impl HarnessController {
         error: crate::commands::ControlError,
         runtime_started: bool,
     ) -> crate::commands::ControlError {
+        let session_id = self.status().active_session_id;
         let _ = self.tunnel.stop();
         if runtime_started {
             let _ = self.runtime.stop(app);
@@ -439,6 +532,9 @@ impl HarnessController {
             inner.status.last_error = Some(error_summary(&error));
         });
         let status = self.status();
+        if let Some(session_id) = session_id.as_deref() {
+            self.startup.fail_active(session_id, &error.code);
+        }
         self.emit_status(&status);
         error
     }
@@ -526,6 +622,80 @@ impl HarnessController {
         }
     }
 
+    fn on_runtime_startup(
+        &self,
+        generation: Uuid,
+        phase: crate::runtime::RuntimeStartupPhase,
+        error: Option<&SupervisorError>,
+    ) {
+        let session_id = self.shared.inner.lock().ok().and_then(|mut inner| {
+            if inner.status.lifecycle != HarnessLifecycle::Starting {
+                return None;
+            }
+            if inner.runtime_generation.is_none() {
+                inner.runtime_generation = Some(generation);
+            }
+            (inner.runtime_generation == Some(generation))
+                .then(|| inner.status.active_session_id.clone())
+                .flatten()
+        });
+        let Some(session_id) = session_id else {
+            return;
+        };
+        if let Some(error) = error {
+            self.startup.fail_active(&session_id, &error.code);
+            return;
+        }
+        match phase {
+            crate::runtime::RuntimeStartupPhase::Spawned => {
+                self.startup
+                    .complete_phase(&session_id, StartupPhase::RuntimeSpawn);
+                self.startup
+                    .start_phase(&session_id, StartupPhase::RuntimeInitialize);
+            }
+            crate::runtime::RuntimeStartupPhase::Initialized => {
+                self.startup
+                    .complete_phase(&session_id, StartupPhase::RuntimeInitialize);
+                self.startup
+                    .start_phase(&session_id, StartupPhase::McpEndpointReady);
+            }
+            crate::runtime::RuntimeStartupPhase::McpEndpointReady => {
+                self.startup
+                    .complete_phase(&session_id, StartupPhase::McpEndpointReady);
+            }
+        }
+    }
+
+    fn observe_startup_readiness(&self, session_id: &str, status: &HarnessStatus) {
+        let Some(readiness) = status.tunnel_readiness.as_ref() else {
+            return;
+        };
+        if readiness.control_plane_connected {
+            self.startup
+                .start_phase(session_id, StartupPhase::ControlPlaneConnected);
+            self.startup
+                .complete_phase(session_id, StartupPhase::ControlPlaneConnected);
+        } else {
+            self.startup
+                .start_phase(session_id, StartupPhase::ControlPlaneConnected);
+        }
+        if readiness.mcp_target_reachable {
+            self.startup
+                .start_phase(session_id, StartupPhase::McpTargetReady);
+            self.startup
+                .complete_phase(session_id, StartupPhase::McpTargetReady);
+        } else {
+            self.startup
+                .start_phase(session_id, StartupPhase::McpTargetReady);
+        }
+        if status.lifecycle == HarnessLifecycle::Ready
+            && readiness.control_plane_connected
+            && readiness.mcp_target_reachable
+        {
+            self.startup.ready(session_id);
+        }
+    }
+
     fn on_tunnel_event(
         &self,
         generation: u64,
@@ -537,6 +707,7 @@ impl HarnessController {
         error: Option<&TunnelProcessError>,
     ) {
         let mut changed = false;
+        let mut accepted_session = None;
         if let Ok(mut inner) = self.shared.inner.lock() {
             if inner.tunnel_generation != Some(generation) {
                 return;
@@ -587,7 +758,19 @@ impl HarnessController {
             inner.status.tunnel_readiness = readiness.cloned();
             inner.status.tunnel_health = health;
             inner.status.tunnel_recovery = recovery.clone();
+            accepted_session = inner.status.active_session_id.clone();
             changed = harness_status_event_changed(&previous, &inner.status);
+        }
+        if let Some(session_id) = accepted_session.as_deref() {
+            if state == TunnelState::Failed {
+                if let Some(error) = error {
+                    self.startup.fail_active(session_id, &error.code);
+                } else {
+                    self.startup.fail_active(session_id, "TUNNEL_FAILED");
+                }
+            }
+            let status = self.status();
+            self.observe_startup_readiness(session_id, &status);
         }
         if changed {
             let status = self.status();
@@ -604,6 +787,17 @@ impl RuntimeEventSink for HarnessController {
         error: Option<&SupervisorError>,
     ) {
         self.on_runtime_event(generation, phase, error);
+    }
+}
+
+impl crate::runtime::RuntimeStartupSink for HarnessController {
+    fn runtime_startup_event(
+        &self,
+        generation: Uuid,
+        phase: crate::runtime::RuntimeStartupPhase,
+        error: Option<&SupervisorError>,
+    ) {
+        self.on_runtime_startup(generation, phase, error);
     }
 }
 
@@ -1375,6 +1569,7 @@ mod tests {
             runtime_generation: None,
             tunnel_generation: Some(1),
             tunnel_instance: Some("active-instance".into()),
+            startup_seen: true,
         };
         let stale_snapshot = TunnelStatus {
             recovery: TunnelRecoveryStatus::default(),

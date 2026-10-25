@@ -5,10 +5,10 @@ use crate::{
 use harness_control_protocol::{
     error_codes, ActivityEvent, ActivityListParams, ActivityListResult, ActivitySubscribeParams,
     ActivitySubscribeResult, ApprovalsListResult, ApprovalsResolveParams, DiagnosticCheck,
-    DiagnosticRun, DiagnosticStatus, EmptyParams, InitializeParams, InitializeResult,
-    MachineErrorCode, McpEndpointResult, PoliciesListResult, RpcError, RpcErrorData,
-    RpcErrorResponse, RpcMessage, RpcNotification, RpcRequest, RpcResponse, RuntimeStopResult,
-    ToolsListResult, PROTOCOL_VERSION,
+    DiagnosticRun, DiagnosticScope, DiagnosticStatus, EmptyParams, InitializeParams,
+    InitializeResult, MachineErrorCode, McpEndpointResult, PoliciesListResult, RpcError,
+    RpcErrorData, RpcErrorResponse, RpcMessage, RpcNotification, RpcRequest, RpcResponse,
+    RuntimeStopResult, ToolsListResult, PROTOCOL_VERSION,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -457,6 +457,8 @@ fn handle_request<W: Write>(
                         id: "runtime_skeleton".into(),
                         status: DiagnosticStatus::Pass,
                         summary: "Runtime control protocol is available.".into(),
+                        scope: Some(DiagnosticScope::Runtime),
+                        evidence: Vec::new(),
                         remediation: None,
                     }],
                 },

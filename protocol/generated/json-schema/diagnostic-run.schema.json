@@ -3,14 +3,36 @@
   "$defs": {
     "DiagnosticCheck": {
       "properties": {
+        "evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DiagnosticEvidence"
+          },
+          "type": "array"
+        },
         "id": {
           "type": "string"
         },
         "remediation": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiagnosticRemediation"
+            },
+            {
+              "type": "null"
+            }
           ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiagnosticScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/$defs/DiagnosticStatus"
@@ -26,11 +48,92 @@
       ],
       "type": "object"
     },
+    "DiagnosticEvidence": {
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/DiagnosticEvidenceKey"
+        },
+        "value": {
+          "description": "Values are bounded and sanitized by the Host coordinator.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    "DiagnosticEvidenceKey": {
+      "enum": [
+        "configured",
+        "exists",
+        "version",
+        "process_phase",
+        "lifecycle",
+        "readiness",
+        "route_mode",
+        "proxy_source",
+        "last_success_age_seconds",
+        "error_code",
+        "endpoint_reachable"
+      ],
+      "type": "string"
+    },
+    "DiagnosticRemediation": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiagnosticRemediationTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "DiagnosticRemediationTarget": {
+      "enum": [
+        "overview",
+        "settings_workspace",
+        "settings_connection",
+        "settings_security"
+      ],
+      "type": "string"
+    },
+    "DiagnosticScope": {
+      "enum": [
+        "config",
+        "workspace",
+        "runtime",
+        "mcp",
+        "tunnel",
+        "control_plane",
+        "proxy",
+        "credential",
+        "lifecycle"
+      ],
+      "type": "string"
+    },
     "DiagnosticStatus": {
       "enum": [
         "pass",
         "warning",
-        "fail"
+        "fail",
+        "unknown"
       ],
       "type": "string"
     }

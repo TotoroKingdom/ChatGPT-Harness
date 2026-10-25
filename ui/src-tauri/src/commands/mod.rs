@@ -1,6 +1,7 @@
 mod control_read;
 pub use control_read::*;
 
+use crate::diagnostics::DiagnosticsCoordinator;
 use crate::{
     config::{
         ConfigError, ConfigMetadata, ConfigStore, DesktopPreferencesPatch, CURRENT_SCHEMA_VERSION,
@@ -15,9 +16,10 @@ use chrono::{SecondsFormat, Utc};
 use harness_control_protocol::{
     ActivityListParams, ActivityListResult, ActivitySubscribeParams, ActivitySubscribeResult,
     AppConfig, ApprovalsListParams, ApprovalsListResult, ApprovalsResolveParams,
-    ApprovalsResolveResult, DiagnosticCheck, DiagnosticRun, DiagnosticStatus, PoliciesListResult,
-    RuntimeState, RuntimeStopResult, SecurityMode, StartEligibility, StartEligibilityStatus,
-    ToolsListResult, UiLanguage,
+    ApprovalsResolveResult, DiagnosticCheck, DiagnosticEvidence, DiagnosticEvidenceKey,
+    DiagnosticRemediation, DiagnosticRemediationTarget, DiagnosticRun, DiagnosticScope,
+    DiagnosticStatus, PoliciesListResult, RuntimeState, RuntimeStopResult, SecurityMode,
+    StartEligibility, StartEligibilityStatus, ToolsListResult, UiLanguage,
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -450,6 +452,31 @@ pub fn runtime_diagnostics_run(
 }
 
 #[tauri::command]
+pub fn harness_startup_latest(
+    harness: State<'_, HarnessController>,
+) -> Option<harness_control_protocol::StartupAttempt> {
+    harness.latest_startup_attempt()
+}
+
+#[tauri::command]
+pub fn connection_diagnostics_run(
+    app: AppHandle,
+    secrets: State<'_, Mutex<BackendState>>,
+    runtime: State<'_, RuntimeSupervisor>,
+    tunnel: State<'_, crate::tunnel::TunnelProcessManager>,
+    harness: State<'_, HarnessController>,
+) -> Result<DiagnosticRun, ControlError> {
+    Ok(DiagnosticsCoordinator::new(
+        &app,
+        secrets.inner(),
+        runtime.inner(),
+        tunnel.inner(),
+        harness.inner(),
+    )
+    .run())
+}
+
+#[tauri::command]
 pub fn local_diagnostics_run(
     app: AppHandle,
     state: State<'_, Mutex<BackendState>>,
@@ -475,7 +502,16 @@ pub fn local_diagnostics_run(
         } else {
             "Workspace folder is missing or inaccessible.".into()
         },
-        remediation: (!workspace_ok).then(|| "Choose an accessible folder in Settings.".into()),
+        scope: Some(DiagnosticScope::Workspace),
+        evidence: vec![DiagnosticEvidence {
+            key: DiagnosticEvidenceKey::Exists,
+            value: workspace_ok.to_string(),
+        }],
+        remediation: (!workspace_ok).then(|| DiagnosticRemediation {
+            code: "workspace_choose".into(),
+            summary: "Choose an accessible folder in Settings.".into(),
+            target: Some(DiagnosticRemediationTarget::SettingsWorkspace),
+        }),
     });
     let tunnel_ok = !config.tunnel.tunnel_id.trim().is_empty();
     checks.push(DiagnosticCheck {
@@ -490,8 +526,16 @@ pub fn local_diagnostics_run(
         } else {
             "External connection is not configured (optional for Local Runtime).".into()
         },
-        remediation: (!tunnel_ok)
-            .then(|| "Configure an external connection in Settings when needed.".into()),
+        scope: Some(DiagnosticScope::ControlPlane),
+        evidence: vec![DiagnosticEvidence {
+            key: DiagnosticEvidenceKey::Configured,
+            value: tunnel_ok.to_string(),
+        }],
+        remediation: (!tunnel_ok).then(|| DiagnosticRemediation {
+            code: "connection_configure".into(),
+            summary: "Configure an external connection in Settings when needed.".into(),
+            target: Some(DiagnosticRemediationTarget::SettingsConnection),
+        }),
     });
     let client_ok = config
         .tunnel
@@ -512,8 +556,16 @@ pub fn local_diagnostics_run(
         } else {
             "External tunnel client is not configured (optional for Local Runtime).".into()
         },
-        remediation: (!client_ok).then(|| {
-            "Choose a tunnel-client package folder when external connection is needed.".into()
+        scope: Some(DiagnosticScope::Tunnel),
+        evidence: vec![DiagnosticEvidence {
+            key: DiagnosticEvidenceKey::Exists,
+            value: client_ok.to_string(),
+        }],
+        remediation: (!client_ok).then(|| DiagnosticRemediation {
+            code: "tunnel_client_choose".into(),
+            summary: "Choose a tunnel-client package folder when external connection is needed."
+                .into(),
+            target: Some(DiagnosticRemediationTarget::SettingsConnection),
         }),
     });
     let api_key_ok = if let Some(reference) = config.tunnel.api_key_ref {
@@ -538,8 +590,16 @@ pub fn local_diagnostics_run(
         } else {
             "API Key is not configured (optional for Local Runtime).".into()
         },
-        remediation: (!api_key_ok)
-            .then(|| "Save an API Key when external connection is needed.".into()),
+        scope: Some(DiagnosticScope::Credential),
+        evidence: vec![DiagnosticEvidence {
+            key: DiagnosticEvidenceKey::Exists,
+            value: api_key_ok.to_string(),
+        }],
+        remediation: (!api_key_ok).then(|| DiagnosticRemediation {
+            code: "credential_save".into(),
+            summary: "Save an API Key when external connection is needed.".into(),
+            target: Some(DiagnosticRemediationTarget::SettingsConnection),
+        }),
     });
     let security_ok = (matches!(config.security.mode, SecurityMode::Normal)
         && !config.security.developer_test_mode)
@@ -557,6 +617,11 @@ pub fn local_diagnostics_run(
         } else {
             "Security mode fields are inconsistent.".into()
         },
+        scope: Some(DiagnosticScope::Config),
+        evidence: vec![DiagnosticEvidence {
+            key: DiagnosticEvidenceKey::Configured,
+            value: security_ok.to_string(),
+        }],
         remediation: None,
     });
     let overall_status = if checks

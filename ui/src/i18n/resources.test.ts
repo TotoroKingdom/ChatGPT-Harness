@@ -31,7 +31,7 @@ describe("supported language resource integrity", () => {
   it("covers every primary domain with exactly two supported languages", () => {
     expect(supportedLanguages).toEqual(["en", "zh-CN"]);
     expect(i18n.options.fallbackLng).toEqual(["en"]);
-    for (const domain of ["app", "common", "nav", "status", "overview", "tools", "policies", "activity", "approvals", "settings", "firstRun", "errors", "policy", "bash", "validation"]) {
+    for (const domain of ["app", "common", "nav", "status", "overview", "diagnostics", "tools", "policies", "activity", "approvals", "settings", "firstRun", "errors", "policy", "bash", "validation"]) {
       expect(Object.keys(en), domain).toContain(domain);
       expect(Object.keys(zhCN), domain).toContain(domain);
     }

@@ -14,6 +14,7 @@ import type {
   PoliciesListResult,
   RuntimeState,
   RuntimeStopResult,
+  StartupAttempt,
   StartEligibility,
   ToolsListResult,
   UiLanguage,
@@ -247,7 +248,15 @@ export class TauriHarnessControlClient implements HarnessControlClient {
   }
 
   localDiagnosticsRun() {
-    return this.call<DiagnosticRun>("local_diagnostics_run");
+    return this.connectionDiagnosticsRun();
+  }
+
+  connectionDiagnosticsRun() {
+    return this.call<DiagnosticRun>("connection_diagnostics_run");
+  }
+
+  startupLatest() {
+    return this.call<StartupAttempt | null>("harness_startup_latest");
   }
 
   runtimeStartEligibility() {

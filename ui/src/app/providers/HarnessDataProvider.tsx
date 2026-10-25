@@ -8,6 +8,7 @@ import type {
   PoliciesListResult,
   RuntimeState,
   StartEligibility,
+  StartupAttempt,
   ToolsListResult,
   UiLanguage,
 } from "@protocol/v1";
@@ -65,6 +66,7 @@ type ContextValue = ResourceState & {
   restartRequired: boolean;
   activeRevision: string | null;
   lastDiagnostics: DiagnosticRun | null;
+  latestStartupAttempt?: StartupAttempt | null;
   refreshConfig: () => Promise<void>;
   refreshHarness: () => Promise<void>;
   resetConfig: () => Promise<SaveResult>;
@@ -226,6 +228,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const [harnessObserved, setHarnessObserved] = useState(false);
   const [activeRevision, setActiveRevision] = useState<string | null>(null);
   const [lastDiagnostics, setLastDiagnostics] = useState<DiagnosticRun | null>(null);
+  const [latestStartupAttempt, setLatestStartupAttempt] = useState<StartupAttempt | null>(null);
   const activityCursorRef = useRef<string | undefined>(undefined);
   const observedSession = useRef<string | null | undefined>(undefined);
   const resourceEpoch = useRef(0);
@@ -594,8 +597,12 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   }, [client, refreshHarness, refreshRuntimeResources]);
 
   const runDiagnostics = useCallback(async () => {
-    const result = await client.localDiagnosticsRun();
+    const [result, startup] = await Promise.all([
+      client.connectionDiagnosticsRun(),
+      client.startupLatest(),
+    ]);
     setLastDiagnostics(result);
+    setLatestStartupAttempt(startup);
     return result;
   }, [client]);
 
@@ -647,6 +654,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       activeRevision,
       restartRequired: activeRevision !== null && config !== null && activeRevision !== config.configRevision,
       lastDiagnostics,
+      latestStartupAttempt,
       themePreference,
       effectiveTheme,
       setThemePreference,

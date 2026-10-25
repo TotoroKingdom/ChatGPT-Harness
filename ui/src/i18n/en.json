@@ -282,6 +282,65 @@
       "lifecycle_conflict": "Wait for the current lifecycle action to finish."
     }
   },
+  "diagnostics": {
+    "run": "Run connection diagnostics",
+    "running": "Running connection diagnostics…",
+    "overall": "Overall result",
+    "checks": "Checks",
+    "evidence": "Safe evidence",
+    "remediation": "Next step",
+    "copy": "Copy diagnostic summary",
+    "copied": "Diagnostic summary copied",
+    "copyFailed": "Could not copy the diagnostic summary",
+    "noRun": "Run diagnostics to inspect the current connection.",
+    "startup": "Latest startup attempt",
+    "startupDetails": "Startup stage timings",
+    "cohort": "Cohort",
+    "outcome": "Outcome",
+    "duration": "Total duration",
+    "milliseconds": "ms",
+    "slowestPhase": "Slowest phase",
+    "status": {
+      "pass": "PASS",
+      "warning": "WARNING",
+      "fail": "FAIL",
+      "unknown": "UNKNOWN"
+    },
+    "scope": {
+      "config": "Configuration",
+      "workspace": "Workspace",
+      "runtime": "Runtime",
+      "mcp": "MCP",
+      "tunnel": "Tunnel",
+      "control_plane": "Control plane",
+      "proxy": "Proxy",
+      "credential": "Credential",
+      "lifecycle": "Lifecycle"
+    },
+    "startupOutcome": {
+      "ready": "Ready",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "incomplete": "Incomplete"
+    },
+    "phase": {
+      "eligibility_prepare": "Eligibility preparation",
+      "runtime_spawn": "Runtime spawn",
+      "runtime_initialize": "Runtime initialize",
+      "mcp_endpoint_ready": "MCP endpoint ready",
+      "tunnel_resolve": "Tunnel resolve",
+      "tunnel_launch": "Tunnel launch",
+      "control_plane_connected": "Control-plane connected",
+      "mcp_target_ready": "MCP target ready",
+      "harness_ready": "Harness Ready"
+    },
+    "phaseStatus": {
+      "completed": "Completed",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "incomplete": "Incomplete"
+    }
+  },
   "tools": {
     "title": "Tools",
     "eyebrow": "M5 controlled Bash",

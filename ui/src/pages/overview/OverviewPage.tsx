@@ -4,6 +4,7 @@ import { Button, Disclosure, InlineFeedback, Inspector, Row, Section, StatusBadg
 import { useHarnessData } from "@/app/providers/HarnessDataProvider";
 import type { Navigate } from "@/app/router/routes";
 import { RuntimeOverview } from "./RuntimeOverview";
+import { DiagnosticsPanel } from "@/components/status/DiagnosticsPanel";
 import { useTranslation } from "react-i18next";
 import { componentStatusKey, errorCodeKey, overallStatusKey, startEligibilityKey, activityEventKey } from "@/i18n/presentation";
 
@@ -18,6 +19,7 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const [selected, setSelected] = useState<Component | null>(null);
+  const [diagnosticRunning, setDiagnosticRunning] = useState(false);
   const observed = data.harnessObserved !== false;
   const critical = data.policies ? hasPolicyCritical(data.components.runtime, data.policies) : false;
   const transitioning = busy || data.overall === "starting" || data.overall === "stopping";
@@ -40,6 +42,11 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
   };
   const refresh = () => { void data.refreshHarness?.(); void data.refreshConfig?.(); };
   const blocker = data.harness?.lastError?.code;
+  const runDiagnostics = async () => {
+    setDiagnosticRunning(true);
+    try { return await data.runDiagnostics(); }
+    finally { setDiagnosticRunning(false); }
+  };
   return <div className="page-stack">
     <div className="workspace-row"><div className="row-identity"><h2>{critical ? t("m8.harnessNeedsAttention") : t("overview.harnessIs", { status: observed ? t(overallStatusKey(data.overall)) : t("m8.unknown") })}</h2><p>{t("m8.overviewTask")}</p></div>
       <div className="row-controls">
@@ -65,6 +72,7 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
       {recovery.cooldownUntil && <span>{t("overview.cooldownUntil")}: <time dateTime={recovery.cooldownUntil}>{recovery.cooldownUntil}</time></span>}
       {recovery.nextAttemptAt && <span>{t("overview.nextRecoveryAttempt")}: <time dateTime={recovery.nextAttemptAt}>{recovery.nextAttemptAt}</time></span>}
     </div>}
+    <DiagnosticsPanel run={data.lastDiagnostics} startup={data.latestStartupAttempt ?? null} running={diagnosticRunning} onRun={runDiagnostics} onNavigate={onNavigate} />
     <Section title={t("overview.services")}>
       {(["runtime", "tunnel", "mcp"] as const).map((component) => <Row key={component} title={component === "mcp" ? "MCP" : component === "runtime" ? "Runtime" : "Tunnel"} selected={selected === component} onInspect={() => setSelected(component)} controls={<StatusBadge>{observed ? t(componentStatusKey(data.components[component])) : t("m8.unknown")}</StatusBadge>} />)}
     </Section>

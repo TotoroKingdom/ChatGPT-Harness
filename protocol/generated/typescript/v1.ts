@@ -154,6 +154,25 @@ export type ApprovalsListParams = { status?: ApprovalStatus, };
 export type ApprovalsListResult = { items: Array<ApprovalRequest>, };
 export type ApprovalsResolveParams = { requestId: string, decision: ApprovalDecision, };
 export type ApprovalsResolveResult = { approval: ApprovalRequest, };
-export type DiagnosticStatus = "pass" | "warning" | "fail";
-export type DiagnosticCheck = { id: string, status: DiagnosticStatus, summary: string, remediation?: string, };
+export type DiagnosticStatus = "pass" | "warning" | "fail" | "unknown";
+export type DiagnosticScope = "config" | "workspace" | "runtime" | "mcp" | "tunnel" | "control_plane" | "proxy" | "credential" | "lifecycle";
+export type DiagnosticEvidenceKey = "configured" | "exists" | "version" | "process_phase" | "lifecycle" | "readiness" | "route_mode" | "proxy_source" | "last_success_age_seconds" | "error_code" | "endpoint_reachable";
+export type DiagnosticEvidence = { key: DiagnosticEvidenceKey,
+/**
+ * Values are bounded and sanitized by the Host coordinator.
+ */
+value: string, };
+export type DiagnosticRemediationTarget = "overview" | "settings_workspace" | "settings_connection" | "settings_security";
+export type DiagnosticRemediation = { code: string, summary: string, target?: DiagnosticRemediationTarget, };
+export type DiagnosticCheck = { id: string, status: DiagnosticStatus, summary: string, scope?: DiagnosticScope, evidence: Array<DiagnosticEvidence>, remediation?: DiagnosticRemediation, };
 export type DiagnosticRun = { runId: string, startedAt: string, finishedAt: string, overallStatus: DiagnosticStatus, checks: Array<DiagnosticCheck>, };
+export type StartupCohort = "cold" | "warm";
+export type StartupOutcome = "ready" | "failed" | "cancelled" | "incomplete";
+export type StartupPhase = "eligibility_prepare" | "runtime_spawn" | "runtime_initialize" | "mcp_endpoint_ready" | "tunnel_resolve" | "tunnel_launch" | "control_plane_connected" | "mcp_target_ready" | "harness_ready";
+export type StartupPhaseStatus = "completed" | "failed" | "skipped" | "incomplete";
+export type StartupPhaseTiming = { phase: StartupPhase, startedOffsetMs: number, durationMs: number, status: StartupPhaseStatus, safeErrorCode?: string, };
+export type StartupAttempt = { attemptId: string, harnessSessionId: string, cohort: StartupCohort,
+/**
+ * RFC3339 UTC wall-clock timestamp for display and correlation only.
+ */
+startedAt: string, finishedAt?: string, outcome: StartupOutcome, totalDurationMs?: number, phases: Array<StartupPhaseTiming>, failureCode?: string, appVersion: string, runtimeVersion?: string, tunnelVersion?: string, };

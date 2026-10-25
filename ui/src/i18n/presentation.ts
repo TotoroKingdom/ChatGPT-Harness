@@ -13,6 +13,11 @@ import type {
   SecurityMode,
   RuntimeReadiness,
   StartEligibilityStatus,
+  DiagnosticScope,
+  DiagnosticStatus,
+  StartupOutcome,
+  StartupPhase,
+  StartupPhaseStatus,
   ToolReadiness as ProtocolToolReadiness,
 } from "@protocol/v1";
 import type {
@@ -116,6 +121,26 @@ const startEligibilityKeys: Record<StartEligibilityStatus, TranslationKey> = {
 
 export function startEligibilityKey(value: StartEligibilityStatus): TranslationKey {
   return startEligibilityKeys[value];
+}
+
+export function diagnosticStatusKey(value: DiagnosticStatus): TranslationKey {
+  return `diagnostics.status.${value}`;
+}
+
+export function diagnosticScopeKey(value: DiagnosticScope): TranslationKey {
+  return `diagnostics.scope.${value}`;
+}
+
+export function startupOutcomeKey(value: StartupOutcome): TranslationKey {
+  return `diagnostics.startupOutcome.${value}`;
+}
+
+export function startupPhaseKey(value: StartupPhase): TranslationKey {
+  return `diagnostics.phase.${value}`;
+}
+
+export function startupPhaseStatusKey(value: StartupPhaseStatus): TranslationKey {
+  return `diagnostics.phaseStatus.${value}`;
 }
 
 const policySnapshotStatusKeys: Record<PolicySnapshotStatus, TranslationKey> = {

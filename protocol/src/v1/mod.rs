@@ -8,6 +8,7 @@ pub mod initialize;
 pub mod methods;
 pub mod policies;
 pub mod runtime;
+pub mod startup;
 pub mod tools;
 
 pub use activity::*;
@@ -19,4 +20,5 @@ pub use initialize::*;
 pub use methods::*;
 pub use policies::*;
 pub use runtime::*;
+pub use startup::*;
 pub use tools::*;

@@ -282,6 +282,65 @@
       "lifecycle_conflict": "请等待当前生命周期操作完成。"
     }
   },
+  "diagnostics": {
+    "run": "运行连接诊断",
+    "running": "正在运行连接诊断…",
+    "overall": "总体结果",
+    "checks": "检查项",
+    "evidence": "安全证据",
+    "remediation": "下一步处理",
+    "copy": "复制诊断摘要",
+    "copied": "诊断摘要已复制",
+    "copyFailed": "无法复制诊断摘要",
+    "noRun": "运行诊断以检查当前连接。",
+    "startup": "最近一次启动尝试",
+    "startupDetails": "启动阶段耗时",
+    "cohort": "样本组",
+    "outcome": "结果",
+    "duration": "总耗时",
+    "milliseconds": "毫秒",
+    "slowestPhase": "最慢阶段",
+    "status": {
+      "pass": "PASS",
+      "warning": "WARNING",
+      "fail": "FAIL",
+      "unknown": "UNKNOWN"
+    },
+    "scope": {
+      "config": "配置",
+      "workspace": "工作区",
+      "runtime": "Runtime",
+      "mcp": "MCP",
+      "tunnel": "Tunnel",
+      "control_plane": "控制面",
+      "proxy": "代理",
+      "credential": "凭据",
+      "lifecycle": "生命周期"
+    },
+    "startupOutcome": {
+      "ready": "就绪",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "incomplete": "未完成"
+    },
+    "phase": {
+      "eligibility_prepare": "启动资格准备",
+      "runtime_spawn": "启动 Runtime 进程",
+      "runtime_initialize": "初始化 Runtime",
+      "mcp_endpoint_ready": "MCP 端点就绪",
+      "tunnel_resolve": "解析 Tunnel",
+      "tunnel_launch": "启动 Tunnel",
+      "control_plane_connected": "控制面已连接",
+      "mcp_target_ready": "MCP 目标就绪",
+      "harness_ready": "Harness 已就绪"
+    },
+    "phaseStatus": {
+      "completed": "已完成",
+      "failed": "失败",
+      "skipped": "已跳过",
+      "incomplete": "未完成"
+    }
+  },
   "tools": {
     "title": "工具",
     "eyebrow": "M5 受控 Bash",

@@ -16,6 +16,7 @@ pub fn run() {
     let tunnel = crate::tunnel::TunnelProcessManager::new();
     let harness = crate::harness::HarnessController::new(runtime.clone(), tunnel.clone());
     runtime.set_event_sink(std::sync::Arc::new(harness.clone()));
+    runtime.set_startup_sink(std::sync::Arc::new(harness.clone()));
     tunnel.set_event_sink(std::sync::Arc::new(harness.clone()));
     let desktop = crate::desktop::DesktopLifecycleCoordinator::new(harness.clone());
     let desktop_for_window = desktop.clone();
@@ -183,9 +184,11 @@ pub fn run() {
             crate::commands::runtime_get_activity_snapshot,
             crate::commands::runtime_get_effective_tools,
             crate::commands::runtime_diagnostics_run,
+            crate::commands::connection_diagnostics_run,
             crate::commands::harness_start_eligibility,
             crate::commands::harness_start,
             crate::commands::harness_status,
+            crate::commands::harness_startup_latest,
             crate::commands::harness_stop,
             crate::commands::harness_restart
         ])
@@ -196,10 +199,12 @@ pub fn run() {
 mod commands;
 mod config;
 mod desktop;
+mod diagnostics;
 mod harness;
 mod platform;
 mod runtime;
 mod secrets;
+mod startup;
 // M7-B is intentionally internal until a later connection orchestration slice.
 #[allow(dead_code)]
 mod tunnel;
