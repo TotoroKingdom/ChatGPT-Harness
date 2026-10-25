@@ -180,7 +180,14 @@ impl HarnessController {
                 _ => {}
             }
         }
-        harness_status_event_changed(&previous, &inner.status)
+        let session_id = inner.status.active_session_id.clone();
+        let status = inner.status.clone();
+        let changed = harness_status_event_changed(&previous, &status);
+        drop(inner);
+        if let Some(session_id) = session_id {
+            self.observe_startup_readiness(&session_id, &status);
+        }
+        changed
     }
 
     pub(crate) fn latest_startup_attempt(

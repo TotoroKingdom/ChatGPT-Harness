@@ -92,8 +92,12 @@ try {
     }
 
     $analyzer = Join-Path $scriptDirectory "analyze-startup-benchmark.ps1"
+    $aggregatePath = Join-Path $benchmarkDirectory ("{0}.ndjson" -f $Mode.ToLowerInvariant())
+    foreach ($rawPath in $rawPaths) {
+        Get-Content -LiteralPath $rawPath | Add-Content -LiteralPath $aggregatePath -Encoding utf8
+    }
     $analysis = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $analyzer `
-        -InputPath $rawPaths -Cohort ($Mode.ToLowerInvariant()) -SkipPrimer $PrimerCount
+        -InputPath $aggregatePath -Cohort ($Mode.ToLowerInvariant()) -SkipPrimer $PrimerCount
     if ($LASTEXITCODE -ne 0) {
         throw "Startup benchmark analysis failed."
     }
