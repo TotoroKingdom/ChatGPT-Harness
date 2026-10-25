@@ -499,6 +499,11 @@ impl HarnessController {
         };
         self.startup
             .complete_phase(&session_id, StartupPhase::TunnelLaunch);
+        // The managed Tunnel start returns before control-plane readiness is
+        // necessarily proven. Keep the fixed tail phases sequential because
+        // the recorder intentionally tracks one open phase at a time.
+        self.startup
+            .start_phase(&session_id, StartupPhase::ControlPlaneConnected);
         let Some(instance) = tunnel_status.instance.as_ref() else {
             return Err(self.fail_start(
                 app,
@@ -732,26 +737,23 @@ impl HarnessController {
         };
         if readiness.control_plane_connected {
             self.startup
-                .start_phase(session_id, StartupPhase::ControlPlaneConnected);
-            self.startup
                 .complete_phase(session_id, StartupPhase::ControlPlaneConnected);
+            self.startup
+                .start_phase(session_id, StartupPhase::McpTargetReady);
+            if readiness.mcp_target_reachable {
+                self.startup
+                    .complete_phase(session_id, StartupPhase::McpTargetReady);
+            }
         } else {
             self.startup
                 .start_phase(session_id, StartupPhase::ControlPlaneConnected);
-        }
-        if readiness.mcp_target_reachable {
-            self.startup
-                .start_phase(session_id, StartupPhase::McpTargetReady);
-            self.startup
-                .complete_phase(session_id, StartupPhase::McpTargetReady);
-        } else {
-            self.startup
-                .start_phase(session_id, StartupPhase::McpTargetReady);
         }
         if status.lifecycle == HarnessLifecycle::Ready
             && readiness.control_plane_connected
             && readiness.mcp_target_reachable
         {
+            self.startup
+                .start_phase(session_id, StartupPhase::HarnessReady);
             self.startup.ready(session_id);
         }
     }
