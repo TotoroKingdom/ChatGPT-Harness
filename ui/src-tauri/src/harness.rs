@@ -12,7 +12,10 @@ use harness_control_protocol::{
     AppConfig, SecurityMode, StartEligibility, StartEligibilityStatus, StartupCohort, StartupPhase,
 };
 use serde::Serialize;
-use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::{
+    sync::{Arc, Mutex, MutexGuard, TryLockError},
+    time::Duration,
+};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -80,6 +83,8 @@ pub struct HarnessController {
     tunnel: TunnelProcessManager,
     startup: StartupPhaseRecorder,
 }
+
+const STARTUP_CONTROL_PLANE_POLL_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl Clone for HarnessController {
     fn clone(&self) -> Self {
@@ -486,6 +491,10 @@ impl HarnessController {
         let mut launch = TunnelLaunch::new(resolved.client_path, endpoint)
             .with_tunnel_id(config.tunnel.tunnel_id.clone())
             .with_control_plane_http_proxy(config.tunnel.control_plane_http_proxy.clone())
+            // B0 showed the default 30s long-poll dominating Start→Ready.
+            // Keep the same authoritative poll/freshness checks, but bound the
+            // first successful poll interval for the managed Harness process.
+            .with_control_plane_poll_timeout(STARTUP_CONTROL_PLANE_POLL_TIMEOUT)
             .with_cloudflared_path(resolved.cloudflared_path)
             .with_api_key(api_key);
         if let Ok(directory) = app.path().app_data_dir() {
