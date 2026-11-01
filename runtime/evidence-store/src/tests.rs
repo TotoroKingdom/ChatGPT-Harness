@@ -169,6 +169,11 @@ fn newer_and_corrupt_databases_are_preserved() {
     let error = EvidenceWriter::open(&corrupt_path).expect_err("corrupt source must be preserved");
     assert!(matches!(error, StoreError::Corrupt { .. }));
     assert_eq!(fs::read(&corrupt_path).unwrap(), bytes);
+
+    assert!(matches!(
+        EvidenceReader::open(&corrupt_path),
+        Err(StoreError::Corrupt { .. })
+    ));
 }
 
 #[test]

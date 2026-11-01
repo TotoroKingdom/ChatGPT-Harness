@@ -34,7 +34,7 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("sqlite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    Sqlite(rusqlite::Error),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
@@ -65,6 +65,12 @@ pub enum StoreError {
     InvalidEvidence(String),
     #[error("history request was not found")]
     NotFound,
+}
+
+impl From<rusqlite::Error> for StoreError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::from_sqlite(error)
+    }
 }
 
 impl StoreError {

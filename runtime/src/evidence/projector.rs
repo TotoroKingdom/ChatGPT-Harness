@@ -80,7 +80,9 @@ fn stage_and_outcome(event: &AuditEvent) -> (EvidenceStage, HistoryOutcome) {
             if event.workspace_validation == WorkspaceValidation::Failed {
                 HistoryOutcome::Failed
             } else {
-                HistoryOutcome::Success
+                // Workspace validation only admits a request to policy
+                // evaluation. It is not a successful terminal outcome.
+                HistoryOutcome::InProgress
             },
         ),
         AuditEventType::PolicyEvaluated => {
@@ -407,5 +409,17 @@ mod tests {
         assert!(evidence.result_evidence.is_none());
         assert_eq!(evidence.coverage, EvidenceCoverage::Incomplete);
         assert_eq!(evidence.policy_decision, Option::<PolicyDecision>::None);
+    }
+
+    #[test]
+    fn successful_workspace_validation_is_not_a_terminal_outcome() {
+        let mut source = event(AuditEventType::WorkspaceValidated);
+        source.workspace_validation = WorkspaceValidation::Passed;
+
+        let evidence = SafeEvidenceProjector::new(context()).project(&source);
+
+        assert_eq!(evidence.stage, EvidenceStage::WorkspaceValidated);
+        assert_eq!(evidence.outcome, HistoryOutcome::InProgress);
+        assert_eq!(evidence.coverage, EvidenceCoverage::Incomplete);
     }
 }
