@@ -119,6 +119,15 @@ fn query_at(
     Ok(result)
 }
 
+#[cfg(test)]
+pub(crate) fn query_at_for_test(
+    database: PathBuf,
+    config: &AppConfig,
+    params: HistoryQueryParams,
+) -> Result<HistoryQueryResult, ControlError> {
+    query_at(database, config, params)
+}
+
 pub(crate) fn get(
     app: &AppHandle,
     params: HistoryGetParams,
@@ -144,6 +153,15 @@ fn get_at(
             code: "EVIDENCE_NOT_FOUND".into(),
             message: "History request was not found.".into(),
         })
+}
+
+#[cfg(test)]
+pub(crate) fn get_at_for_test(
+    database: PathBuf,
+    config: &AppConfig,
+    params: HistoryGetParams,
+) -> Result<HistoryGetResult, ControlError> {
+    get_at(database, config, params)
 }
 
 pub(crate) fn status(
@@ -224,6 +242,35 @@ fn clear_offline_at(
     config: &AppConfig,
 ) -> Result<HistoryClearResult, ControlError> {
     clear_history_offline(database).map_err(|error| store_error(error, config))
+}
+
+#[cfg(test)]
+pub(crate) fn clear_offline_at_for_test(
+    database: PathBuf,
+    config: &AppConfig,
+) -> Result<HistoryClearResult, ControlError> {
+    clear_offline_at(database, config)
+}
+
+/// Test-only seam for the online Tauri History command.  The real command
+/// chooses this branch after reading the live Runtime evidence status; the
+/// callback is the real Runtime `history.clear` control request supplied by
+/// the integration test.
+#[cfg(test)]
+pub(crate) fn clear_online_at_for_test<F>(
+    database: PathBuf,
+    config: &AppConfig,
+    status: EvidenceStoreStatus,
+    clear_runtime: F,
+) -> Result<HistoryClearResult, ControlError>
+where
+    F: FnOnce() -> Result<HistoryClearResult, ControlError>,
+{
+    if status.state == EvidenceStoreState::Disabled {
+        clear_offline_at(database, config)
+    } else {
+        clear_runtime()
+    }
 }
 
 fn control_error(error: SupervisorError) -> ControlError {

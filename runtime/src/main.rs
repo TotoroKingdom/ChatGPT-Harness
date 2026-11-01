@@ -17,6 +17,8 @@ mod tools;
 mod workspace;
 
 #[cfg(test)]
+mod m03_qa_integration;
+#[cfg(test)]
 mod m3_integration;
 #[cfg(test)]
 mod m5_analyzer_security;

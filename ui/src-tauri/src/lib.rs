@@ -213,6 +213,9 @@ mod runtime;
 mod secrets;
 mod startup;
 mod startup_benchmark;
+
+#[cfg(test)]
+mod m03_qa_integration;
 // M7-B is intentionally internal until a later connection orchestration slice.
 #[allow(dead_code)]
 mod tunnel;
