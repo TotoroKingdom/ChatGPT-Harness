@@ -1,0 +1,548 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "ActivityFailureCategory": {
+      "enum": [
+        "approval_denied",
+        "approval_expired",
+        "approval_cancelled",
+        "tool_disabled",
+        "target_changed",
+        "atomic_failure",
+        "io_failure",
+        "workspace_violation",
+        "invalid_arguments",
+        "execution_failed",
+        "bash_unavailable",
+        "bash_invalid_command",
+        "bash_command_too_long",
+        "bash_timeout",
+        "bash_output_limit",
+        "bash_concurrency_limit",
+        "bash_spawn_failed",
+        "bash_cancelled",
+        "bash_process_failed"
+      ],
+      "type": "string"
+    },
+    "ApprovalDecision": {
+      "enum": [
+        "allow_once",
+        "allow_for_session",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "BashClassification": {
+      "description": "Runtime-owned, display-safe Bash approval evidence.  This projection is\nintentionally separate from the internal normalized command scope used by\nSessionGrant matching: the latter may contain sensitive literal argv and\nnever crosses the protocol boundary.",
+      "enum": [
+        "classified",
+        "unclassified_high_risk"
+      ],
+      "type": "string"
+    },
+    "BashRiskFlag": {
+      "enum": [
+        "command_substitution",
+        "backticks",
+        "eval",
+        "nested_shell",
+        "interpreter_inline_code",
+        "redirection",
+        "dynamic_expansion",
+        "malformed_quoting",
+        "unsupported_grammar"
+      ],
+      "type": "string"
+    },
+    "BashWorkingDirectory": {
+      "enum": [
+        "active_workspace"
+      ],
+      "type": "string"
+    },
+    "DurableSanitizedArgumentsEvidence": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "logicalPath": {
+              "type": "string"
+            },
+            "tool": {
+              "const": "read_file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "logicalPath"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "tool": {
+              "const": "glob",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "logicalPath": {
+              "type": "string"
+            },
+            "tool": {
+              "const": "write",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "logicalPath"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "logicalPath": {
+              "type": "string"
+            },
+            "tool": {
+              "const": "edit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "logicalPath"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "capability": {
+              "$ref": "#/$defs/ToolCapability"
+            },
+            "classification": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/BashClassification"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cwd": {
+              "$ref": "#/$defs/BashWorkingDirectory"
+            },
+            "mode": {
+              "$ref": "#/$defs/SecurityMode"
+            },
+            "modeEligible": {
+              "type": "boolean"
+            },
+            "riskFlags": {
+              "items": {
+                "$ref": "#/$defs/BashRiskFlag"
+              },
+              "type": "array"
+            },
+            "sessionGrantHit": {
+              "type": "boolean"
+            },
+            "tool": {
+              "const": "bash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "mode",
+            "modeEligible",
+            "capability",
+            "cwd",
+            "sessionGrantHit"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "EvidenceCoverage": {
+      "enum": [
+        "COMPLETE",
+        "INCOMPLETE",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "EvidenceLifecycleState": {
+      "enum": [
+        "received",
+        "validating",
+        "workspace_validating",
+        "policy_evaluating",
+        "denied",
+        "awaiting_approval",
+        "executing",
+        "completed",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "EvidenceStage": {
+      "enum": [
+        "request_received",
+        "workspace_validated",
+        "policy_evaluated",
+        "approval_required",
+        "approval_resolved",
+        "approval_expired",
+        "approval_cancelled",
+        "session_grant_matched",
+        "execution_started",
+        "execution_completed",
+        "execution_failed",
+        "request_denied"
+      ],
+      "type": "string"
+    },
+    "EvidenceWorkspaceValidation": {
+      "enum": [
+        "not_attempted",
+        "passed",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "ExecutionResultEvidence": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytesRead": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tool": {
+              "const": "read_file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "bytesRead"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "matchCount": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tool": {
+              "const": "glob",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "matchCount"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytesWritten": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "disposition": {
+              "$ref": "#/$defs/WriteDisposition"
+            },
+            "tool": {
+              "const": "write",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "bytesWritten",
+            "disposition"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytesWritten": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "replacements": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tool": {
+              "const": "edit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "replacements",
+            "bytesWritten"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "exitCode": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "tool": {
+              "const": "bash",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "exitCode"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HistoryOutcome": {
+      "enum": [
+        "in_progress",
+        "success",
+        "failed",
+        "denied",
+        "approval_required",
+        "cancelled",
+        "timed_out",
+        "approval_expired",
+        "approval_cancelled"
+      ],
+      "type": "string"
+    },
+    "PolicyDecision": {
+      "enum": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "type": "string"
+    },
+    "PolicyReason": {
+      "description": "Reasons are typed because policy evidence is consumed by Runtime, control\nreads, activity, and the UI. They are not display-only log strings.",
+      "enum": [
+        "system_guardrail",
+        "matched_user_rules",
+        "tool_default",
+        "invalid_policy_snapshot",
+        "invalid_context",
+        "unsupported_capability",
+        "tool_disabled"
+      ],
+      "type": "string"
+    },
+    "SecurityMode": {
+      "enum": [
+        "normal",
+        "developer_test"
+      ],
+      "type": "string"
+    },
+    "ToolCapability": {
+      "enum": [
+        "workspace_read",
+        "workspace_write",
+        "developer_shell"
+      ],
+      "type": "string"
+    },
+    "WriteDisposition": {
+      "enum": [
+        "created",
+        "overwritten"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "approvalDecision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApprovalDecision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "approvalId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "coverage": {
+      "$ref": "#/$defs/EvidenceCoverage"
+    },
+    "durationMs": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "eventId": {
+      "type": "string"
+    },
+    "failureCategory": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ActivityFailureCategory"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hostSessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lifecycleState": {
+      "$ref": "#/$defs/EvidenceLifecycleState"
+    },
+    "matchedRuleIds": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "occurredAtUtc": {
+      "type": "string"
+    },
+    "outcome": {
+      "$ref": "#/$defs/HistoryOutcome"
+    },
+    "policyDecision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "policyReason": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyReason"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "recordedAtUtc": {
+      "type": "string"
+    },
+    "requestId": {
+      "type": "string"
+    },
+    "resultEvidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExecutionResultEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "runtimeId": {
+      "type": "string"
+    },
+    "sanitizedArguments": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DurableSanitizedArgumentsEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "schemaVersion": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stage": {
+      "$ref": "#/$defs/EvidenceStage"
+    },
+    "supervisorGenerationId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "toolName": {
+      "type": "string"
+    },
+    "workspaceValidation": {
+      "$ref": "#/$defs/EvidenceWorkspaceValidation"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "runtimeId",
+    "requestId",
+    "toolName",
+    "occurredAtUtc",
+    "recordedAtUtc",
+    "stage",
+    "lifecycleState",
+    "workspaceValidation",
+    "outcome",
+    "coverage"
+  ],
+  "title": "EvidenceEventV1",
+  "type": "object"
+}

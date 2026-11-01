@@ -1,5 +1,5 @@
 import type { ActivityEntry, RuntimeDiagnostics, ToolDiagnostic } from "./control-read";
-import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, StartupAttempt, ToolsListResult, ToolDescriptor, UiLanguage } from "@protocol/v1";
+import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, EvidenceStoreStatus, HistoryClearResult, HistoryGetParams, HistoryGetResult, HistoryQueryParams, HistoryQueryResult, HistoryRequestSummary, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, StartupAttempt, ToolsListResult, ToolDescriptor, UiLanguage } from "@protocol/v1";
 import { HarnessClientError } from "./errors";
 import type { ActivityEventListener, ComponentStates, ComponentStatesListener, DesktopNavigationIntent, DesktopPreferencesPatch, HarnessControlClient, HarnessStatus, RuntimeProcessStatus, Unsubscribe } from "./client";
 export type MockScenario = "ready" | "disconnected" | "empty" | "error";
@@ -34,7 +34,7 @@ const safeConfig = (): AppConfig => {
   tunnel: { ...config.tunnel, tunnelId: "", tunnelClientPath: undefined, apiKeyRef: undefined },
  };
 };
-function event(sequence: string, eventType: ActivityEventType, summary: string, metadata: Record<string,string>, requestId?: string): ActivityEvent { return { eventId: `event_mock_${sequence}`, sequence, eventType, requestId, timestamp: `2026-09-02T00:0${sequence}:00Z`, summary, metadata }; }
+function event(sequence: string, eventType: ActivityEventType, summary: string, metadata: Record<string,string>, requestId?: string): ActivityEvent { return { eventId: `event_mock_${sequence}`, runtimeId: "runtime_mock_01", sequence, eventType, requestId, timestamp: `2026-09-02T00:0${sequence}:00Z`, summary, metadata }; }
 const tools: ToolDescriptor[] = [{name:"read_file",description:"Read a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"glob",description:"Find workspace paths.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"write",description:"Write a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"edit",description:"Edit a workspace text file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"bash",description:"Run a controlled Git Bash command from the active Workspace. The cwd is an initial working directory, not a filesystem sandbox.",implemented:true,enabled:false,exposed:false,effectivePolicy:"ask",scope:"active_workspace",readiness:"unavailable",riskLevel:"high"}];
 const policies: PolicyRule[] = [{id:"system-read-workspace",name:"Allow workspace reads",decision:"allow",scope:"active_workspace",reason:"Read-only default capability.",source:"system",editable:false,enabled:true},{id:"user-review-sensitive",name:"Review sensitive requests",decision:"ask",scope:"developer_test_capabilities",reason:"Requires explicit approval before a high-risk request.",source:"user",editable:false,enabled:true},{id:"system-deny-outside",name:"Deny outside workspace",decision:"deny",scope:"outside_active_workspace",reason:"Workspace boundary.",source:"system",editable:false,enabled:true}];
 function restartSemantics(config: AppConfig | null) {
@@ -55,9 +55,15 @@ function effectivePolicy(config: AppConfig["policies"]): PolicyEffectiveSnapshot
   return { valid: true, status: "valid", systemRules, userRules, toolDefaults: config.toolDefaults, perTool };
 }
 const approvals: ApprovalRequest[] = [{requestId:"approval_mock_01",runtimeId:"runtime_mock_01",generationId:"generation_mock_01",tool:"write",sanitizedArguments:{path:"notes.txt",content:"<redacted content>"},scopeSummary:"notes.txt",matchedRuleIds:["review-writes"],policyReason:"matched_user_rules",riskLevel:"medium",createdAt:"2026-09-02T00:03:00Z",expiresAt:"2026-09-02T00:08:00Z",status:"pending"}];
+const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+const historyItems: HistoryRequestSummary[] = [
+  { runtimeId: "runtime_mock_01", requestId: "history-read-1", toolName: "read_file", firstSeenAtUtc: hoursAgo(1), lastSeenAtUtc: hoursAgo(1), terminalState: "succeeded", outcome: "success", policyDecision: "allow", approvalState: "none", durationMs: 12, evidenceCoverage: "COMPLETE" },
+  { runtimeId: "runtime_mock_01", requestId: "history-write-1", toolName: "write", firstSeenAtUtc: hoursAgo(2), lastSeenAtUtc: hoursAgo(2), terminalState: "denied", outcome: "denied", policyDecision: "deny", approvalState: "none", failureCategory: "execution_failed", durationMs: 2, evidenceCoverage: "COMPLETE" },
+  { runtimeId: "runtime_mock_00", requestId: "history-incomplete-1", toolName: "bash", firstSeenAtUtc: hoursAgo(25), lastSeenAtUtc: hoursAgo(25), terminalState: "incomplete", approvalState: "required_observed", evidenceCoverage: "INCOMPLETE" },
+];
 export class MockHarnessControlClient implements HarnessControlClient {
  readonly adapterKind = "mock" as const;
- private scenario: MockScenario; private config: AppConfig | null = completeConfig(); private activeTools: AppConfig["tools"] | null = completeConfig().tools; private activePolicies: AppConfig["policies"] = completeConfig().policies; private configured = true; private components: ComponentStates = {runtime:"ready",tunnel:"ready",mcp:"ready"}; private activeRevision = "7"; private nextSequence="4"; private activities: ActivityEvent[];
+ private scenario: MockScenario; private config: AppConfig | null = completeConfig(); private activeTools: AppConfig["tools"] | null = completeConfig().tools; private activePolicies: AppConfig["policies"] = completeConfig().policies; private configured = true; private components: ComponentStates = {runtime:"ready",tunnel:"ready",mcp:"ready"}; private activeRevision = "7"; private nextSequence="4"; private activities: ActivityEvent[]; private storedHistory: HistoryRequestSummary[] = historyItems.map((item) => ({ ...item }));
  constructor(scenario: MockScenario="ready") { this.scenario=scenario; this.activities=scenario==="empty"?[]:[event("1","runtime_started","Runtime started in mock mode.",{source:"mock-runtime"}),event("2","policy_evaluated","Workspace read policy evaluated.",{decision:"allow"},"request_mock_01"),event("3","tool_requested","ChatGPT requested read_file.",{tool:"read_file"},"request_mock_01")]; if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("setup")==="first-run") { this.config=null; this.configured=false; this.components={runtime:"stopped",tunnel:"stopped",mcp:"stopped"}; this.activeRevision="0"; this.activities=[]; } }
  syncConfig(config: AppConfig | null, apiKeyConfigured: boolean) {
   this.config = config;
@@ -152,6 +158,52 @@ export class MockHarnessControlClient implements HarnessControlClient {
  getComponentStates(){return this.components;} setComponentStates(s:ComponentStates){this.components=s;if(s.runtime==="stopped"&&s.tunnel==="stopped"&&s.mcp==="stopped")this.activeRevision="0";} async componentStatesSubscribe(_listener:ComponentStatesListener):Promise<Unsubscribe>{return ()=>{};}
  toolsList(){return this.respond({items:this.scenario==="empty"?[]:this.toolCatalog()});} policiesList(){return this.respond(this.scenario==="empty"?{items:[]}:{items:policies,effective:effectivePolicy(this.activePolicies)});}
  activityList():Promise<ActivityListResult>{return this.respond({items:this.activities,latestSequence:decrementDecimal(this.nextSequence)});}
+  async historyQuery(params: HistoryQueryParams = {}): Promise<HistoryQueryResult> {
+    const filtered = this.storedHistory.filter((item) =>
+      (!params.fromUtc || item.firstSeenAtUtc >= params.fromUtc)
+      && (!params.toUtc || item.firstSeenAtUtc < params.toUtc)
+      && (!params.tool || item.toolName === params.tool)
+      && (!params.outcome || item.outcome === params.outcome)
+      && (!params.policyDecision || item.policyDecision === params.policyDecision)
+      && (!params.approvalState || item.approvalState === params.approvalState));
+    const offset = params.cursor?.startsWith("mock:") ? Number(params.cursor.slice(5)) : 0;
+    const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
+    const items = filtered.slice(offset, offset + limit);
+    const next = offset + items.length < filtered.length ? `mock:${offset + items.length}` : undefined;
+    return this.respond({ items, ...(next ? { nextCursor: next } : {}), storeStatus: this.historyStatusValue() });
+  }
+  async historyGet(params: HistoryGetParams): Promise<HistoryGetResult> {
+    const summary = this.storedHistory.find((item) => item.runtimeId === params.runtimeId && item.requestId === params.requestId);
+    if (!summary) throw new HarnessClientError("error", "History request was not found.", undefined, "EVIDENCE_NOT_FOUND");
+    const terminal = summary.terminalState === "succeeded";
+    return this.respond({
+      summary,
+      events: [
+        { schemaVersion: 1, eventId: "history-event-1", runtimeId: summary.runtimeId, requestId: summary.requestId, toolName: summary.toolName, occurredAtUtc: summary.firstSeenAtUtc, recordedAtUtc: summary.firstSeenAtUtc, stage: "request_received", lifecycleState: "received", workspaceValidation: "not_attempted", matchedRuleIds: [], outcome: "in_progress", coverage: summary.evidenceCoverage },
+        ...(terminal ? [{ schemaVersion: 1 as const, eventId: "history-event-2", runtimeId: summary.runtimeId, requestId: summary.requestId, toolName: summary.toolName, occurredAtUtc: summary.lastSeenAtUtc, recordedAtUtc: summary.lastSeenAtUtc, stage: "execution_completed" as const, lifecycleState: "completed" as const, workspaceValidation: "passed" as const, policyDecision: "allow" as const, matchedRuleIds: [], outcome: "success" as const, durationMs: summary.durationMs, coverage: "COMPLETE" as const }] : []),
+      ],
+      ...(terminal ? { terminalApproval: { runtimeId: summary.runtimeId, approvalId: "mock-approval", requestId: summary.requestId, toolName: summary.toolName, terminalAtUtc: summary.lastSeenAtUtc, terminalState: "allow_once" as const, decision: "allow_once" as const } } : {}),
+      ...(summary.evidenceCoverage === "COMPLETE" ? {} : { notice: { code: "EVIDENCE_QUEUE_OVERFLOW" as const, coverage: summary.evidenceCoverage } }),
+      storeStatus: this.historyStatusValue(),
+    });
+  }
+  historyStatus(): Promise<EvidenceStoreStatus> { return this.respond(this.historyStatusValue()); }
+  async historyClear(): Promise<HistoryClearResult> {
+    const deletedRequestCount = this.storedHistory.length;
+    this.storedHistory.splice(0, this.storedHistory.length);
+    return this.respond({ deletedRequestCount, deletedEventCount: deletedRequestCount * 2, deletedApprovalCount: 1, footprintBytes: 0, completedAtUtc: "2026-09-02T00:10:00Z" });
+  }
+  private historyStatusValue(): EvidenceStoreStatus {
+    return {
+      state: this.scenario === "error" ? "corrupt" : this.scenario === "empty" ? "disabled" : "healthy",
+      schemaVersion: 1,
+      queueDepth: 0,
+      queueCapacity: 1024,
+      dropCount: 0,
+      effectiveHistoryConfig: this.config?.history ?? completeConfig().history,
+      footprintBytes: 4096,
+    };
+  }
  async activitySubscribe(listener:ActivityEventListener,_afterSequence?:string):Promise<Unsubscribe>{await this.respond<ActivitySubscribeResult>({latestSequence:decrementDecimal(this.nextSequence)});let active=true;const timer=window.setTimeout(()=>{if(active&&this.scenario==="ready"){listener(event(this.nextSequence,"execution_completed","Mock activity stream received a completion event.",{source:"mock-subscription"},"request_mock_02"));this.nextSequence=incrementDecimal(this.nextSequence);}},220);return()=>{active=false;window.clearTimeout(timer);};}
  approvalsList(params: { status?: ApprovalRequest["status"] } = {}):Promise<ApprovalsListResult>{return this.respond({items:this.scenario==="empty"?[]:approvals.filter((item) => !params.status || item.status === params.status)});}
  async approvalsResolve(requestId:string, decision:ApprovalDecision){

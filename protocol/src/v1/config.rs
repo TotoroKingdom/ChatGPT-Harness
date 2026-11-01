@@ -29,8 +29,8 @@ pub struct AppConfig {
     /// are deliberately excluded from `RuntimeConfigSnapshot`.
     #[serde(default)]
     pub desktop: DesktopConfig,
-    /// Future History preferences preserved by the v3 contract. M01 stores
-    /// them but does not activate History behavior.
+    /// Local History persistence preferences. Changes are generation-effective
+    /// and never part of `RuntimeConfigSnapshot` or authorization truth.
     #[serde(default)]
     pub history: HistoryConfig,
 }
@@ -87,6 +87,18 @@ impl Default for HistoryConfig {
             retention_days: 30,
             max_storage_mib: 256,
         }
+    }
+}
+
+impl HistoryConfig {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !(1..=3650).contains(&self.retention_days) {
+            return Err("retentionDays must be between 1 and 3650");
+        }
+        if !(32..=4096).contains(&self.max_storage_mib) {
+            return Err("maxStorageMiB must be between 32 and 4096");
+        }
+        Ok(())
     }
 }
 

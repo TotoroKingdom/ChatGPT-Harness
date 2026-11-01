@@ -2,7 +2,7 @@
   "id": "activity-1",
   "result": {
     "items": [
-      { "eventId": "event_example_01", "sequence": "1", "eventType": "runtime_started", "timestamp": "2026-01-01T00:00:00Z", "summary": "Runtime started.", "metadata": { "source": "runtime" } }
+      { "eventId": "event_example_01", "runtimeId": "runtime_example_01", "sequence": "1", "eventType": "runtime_started", "timestamp": "2026-01-01T00:00:00Z", "summary": "Runtime started.", "metadata": { "source": "runtime" } }
     ],
     "latestSequence": "1"
   }

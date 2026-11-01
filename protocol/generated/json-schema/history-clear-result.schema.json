@@ -1,0 +1,39 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "completedAtUtc": {
+      "type": "string"
+    },
+    "deletedApprovalCount": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "deletedEventCount": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "deletedRequestCount": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "footprintBytes": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "deletedRequestCount",
+    "deletedEventCount",
+    "deletedApprovalCount",
+    "footprintBytes",
+    "completedAtUtc"
+  ],
+  "title": "HistoryClearResult",
+  "type": "object"
+}

@@ -1,6 +1,6 @@
 use harness_control_protocol::{
-    AppConfig, BashConfig, DecimalU64, DesktopConfig, HistoryConfig, PolicyConfig, SecurityConfig,
-    SecurityMode, ToolConfig, TunnelConfig, UiConfig, UiLanguage, WorkspaceConfig,
+    AppConfig, BashConfig, DecimalU64, DesktopConfig, PolicyConfig, SecurityConfig, SecurityMode,
+    ToolConfig, TunnelConfig, UiConfig, UiLanguage, WorkspaceConfig,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -265,6 +265,10 @@ fn validate_current(config: &mut AppConfig) -> Result<(), ConfigError> {
         .policies
         .validate_for_save()
         .map_err(|_| ConfigError::Invalid("invalid policy configuration".into()))?;
+    config
+        .history
+        .validate()
+        .map_err(|error| ConfigError::Invalid(error.into()))?;
     if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
         *path = crate::platform::normalize_tunnel_client_directory(path)
             .display()
@@ -315,8 +319,8 @@ pub(crate) fn normalize_and_validate_control_plane_http_proxy(
 ///
 /// `UiConfig` is presentation state. It is persisted in the same local config
 /// file, but changing it must not create Runtime restart debt or advance the
-/// Runtime-facing revision. Keep every non-UI field in this comparison so a
-/// UI-only save cannot hide an unrelated desired configuration change.
+/// Runtime-facing revision. Keep every non-presentation field in this
+/// comparison so a UI-only save cannot hide an unrelated desired change.
 fn same_restart_semantics(a: &AppConfig, b: &AppConfig) -> bool {
     let mut left = a.clone();
     let mut right = b.clone();
@@ -326,8 +330,6 @@ fn same_restart_semantics(a: &AppConfig, b: &AppConfig) -> bool {
     right.ui = UiConfig::default();
     left.desktop = DesktopConfig::default();
     right.desktop = DesktopConfig::default();
-    left.history = HistoryConfig::default();
-    right.history = HistoryConfig::default();
     left == right
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -594,7 +596,15 @@ mod tests {
 
     #[test]
     fn language_combined_with_each_runtime_change_increments_once() {
-        let runtime_changes = ["tool", "security", "tunnel", "workspace", "policy", "bash"];
+        let runtime_changes = [
+            "tool",
+            "security",
+            "tunnel",
+            "workspace",
+            "policy",
+            "bash",
+            "history",
+        ];
         for change in runtime_changes {
             let d = tempfile::tempdir().unwrap();
             let store = ConfigStore::new(d.path().into());
@@ -611,10 +621,38 @@ mod tests {
                 "workspace" => changed.workspace.root_path = r"D:\next".into(),
                 "policy" => changed.policies.tool_defaults.write = PolicyDecision::Deny,
                 "bash" => changed.bash.auto_detect = false,
+                "history" => changed.history.retention_days = 31,
                 _ => unreachable!(),
             }
             let changed = store.save(changed).unwrap();
             assert_eq!(changed.config_revision, DecimalU64::new(2), "{change}");
+        }
+    }
+
+    #[test]
+    fn history_defaults_and_ranges_are_generation_effective() {
+        let d = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(d.path().into());
+        let first = store.save(c()).unwrap();
+        assert!(first.history.enabled);
+        assert_eq!(first.history.retention_days, 30);
+        assert_eq!(first.history.max_storage_mib, 256);
+
+        let mut expected_revision = first.config_revision;
+        for (retention_days, max_storage_mib) in [(1, 32), (3650, 4096), (31, 256)] {
+            let mut changed = first.clone();
+            changed.history.retention_days = retention_days;
+            changed.history.max_storage_mib = max_storage_mib;
+            let saved = store.save(changed).unwrap();
+            expected_revision = expected_revision.checked_add_one().unwrap();
+            assert_eq!(saved.config_revision, expected_revision);
+        }
+
+        for (retention_days, max_storage_mib) in [(0, 256), (3651, 256), (30, 31), (30, 4097)] {
+            let mut invalid = first.clone();
+            invalid.history.retention_days = retention_days;
+            invalid.history.max_storage_mib = max_storage_mib;
+            assert!(matches!(store.save(invalid), Err(ConfigError::Invalid(_))));
         }
     }
 

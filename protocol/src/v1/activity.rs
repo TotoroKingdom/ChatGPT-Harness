@@ -33,6 +33,7 @@ pub type SanitizedMetadata = BTreeMap<String, String>;
 #[serde(rename_all = "camelCase")]
 pub struct ActivityEvent {
     pub event_id: String,
+    pub runtime_id: String,
     /// Runtime-local monotonically increasing sequence number.
     #[ts(type = "string")]
     pub sequence: DecimalU64,

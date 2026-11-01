@@ -391,7 +391,7 @@
         "maxStorageMiB": 256,
         "retentionDays": 30
       },
-      "description": "Future History preferences preserved by the v3 contract. M01 stores\nthem but does not activate History behavior."
+      "description": "Local History persistence preferences. Changes are generation-effective\nand never part of `RuntimeConfigSnapshot` or authorization truth."
     },
     "policies": {
       "$ref": "#/$defs/PolicyConfig",

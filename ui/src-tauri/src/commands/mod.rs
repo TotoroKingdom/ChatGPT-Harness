@@ -18,8 +18,9 @@ use harness_control_protocol::{
     AppConfig, ApprovalsListParams, ApprovalsListResult, ApprovalsResolveParams,
     ApprovalsResolveResult, DiagnosticCheck, DiagnosticEvidence, DiagnosticEvidenceKey,
     DiagnosticRemediation, DiagnosticRemediationTarget, DiagnosticRun, DiagnosticScope,
-    DiagnosticStatus, PoliciesListResult, RuntimeState, RuntimeStopResult, SecurityMode,
-    StartEligibility, StartEligibilityStatus, ToolsListResult, UiLanguage,
+    DiagnosticStatus, EvidenceStoreStatus, HistoryClearResult, HistoryGetParams, HistoryGetResult,
+    HistoryQueryParams, HistoryQueryResult, PoliciesListResult, RuntimeState, RuntimeStopResult,
+    SecurityMode, StartEligibility, StartEligibilityStatus, ToolsListResult, UiLanguage,
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -88,6 +89,38 @@ pub fn config_get(app: AppHandle) -> Result<Option<AppConfig>, ControlError> {
 #[tauri::command]
 pub fn config_metadata(app: AppHandle) -> Result<ConfigMetadata, ControlError> {
     Ok(store(&app)?.metadata())
+}
+
+#[tauri::command]
+pub fn history_query(
+    app: AppHandle,
+    params: HistoryQueryParams,
+) -> Result<HistoryQueryResult, ControlError> {
+    crate::history::query(&app, params)
+}
+
+#[tauri::command]
+pub fn history_get(
+    app: AppHandle,
+    params: HistoryGetParams,
+) -> Result<HistoryGetResult, ControlError> {
+    crate::history::get(&app, params)
+}
+
+#[tauri::command]
+pub fn history_status(
+    app: AppHandle,
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<EvidenceStoreStatus, ControlError> {
+    crate::history::status(&app, &runtime)
+}
+
+#[tauri::command]
+pub fn history_clear(
+    app: AppHandle,
+    runtime: State<'_, RuntimeSupervisor>,
+) -> Result<HistoryClearResult, ControlError> {
+    crate::history::clear(&app, &runtime)
 }
 
 #[tauri::command]
@@ -677,6 +710,10 @@ fn validate_config_for_save(config: &AppConfig) -> Result<(), ControlError> {
             message,
         });
     }
+    config.history.validate().map_err(|message| ControlError {
+        code: "CONFIG_INVALID".into(),
+        message: message.into(),
+    })?;
     validate_security(config)
 }
 
@@ -695,6 +732,10 @@ fn validate_config_for_local_start(config: &AppConfig) -> Result<(), ControlErro
             message: "Choose an accessible Workspace folder.".into(),
         });
     }
+    config.history.validate().map_err(|message| ControlError {
+        code: "CONFIG_INVALID".into(),
+        message: message.into(),
+    })?;
     // Semantic policy errors are deliberately left for the Runtime compiler:
     // a hand-edited config must produce an observable invalid snapshot and
     // fail closed, rather than preventing the diagnostic control surface from

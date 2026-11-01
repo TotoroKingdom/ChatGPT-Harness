@@ -12,7 +12,7 @@ code: MachineErrorCode, details?: string, };
 export type RpcError = { code: number, message: string, data: RpcErrorData, };
 export type RpcErrorResponse = { id: number | string, error: RpcError, };
 export type RpcMessage = RpcErrorResponse | RpcResponse | RpcRequest | RpcNotification;
-export type MachineErrorCode = "NOT_INITIALIZED" | "ALREADY_INITIALIZED" | "PROTOCOL_VERSION_MISMATCH" | "RUNTIME_NOT_READY" | "INVALID_ARGUMENT" | "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_RESOLVED" | "APPROVAL_SESSION_GRANT_UNAVAILABLE" | "BASH_UNAVAILABLE" | "BASH_INVALID_COMMAND" | "BASH_COMMAND_TOO_LONG" | "BASH_TIMEOUT" | "BASH_OUTPUT_LIMIT" | "BASH_CONCURRENCY_LIMIT" | "BASH_SPAWN_FAILED" | "BASH_CANCELLED" | "BASH_PROCESS_FAILED" | "INTERNAL_ERROR";
+export type MachineErrorCode = "NOT_INITIALIZED" | "ALREADY_INITIALIZED" | "PROTOCOL_VERSION_MISMATCH" | "RUNTIME_NOT_READY" | "INVALID_ARGUMENT" | "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_RESOLVED" | "APPROVAL_SESSION_GRANT_UNAVAILABLE" | "BASH_UNAVAILABLE" | "BASH_INVALID_COMMAND" | "BASH_COMMAND_TOO_LONG" | "BASH_TIMEOUT" | "BASH_OUTPUT_LIMIT" | "BASH_CONCURRENCY_LIMIT" | "BASH_SPAWN_FAILED" | "BASH_CANCELLED" | "BASH_PROCESS_FAILED" | "EVIDENCE_BUSY" | "EVIDENCE_WRITER_OWNERSHIP" | "EVIDENCE_IO" | "EVIDENCE_FULL" | "EVIDENCE_CORRUPT" | "EVIDENCE_INCOMPATIBLE_SCHEMA" | "EVIDENCE_MIGRATION_FAILED" | "EVIDENCE_QUEUE_OVERFLOW" | "EVIDENCE_CAPACITY_DEGRADED" | "EVIDENCE_INVALID_CURSOR" | "EVIDENCE_NOT_FOUND" | "INTERNAL_ERROR";
 export type EmptyParams = Record<string, never>;
 export type PolicyDecision = "deny" | "ask" | "allow";
 export type AppConfig = { schemaVersion: number, configRevision: string, workspace: WorkspaceConfig, tunnel: TunnelConfig, security: SecurityConfig, ui: UiConfig, tools: ToolConfig, bash: BashConfig, policies: PolicyConfig,
@@ -22,8 +22,8 @@ export type AppConfig = { schemaVersion: number, configRevision: string, workspa
  */
 desktop: DesktopConfig,
 /**
- * Future History preferences preserved by the v3 contract. M01 stores
- * them but does not activate History behavior.
+ * Local History persistence preferences. Changes are generation-effective
+ * and never part of `RuntimeConfigSnapshot` or authorization truth.
  */
 history: HistoryConfig, };
 export type DesktopConfig = { approvalNotifications: boolean, connectionNotifications: boolean, backgroundNoticeAcknowledged: boolean, autoStartHarnessOnAppLaunch: boolean, };
@@ -46,7 +46,7 @@ export type RuntimeConfigSnapshot = { configRevision: string, workspace: Workspa
 export type RuntimeLimits = { maxConcurrentRequests: number, maxActivityEvents: number, maxReadBytes: number, };
 export type ClientInfo = { name: string, title: string, version: string, };
 export type ServerInfo = { name: string, title: string, version: string, };
-export type InitializeParams = { clientInfo: ClientInfo, protocolVersion: number, capabilities: { [key in string]?: boolean }, runtimeConfig: RuntimeConfigSnapshot, };
+export type InitializeParams = { clientInfo: ClientInfo, protocolVersion: number, capabilities: { [key in string]?: boolean }, runtimeConfig: RuntimeConfigSnapshot, hostContext?: RuntimeHostContext, };
 export type InitializeResult = { serverInfo: ServerInfo, protocolVersion: number, runtimeId: string, capabilities: { [key in string]?: boolean }, };
 export type InitializedParams = Record<string, never>;
 export type RuntimeLifecycle = "initializing" | "ready" | "stopping" | "error";
@@ -103,7 +103,7 @@ toolName: string | null,
  */
 decisionSummary: PolicyDecision | null, matchedRuleIds?: Array<string>, policyReason?: PolicyReason | null, outcomeSummary: AuditOutcome, failureCategory?: ActivityFailureCategory | null, bash?: BashActivityEvidence | null, toolEnabled?: boolean, capability?: ToolCapability, sanitizedArguments?: SanitizedArgumentsEvidence, approvalId?: string, approvalDecision?: ApprovalDecision, durationMs?: number, resultEvidence?: ExecutionResultEvidence, };
 export type ActivityEventType = "runtime_started" | "runtime_stopped" | "tool_requested" | "validation_failed" | "workspace_violation" | "policy_evaluated" | "approval_requested" | "approval_resolved" | "approval_denied" | "approval_expired" | "approval_cancelled" | "session_grant_matched" | "execution_started" | "execution_completed" | "execution_failed" | "execution_timed_out" | "execution_cancelled";
-export type ActivityEvent = { eventId: string,
+export type ActivityEvent = { eventId: string, runtimeId: string,
 /**
  * Runtime-local monotonically increasing sequence number.
  */
@@ -116,6 +116,28 @@ export type ActivityListParams = { afterSequence?: string, limit?: number, };
 export type ActivityListResult = { items: Array<ActivityEvent>, latestSequence: string, };
 export type ActivitySubscribeParams = { afterSequence?: string, };
 export type ActivitySubscribeResult = { latestSequence: string, };
+export type EvidenceCoverage = "COMPLETE" | "INCOMPLETE" | "UNKNOWN";
+export type HistoryTerminalState = "open" | "succeeded" | "failed" | "denied" | "cancelled" | "timed_out" | "approval_expired" | "approval_cancelled" | "incomplete" | "unknown";
+export type HistoryApprovalState = "none" | "required_observed" | "allow_once" | "allow_for_session" | "denied" | "expired" | "cancelled" | "incomplete" | "unknown";
+export type HistoryOutcome = "in_progress" | "success" | "failed" | "denied" | "approval_required" | "cancelled" | "timed_out" | "approval_expired" | "approval_cancelled";
+export type EvidenceStage = "request_received" | "workspace_validated" | "policy_evaluated" | "approval_required" | "approval_resolved" | "approval_expired" | "approval_cancelled" | "session_grant_matched" | "execution_started" | "execution_completed" | "execution_failed" | "request_denied";
+export type EvidenceLifecycleState = "received" | "validating" | "workspace_validating" | "policy_evaluating" | "denied" | "awaiting_approval" | "executing" | "completed" | "failed";
+export type EvidenceWorkspaceValidation = "not_attempted" | "passed" | "failed";
+export type DurableSanitizedArgumentsEvidence = { "tool": "read_file", logicalPath: string, } | { "tool": "glob", pattern: string, } | { "tool": "write", logicalPath: string, } | { "tool": "edit", logicalPath: string, } | { "tool": "bash", mode: SecurityMode, modeEligible: boolean, capability: ToolCapability, cwd: BashWorkingDirectory, classification?: BashClassification, riskFlags?: Array<BashRiskFlag>, sessionGrantHit: boolean, };
+export type EvidenceStoreLaunchConfig = { enabled: boolean, databasePath: string, retentionDays: number, maxStorageMiB: number, };
+export type RuntimeHostContext = { hostSessionId?: string, supervisorGenerationId?: string, evidenceStore?: EvidenceStoreLaunchConfig, };
+export type EvidenceEventV1 = { schemaVersion: number, eventId: string, runtimeId: string, requestId: string, hostSessionId?: string, supervisorGenerationId?: string, approvalId?: string, toolName: string, occurredAtUtc: string, recordedAtUtc: string, stage: EvidenceStage, lifecycleState: EvidenceLifecycleState, workspaceValidation: EvidenceWorkspaceValidation, policyDecision?: PolicyDecision, policyReason?: PolicyReason, matchedRuleIds?: Array<string>, approvalDecision?: ApprovalDecision, outcome: HistoryOutcome, failureCategory?: ActivityFailureCategory, durationMs?: number, sanitizedArguments?: DurableSanitizedArgumentsEvidence, resultEvidence?: ExecutionResultEvidence, coverage: EvidenceCoverage, };
+export type HistoryQueryParams = { fromUtc?: string, toUtc?: string, tool?: string, outcome?: HistoryOutcome, policyDecision?: PolicyDecision, approvalState?: HistoryApprovalState, cursor?: string, limit?: number, };
+export type HistoryRequestSummary = { runtimeId: string, requestId: string, toolName: string, firstSeenAtUtc: string, lastSeenAtUtc: string, terminalState: HistoryTerminalState, outcome?: HistoryOutcome, policyDecision?: PolicyDecision, approvalState: HistoryApprovalState, failureCategory?: ActivityFailureCategory, durationMs?: number, evidenceCoverage: EvidenceCoverage, };
+export type HistoryGetParams = { runtimeId: string, requestId: string, };
+export type HistoryApprovalEvidence = { runtimeId: string, approvalId: string, requestId: string, toolName: string, requestedAtUtc?: string, terminalAtUtc: string, terminalState: HistoryApprovalState, decision?: ApprovalDecision, };
+export type HistoryStoreNotice = { code: EvidenceErrorCode, coverage: EvidenceCoverage, };
+export type HistoryQueryResult = { items: Array<HistoryRequestSummary>, nextCursor?: string, storeStatus: EvidenceStoreStatus, };
+export type HistoryGetResult = { summary: HistoryRequestSummary, events: Array<EvidenceEventV1>, terminalApproval?: HistoryApprovalEvidence, notice?: HistoryStoreNotice, storeStatus: EvidenceStoreStatus, };
+export type HistoryClearResult = { deletedRequestCount: number, deletedEventCount: number, deletedApprovalCount: number, footprintBytes: number, completedAtUtc: string, };
+export type EvidenceStoreState = "disabled" | "healthy" | "degraded" | "busy" | "incompatible" | "corrupt" | "unavailable";
+export type EvidenceErrorCode = "EVIDENCE_BUSY" | "EVIDENCE_WRITER_OWNERSHIP" | "EVIDENCE_IO" | "EVIDENCE_FULL" | "EVIDENCE_CORRUPT" | "EVIDENCE_INCOMPATIBLE_SCHEMA" | "EVIDENCE_MIGRATION_FAILED" | "EVIDENCE_QUEUE_OVERFLOW" | "EVIDENCE_CAPACITY_DEGRADED" | "EVIDENCE_INVALID_CURSOR" | "EVIDENCE_NOT_FOUND";
+export type EvidenceStoreStatus = { state: EvidenceStoreState, schemaVersion?: number, queueDepth: number, queueCapacity: number, dropCount: number, lastDropAtUtc?: string, lastCommitAtUtc?: string, lastErrorCode?: EvidenceErrorCode, effectiveHistoryConfig: HistoryConfig, footprintBytes?: number, coverageUnknownSinceUtc?: string, };
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type ApprovalDecision = "allow_once" | "allow_for_session" | "deny";
 export type BashClassification = "classified" | "unclassified_high_risk";

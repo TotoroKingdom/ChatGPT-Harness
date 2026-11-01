@@ -220,6 +220,7 @@ mod tests {
     fn event(event_type: ActivityEventType, request_id: &str) -> ActivityEvent {
         ActivityEvent {
             event_id: format!("event-{request_id}"),
+            runtime_id: "runtime-1".into(),
             sequence: harness_control_protocol::DecimalU64::new(1),
             event_type,
             request_id: Some(request_id.into()),

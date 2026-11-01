@@ -37,8 +37,19 @@ const approval = (): ApprovalRequest => ({
 
 function setup(entries: ActivityEntry[], options: { rules?: PolicyRule[]; effectiveRules?: PolicyRule[]; approvals?: ApprovalRequest[] } = {}) {
   const navigate = vi.fn();
+  const historyQuery = vi.fn().mockResolvedValue({
+    items: [],
+    storeStatus: {
+      state: "healthy",
+      schemaVersion: 1,
+      queueDepth: 0,
+      queueCapacity: 1024,
+      dropCount: 0,
+      effectiveHistoryConfig: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
+    },
+  });
   harness.current = {
-    client: { runtimeGetActivitySnapshot: vi.fn() },
+    client: { runtimeGetActivitySnapshot: vi.fn(), historyQuery },
     config: { policies: { userRules: (options.rules ?? []).map((item) => ({ id: item.id, name: item.name, enabled: item.enabled, decision: item.decision, reason: item.reason, matcher: { type: "tool", tool: "read_file" } })) } },
     policies: { status: "success", data: { items: options.effectiveRules ?? options.rules ?? [] } },
     approvals: { status: "success", data: { items: options.approvals ?? [] } },
@@ -46,7 +57,7 @@ function setup(entries: ActivityEntry[], options: { rules?: PolicyRule[]; effect
   control.state = { status: "success", data: entries };
   control.refresh.mockReset();
   const rendered = render(<ActivityPage onNavigate={navigate} />);
-  return { ...rendered, navigate };
+  return { ...rendered, navigate, historyQuery };
 }
 
 beforeEach(async () => {
@@ -59,6 +70,15 @@ afterEach(() => {
 });
 
 describe("M8 T7 ActivityPage", () => {
+  it("keeps Live as the default and switches to the durable History tab", async () => {
+    const view = setup([entry({ eventId: "live-default" })]);
+    await waitFor(() => expect(screen.getByTestId("activity-row-event:live-default")).toBeInTheDocument());
+    expect(screen.getByRole("radio", { name: "Live" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "History" }));
+    await waitFor(() => expect(view.historyQuery).toHaveBeenCalledOnce());
+    expect(screen.getByText("No retained History matches these filters")).toBeInTheDocument();
+  });
+
   it("renders a compact feed with distinct reported outcomes, local filters, and non-tool events", async () => {
     setup([
       entry({ eventId: "success", category: "request", eventType: "request_received", lifecycleState: "received", toolName: "read_file" }),

@@ -4,10 +4,10 @@ pub(crate) mod manifest;
 use harness_control_protocol::{
     ActivityEvent, ActivityListParams, ActivityListResult, ActivitySubscribeParams,
     ActivitySubscribeResult, AppConfig, ApprovalsListParams, ApprovalsListResult,
-    ApprovalsResolveParams, ClientInfo, DiagnosticRun, InitializeParams, InitializeResult,
-    McpEndpointResult, PoliciesListResult, RpcMessage, RpcNotification, RpcRequest,
-    RuntimeConfigSnapshot, RuntimeLimits, RuntimeState, RuntimeStopResult, ToolsListResult,
-    PROTOCOL_VERSION,
+    ApprovalsResolveParams, ClientInfo, DiagnosticRun, EvidenceStoreLaunchConfig, InitializeParams,
+    InitializeResult, McpEndpointResult, PoliciesListResult, RpcMessage, RpcNotification,
+    RpcRequest, RuntimeConfigSnapshot, RuntimeHostContext, RuntimeLimits, RuntimeState,
+    RuntimeStopResult, ToolsListResult, PROTOCOL_VERSION,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -20,7 +20,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 trait ProcessEventSink: Send + Sync {
     fn emit_process(&self, phase: RuntimeProcessPhase, error: Option<&SupervisorError>);
@@ -330,29 +330,47 @@ impl RuntimeSupervisor {
         app: &AppHandle<R>,
         config: &AppConfig,
     ) -> Result<RuntimeState, SupervisorError> {
+        self.start_with_host_session(app, config, None)
+    }
+
+    pub(crate) fn start_with_host_session<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        config: &AppConfig,
+        host_session_id: Option<&str>,
+    ) -> Result<RuntimeState, SupervisorError> {
         let activity_sink = self
             .inner
             .lock()
             .ok()
             .and_then(|inner| inner.activity_sink.clone());
+        let history_directory = app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|directory| directory.join("history"));
         self.start_with_sink(
             Arc::new(TauriProcessEventSink {
                 app: app.clone(),
                 activity_sink,
             }),
             config,
+            host_session_id,
+            history_directory,
         )
     }
 
     #[cfg(test)]
     fn start_for_test(&self, config: &AppConfig) -> Result<RuntimeState, SupervisorError> {
-        self.start_with_sink(Arc::new(NoopProcessEventSink), config)
+        self.start_with_sink(Arc::new(NoopProcessEventSink), config, None, None)
     }
 
     fn start_with_sink(
         &self,
         sink: Arc<dyn ProcessEventSink>,
         config: &AppConfig,
+        host_session_id: Option<&str>,
+        history_directory: Option<PathBuf>,
     ) -> Result<RuntimeState, SupervisorError> {
         let generation = {
             let mut inner = self.lock_inner()?;
@@ -429,7 +447,20 @@ impl RuntimeSupervisor {
             generation,
         );
 
-        match self.initialize(&waiter_process, config) {
+        let host_context = history_directory.map(|directory| RuntimeHostContext {
+            host_session_id: host_session_id.map(str::to_owned),
+            supervisor_generation_id: Some(generation.to_string()),
+            evidence_store: Some(EvidenceStoreLaunchConfig {
+                enabled: config.history.enabled,
+                database_path: directory
+                    .join("history.sqlite3")
+                    .to_string_lossy()
+                    .into_owned(),
+                retention_days: config.history.retention_days,
+                max_storage_mib: config.history.max_storage_mib,
+            }),
+        });
+        match self.initialize(&waiter_process, config, host_context.as_ref()) {
             Ok(state) => {
                 let should_run = {
                     let mut inner = self.lock_inner()?;
@@ -600,6 +631,18 @@ impl RuntimeSupervisor {
         self.request("diagnostics.run", json!({}))
     }
 
+    pub fn evidence_status(
+        &self,
+    ) -> Result<harness_control_protocol::EvidenceStoreStatus, SupervisorError> {
+        self.request("evidence.status", json!({}))
+    }
+
+    pub fn history_clear(
+        &self,
+    ) -> Result<harness_control_protocol::HistoryClearResult, SupervisorError> {
+        self.request("history.clear", json!({}))
+    }
+
     #[allow(dead_code)]
     pub fn identity(&self) -> Option<RuntimeProcessIdentity> {
         self.inner.lock().ok().and_then(|inner| {
@@ -645,6 +688,7 @@ impl RuntimeSupervisor {
         &self,
         process: &RuntimeProcessRef,
         config: &AppConfig,
+        host_context: Option<&RuntimeHostContext>,
     ) -> Result<RuntimeState, SupervisorError> {
         let snapshot = runtime_config_snapshot(config);
         let initialize = InitializeParams {
@@ -656,6 +700,7 @@ impl RuntimeSupervisor {
             protocol_version: PROTOCOL_VERSION,
             capabilities: Default::default(),
             runtime_config: snapshot,
+            host_context: host_context.cloned(),
         };
         let params = serde_json::to_value(initialize)
             .map_err(|error| SupervisorError::spawn(error.to_string()))?;
@@ -1349,6 +1394,29 @@ fn machine_code(code: &harness_control_protocol::MachineErrorCode) -> &'static s
         harness_control_protocol::MachineErrorCode::BashSpawnFailed => "BASH_SPAWN_FAILED",
         harness_control_protocol::MachineErrorCode::BashCancelled => "BASH_CANCELLED",
         harness_control_protocol::MachineErrorCode::BashProcessFailed => "BASH_PROCESS_FAILED",
+        harness_control_protocol::MachineErrorCode::EvidenceBusy => "EVIDENCE_BUSY",
+        harness_control_protocol::MachineErrorCode::EvidenceWriterOwnership => {
+            "EVIDENCE_WRITER_OWNERSHIP"
+        }
+        harness_control_protocol::MachineErrorCode::EvidenceIo => "EVIDENCE_IO",
+        harness_control_protocol::MachineErrorCode::EvidenceFull => "EVIDENCE_FULL",
+        harness_control_protocol::MachineErrorCode::EvidenceCorrupt => "EVIDENCE_CORRUPT",
+        harness_control_protocol::MachineErrorCode::EvidenceIncompatibleSchema => {
+            "EVIDENCE_INCOMPATIBLE_SCHEMA"
+        }
+        harness_control_protocol::MachineErrorCode::EvidenceMigrationFailed => {
+            "EVIDENCE_MIGRATION_FAILED"
+        }
+        harness_control_protocol::MachineErrorCode::EvidenceQueueOverflow => {
+            "EVIDENCE_QUEUE_OVERFLOW"
+        }
+        harness_control_protocol::MachineErrorCode::EvidenceCapacityDegraded => {
+            "EVIDENCE_CAPACITY_DEGRADED"
+        }
+        harness_control_protocol::MachineErrorCode::EvidenceInvalidCursor => {
+            "EVIDENCE_INVALID_CURSOR"
+        }
+        harness_control_protocol::MachineErrorCode::EvidenceNotFound => "EVIDENCE_NOT_FOUND",
         harness_control_protocol::MachineErrorCode::InternalError => "INTERNAL_ERROR",
     }
 }

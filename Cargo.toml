@@ -1,3 +1,3 @@
 [workspace]
-members = ["protocol", "runtime", "ui/src-tauri"]
+members = ["protocol", "runtime", "ui/src-tauri", "runtime/evidence-store"]
 resolver = "2"

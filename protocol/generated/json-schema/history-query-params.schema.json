@@ -1,0 +1,109 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "HistoryApprovalState": {
+      "enum": [
+        "none",
+        "required_observed",
+        "allow_once",
+        "allow_for_session",
+        "denied",
+        "expired",
+        "cancelled",
+        "incomplete",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "HistoryOutcome": {
+      "enum": [
+        "in_progress",
+        "success",
+        "failed",
+        "denied",
+        "approval_required",
+        "cancelled",
+        "timed_out",
+        "approval_expired",
+        "approval_cancelled"
+      ],
+      "type": "string"
+    },
+    "PolicyDecision": {
+      "enum": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "approvalState": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HistoryApprovalState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fromUtc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HistoryOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "policyDecision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "toUtc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "HistoryQueryParams",
+  "type": "object"
+}

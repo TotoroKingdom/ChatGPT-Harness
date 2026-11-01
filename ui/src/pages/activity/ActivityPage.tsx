@@ -42,6 +42,7 @@ import {
   type ActivityRow,
   type ActivitySelection,
 } from "./activity-feed";
+import { HistoryPanel } from "./HistoryPanel";
 
 type Snapshot = { rows: ActivityRow[] };
 
@@ -57,6 +58,7 @@ export function ActivityPage({ onNavigate }: { onNavigate?: Navigate } = {}) {
   const [toolFilter, setToolFilter] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [readError, setReadError] = useState<{ code: string } | null>(null);
+  const [tab, setTab] = useState<"live" | "history">("live");
 
   useEffect(() => {
     if (state.status === "loading") {
@@ -94,31 +96,44 @@ export function ActivityPage({ onNavigate }: { onNavigate?: Navigate } = {}) {
     <SectionHeading
       title={t("activity.feed")}
       description={t("activity.help")}
-      action={<Button variant="secondary" onClick={onRefresh} disabled={refreshing}>{t("activity.refresh")}</Button>}
+      action={tab === "live" ? <Button variant="secondary" onClick={onRefresh} disabled={refreshing}>{t("activity.refresh")}</Button> : undefined}
     />
-    {refreshing && <InlineFeedback>{t("m8Activity.refreshing")}</InlineFeedback>}
-    {readError && snapshot && <div className="notice notice-warning" role="status">
-      <strong>{t("m8Activity.stale")}</strong>
-      <span>{t("m8Activity.staleHelp")} {t(errorCodeKey(readError.code))}</span>
-    </div>}
-    {!snapshot
-      ? <ControlReadView state={state}>{() => null}</ControlReadView>
-      : <ActivityFeed
-        rows={rows}
-        visibleRows={visibleRows}
-        tools={tools}
-        outcomeFilter={outcomeFilter}
-        onOutcomeFilter={setOutcomeFilter}
-        toolFilter={toolFilter}
-        onToolFilter={setToolFilter}
-        onInspect={(row) => setSelection({ rowKey: row.rowKey, ...(row.stableEventId ? { eventId: row.stableEventId } : {}) })}
-        selectedRow={selectedRow}
-        onClose={() => setSelection(null)}
-        onNavigate={onNavigate}
-        config={config}
-        approvals={approvals}
-        t={t}
-      />}
+    <Segmented
+      value={tab}
+      label={t("m03History.view")}
+      options={[
+        { value: "live", label: t("m03History.live") },
+        { value: "history", label: t("m03History.history") },
+      ]}
+      onChange={setTab}
+    />
+    {tab === "history"
+      ? <HistoryPanel />
+      : <>
+        {refreshing && <InlineFeedback>{t("m8Activity.refreshing")}</InlineFeedback>}
+        {readError && snapshot && <div className="notice notice-warning" role="status">
+          <strong>{t("m8Activity.stale")}</strong>
+          <span>{t("m8Activity.staleHelp")} {t(errorCodeKey(readError.code))}</span>
+        </div>}
+        {!snapshot
+          ? <ControlReadView state={state}>{() => null}</ControlReadView>
+          : <ActivityFeed
+            rows={rows}
+            visibleRows={visibleRows}
+            tools={tools}
+            outcomeFilter={outcomeFilter}
+            onOutcomeFilter={setOutcomeFilter}
+            toolFilter={toolFilter}
+            onToolFilter={setToolFilter}
+            onInspect={(row) => setSelection({ rowKey: row.rowKey, ...(row.stableEventId ? { eventId: row.stableEventId } : {}) })}
+            selectedRow={selectedRow}
+            onClose={() => setSelection(null)}
+            onNavigate={onNavigate}
+            config={config}
+            approvals={approvals}
+            t={t}
+          />}
+      </>}
   </div>;
 }
 

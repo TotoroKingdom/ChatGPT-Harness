@@ -1,11 +1,12 @@
 use crate::activity::{ActivityEntry, ActivityStore};
 use crate::approval::ApprovalManager;
 use crate::audit::{
-    AuditEvent, AuditEventType, AuditFailureCategory, AuditLifecycleState, AuditOutcome, AuditSink,
-    WorkspaceValidation,
+    AuditEvent, AuditEventType, AuditFailureCategory, AuditFanout, AuditLifecycleState,
+    AuditOutcome, AuditSink, WorkspaceValidation,
 };
 use crate::bash::{resolve_bash, BashExecutableState, BashRuntime};
 use crate::events::{ActivityEventInput, ActivityEventSender, EventBus};
+use crate::evidence::{EvidenceAuditSink, EvidenceService, RuntimeEvidenceContext};
 use crate::execution::{
     BashCancellationKind, BashCancellationObserver, BashEvidenceSnapshot, ExecutionError,
     ExecutionPipeline, SecurityContext,
@@ -19,8 +20,9 @@ use crate::tools::{
 };
 use crate::workspace::{Workspace, WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
-    ActivityEvent, ActivityEventType, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeLifecycle,
-    RuntimeReadiness, RuntimeState,
+    ActivityEvent, ActivityEventType, EvidenceErrorCode, EvidenceStoreStatus, HistoryClearResult,
+    HistoryConfig, RuntimeConfigSnapshot, RuntimeErrorSummary, RuntimeHostContext,
+    RuntimeLifecycle, RuntimeReadiness, RuntimeState,
 };
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -145,6 +147,8 @@ pub struct RuntimeCore {
     approval_manager: Arc<ApprovalManager>,
     session_grants: Arc<SessionGrantStore>,
     activity: Arc<ActivityStore>,
+    evidence: Arc<EvidenceService>,
+    host_context: Option<RuntimeHostContext>,
     pub last_error: Option<RuntimeErrorSummary>,
 }
 
@@ -170,17 +174,27 @@ impl RuntimeCore {
             workspace_guard: None,
             mcp_readiness: Arc::new(AtomicBool::new(false)),
             activity: Arc::new(ActivityStore::new(Arc::clone(&tool_registry))),
+            evidence: Arc::new(EvidenceService::disabled(HistoryConfig::default())),
             tool_registry,
             policy_engine,
             execution_pipeline: None,
             request_counters: Arc::new(crate::execution::RequestCounters::default()),
             approval_manager: ApprovalManager::new(runtime_id.clone()),
             session_grants: Arc::new(SessionGrantStore::new(runtime_id)),
+            host_context: None,
             last_error: None,
         }
     }
 
     pub fn initialize(&mut self, config: RuntimeConfigSnapshot) -> Result<(), WorkspaceError> {
+        self.initialize_with_host(config, None)
+    }
+
+    pub(crate) fn initialize_with_host(
+        &mut self,
+        config: RuntimeConfigSnapshot,
+        host_context: Option<RuntimeHostContext>,
+    ) -> Result<(), WorkspaceError> {
         let workspace = Workspace::new(&config.workspace.root_path)?;
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
         let bash_executable = resolve_bash(&config.bash);
@@ -201,8 +215,45 @@ impl RuntimeCore {
             &self.activity,
             Arc::clone(&tool_registry),
         ));
-        let audit_sink: Arc<dyn crate::audit::AuditSink> = activity.clone();
-        let events = EventBus::from_limits(&config.runtime_limits);
+        let evidence_config = host_context
+            .as_ref()
+            .and_then(|context| context.evidence_store.as_ref())
+            .map(|launch| HistoryConfig {
+                enabled: launch.enabled,
+                retention_days: launch.retention_days,
+                max_storage_mib: launch.max_storage_mib,
+            })
+            .unwrap_or_default();
+        let evidence_context = RuntimeEvidenceContext {
+            runtime_id: self.runtime_id.clone(),
+            host_session_id: host_context
+                .as_ref()
+                .and_then(|context| context.host_session_id.clone()),
+            supervisor_generation_id: host_context
+                .as_ref()
+                .and_then(|context| context.supervisor_generation_id.clone()),
+            runtime_version: env!("CARGO_PKG_VERSION").into(),
+            config_revision: config.config_revision.get().to_string(),
+        };
+        let evidence = match host_context
+            .as_ref()
+            .and_then(|context| context.evidence_store.as_ref())
+        {
+            Some(launch) if launch.enabled => Arc::new(EvidenceService::start(
+                &launch.database_path,
+                evidence_config.clone(),
+                evidence_context.clone(),
+                self.started_at.clone(),
+            )),
+            _ => Arc::new(EvidenceService::disabled(evidence_config)),
+        };
+        let evidence_sink: Arc<dyn crate::audit::AuditSink> = Arc::new(EvidenceAuditSink::new(
+            evidence_context,
+            Arc::clone(&evidence),
+        ));
+        let audit_sink: Arc<dyn crate::audit::AuditSink> =
+            Arc::new(AuditFanout::new(vec![activity.clone(), evidence_sink]));
+        let events = EventBus::from_limits(&config.runtime_limits, self.runtime_id.clone());
         let (activity_event_sender, activity_event_receiver) = mpsc::channel();
         let bash_cancellation_observer = Arc::new(RuntimeBashCancellationObserver {
             audit_sink: Arc::clone(&audit_sink),
@@ -236,6 +287,8 @@ impl RuntimeCore {
         self.approval_manager = approval_manager;
         self.session_grants = session_grants;
         self.activity = activity;
+        self.evidence = evidence;
+        self.host_context = host_context;
         self.events = Some(events);
         self.activity_event_receiver = Some(activity_event_receiver);
         self.config = Some(config);
@@ -249,6 +302,7 @@ impl RuntimeCore {
     /// Reverts a successful initialization when a process-owned service cannot
     /// start. Process identity is intentionally retained.
     pub(crate) fn rollback_initialize(&mut self) {
+        self.evidence.stop();
         self.mcp_readiness.store(false, Ordering::Release);
         self.approval_manager.cancel_all();
         if let Some(runtime) = &self.bash_runtime {
@@ -265,6 +319,8 @@ impl RuntimeCore {
         self.activity_event_receiver = None;
         self.workspace_guard = None;
         self.execution_pipeline = None;
+        self.host_context = None;
+        self.evidence = Arc::new(EvidenceService::disabled(HistoryConfig::default()));
         let tool_registry = Arc::new(ToolRegistry::normal_mode());
         self.policy_engine = PolicyEngine::compile(
             &harness_control_protocol::PolicyConfig::default(),
@@ -388,6 +444,18 @@ impl RuntimeCore {
         self.bash_runtime.as_ref().map(Arc::clone)
     }
 
+    pub(crate) fn stop_evidence(&self) {
+        self.evidence.stop();
+    }
+
+    pub(crate) fn evidence_status(&self) -> EvidenceStoreStatus {
+        self.evidence.status()
+    }
+
+    pub(crate) fn clear_history_online(&self) -> Result<HistoryClearResult, EvidenceErrorCode> {
+        self.evidence.clear_online()
+    }
+
     #[allow(dead_code)]
     /// Typed internal calls use the same initialized enforcement snapshot as MCP.
     pub(crate) fn read_file(
@@ -465,12 +533,16 @@ impl RuntimeCore {
             .map(|receiver| receiver.try_iter().collect::<Vec<_>>())
             .unwrap_or_default();
         for event in pending {
-            self.publish(
-                event.event_type,
-                event.summary,
-                event.metadata,
-                event.request_id,
-            );
+            self.events
+                .as_mut()
+                .expect("event bus exists after initialize")
+                .publish_with_event_id(
+                    Some(event.event_id),
+                    event.event_type,
+                    event.summary,
+                    event.metadata,
+                    event.request_id,
+                );
         }
     }
 
@@ -1032,6 +1104,251 @@ mod tests {
         assert!(!core.mcp_is_ready());
         core.initialize(config_for(&workspace.root))
             .expect("retry initialize runtime");
+    }
+
+    #[test]
+    fn host_context_persists_complete_tool_evidence_without_becoming_authority() {
+        let workspace = TestWorkspace::new();
+        let database = workspace.base.join("history").join("history.sqlite3");
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            config_for(&workspace.root),
+            Some(harness_control_protocol::RuntimeHostContext {
+                host_session_id: Some("host-session".into()),
+                supervisor_generation_id: Some("generation".into()),
+                evidence_store: Some(harness_control_protocol::EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 256,
+                }),
+            }),
+        )
+        .expect("initialize with evidence");
+        core.acknowledge().expect("acknowledge");
+        fs::create_dir_all(workspace.root.join("nested")).expect("nested workspace");
+        core.write(&WriteRequest::new(
+            "nested/history.txt",
+            "M03_TOOL_CONTENT_SENTINEL",
+        ))
+        .expect("tool write remains authoritative");
+        core.stop_evidence();
+
+        let reader = chatgpt_harness_evidence_store::EvidenceReader::open(&database)
+            .expect("open evidence reader");
+        let result = reader
+            .query(&harness_control_protocol::HistoryQueryParams::default())
+            .expect("query evidence");
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(
+            result.items[0].terminal_state,
+            harness_control_protocol::HistoryTerminalState::Succeeded
+        );
+        assert_eq!(
+            result.items[0].evidence_coverage,
+            harness_control_protocol::EvidenceCoverage::Complete
+        );
+        let detail = reader
+            .get(&result.items[0].runtime_id, &result.items[0].request_id)
+            .expect("get evidence")
+            .expect("request exists");
+        assert!(!detail.events.is_empty());
+        assert!(!serde_json::to_string(&detail)
+            .unwrap()
+            .contains("M03_TOOL_CONTENT_SENTINEL"));
+    }
+
+    #[test]
+    fn writer_ownership_failure_degrades_evidence_without_blocking_tool_execution() {
+        let workspace = TestWorkspace::new();
+        let database = workspace.base.join("history").join("history.sqlite3");
+        let paths = chatgpt_harness_evidence_store::StorePaths::from_database(&database);
+        let _lock =
+            chatgpt_harness_evidence_store::WriterLock::try_acquire(&paths.lock).expect("lock");
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            config_for(&workspace.root),
+            Some(harness_control_protocol::RuntimeHostContext {
+                host_session_id: None,
+                supervisor_generation_id: None,
+                evidence_store: Some(harness_control_protocol::EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 256,
+                }),
+            }),
+        )
+        .expect("evidence failure does not abort initialization");
+        core.acknowledge().expect("acknowledge");
+        fs::create_dir_all(workspace.root.join("nested")).expect("nested workspace");
+        core.write(&WriteRequest::new("nested/still-safe.txt", "safe"))
+            .expect("policy and execution are unchanged");
+        let status = core.evidence_status();
+        assert_eq!(
+            status.state,
+            harness_control_protocol::EvidenceStoreState::Degraded
+        );
+        assert_eq!(
+            status.last_error_code,
+            Some(harness_control_protocol::EvidenceErrorCode::EvidenceWriterOwnership)
+        );
+    }
+
+    #[test]
+    fn evidence_io_failure_is_observable_and_does_not_change_tool_semantics() {
+        let workspace = TestWorkspace::new();
+        let blocked_parent = workspace.base.join("history-parent-is-a-file");
+        fs::write(&blocked_parent, "not a directory").expect("blocking file");
+        let database = blocked_parent.join("history.sqlite3");
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            config_for(&workspace.root),
+            Some(harness_control_protocol::RuntimeHostContext {
+                host_session_id: None,
+                supervisor_generation_id: None,
+                evidence_store: Some(harness_control_protocol::EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 256,
+                }),
+            }),
+        )
+        .expect("evidence IO failure does not abort initialization");
+        core.acknowledge().expect("acknowledge");
+        fs::create_dir_all(workspace.root.join("nested")).expect("nested");
+        core.write(&WriteRequest::new("nested/io-safe.txt", "safe"))
+            .expect("tool execution remains authoritative");
+        let status = core.evidence_status();
+        assert_eq!(
+            status.state,
+            harness_control_protocol::EvidenceStoreState::Degraded
+        );
+        assert_eq!(
+            status.last_error_code,
+            Some(harness_control_protocol::EvidenceErrorCode::EvidenceIo)
+        );
+    }
+
+    #[test]
+    fn durable_database_excludes_secret_path_environment_output_and_command_sentinels() {
+        let base = std::env::temp_dir().join(format!(
+            "chatgpt-harness-m03-privacy-{}-M03_WORKSPACE_PATH_SENTINEL",
+            uuid::Uuid::new_v4()
+        ));
+        let root = base.join("workspace");
+        fs::create_dir_all(&root).expect("privacy workspace");
+        let database = base.join("history").join("history.sqlite3");
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            config_for(&root),
+            Some(harness_control_protocol::RuntimeHostContext {
+                host_session_id: Some("M03_HOST_MAPPING_SENTINEL".into()),
+                supervisor_generation_id: Some("M03_GENERATION_SENTINEL".into()),
+                evidence_store: Some(harness_control_protocol::EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 256,
+                }),
+            }),
+        )
+        .expect("initialize");
+        core.acknowledge().expect("acknowledge");
+        let secret_content = format!(
+            "M03_API_KEY_SENTINEL\nM03_RAW_FILE_CONTENT_SENTINEL\n{}",
+            "M03_LARGE_FILE_CONTENT_SENTINEL".repeat(4096)
+        );
+        fs::create_dir_all(root.join("nested")).expect("nested");
+        core.write(&WriteRequest::new("nested/private.txt", &secret_content))
+            .expect("write sentinel content");
+        core.read_file(&ReadFileRequest::new("nested/private.txt"))
+            .expect("read sentinel content through evidence-producing pipeline");
+
+        let request_id = uuid::Uuid::new_v4();
+        let event = AuditEvent {
+            tool_enabled: Some(true),
+            capability: Some(
+                harness_control_protocol::control_read::ToolCapability::DeveloperShell,
+            ),
+            sanitized_arguments: Some(
+                harness_control_protocol::SanitizedArgumentsEvidence::Bash {
+                    command_preview: "M03_BASH_PREVIEW_SENTINEL".into(),
+                },
+            ),
+            approval_id: None,
+            duration_ms: Some(1),
+            result_evidence: None,
+            event_id: uuid::Uuid::new_v4(),
+            request_id,
+            timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            event_type: AuditEventType::ExecutionFailed,
+            tool_name: "bash".into(),
+            lifecycle_state: AuditLifecycleState::Failed,
+            workspace_id: "active".into(),
+            workspace_validation: WorkspaceValidation::NotAttempted,
+            policy_decision: None,
+            matched_rule_ids: vec!["M03_ARBITRARY_JSON_SENTINEL".into()],
+            policy_reason: None,
+            approval_decision: None,
+            outcome: AuditOutcome::Failed,
+            failure_category: Some(AuditFailureCategory::ExecutionFailed),
+            bash: Some(harness_control_protocol::control_read::BashActivityEvidence {
+                mode: harness_control_protocol::SecurityMode::DeveloperTest,
+                mode_eligible: true,
+                capability: harness_control_protocol::control_read::ToolCapability::DeveloperShell,
+                cwd: harness_control_protocol::BashWorkingDirectory::ActiveWorkspace,
+                command_preview: Some(
+                    "M03_RAW_ENV_SENTINEL M03_STDOUT_SENTINEL M03_STDERR_SENTINEL M03_PROXY_CREDENTIAL_SENTINEL M03_RAW_ERROR_PATH_SENTINEL"
+                        .into(),
+                ),
+                classification: None,
+                risk_flags: Vec::new(),
+                approval_request_id: None,
+                session_grant_hit: false,
+                exit_code: None,
+                duration_ms: Some(1),
+            }),
+        };
+        let context = RuntimeEvidenceContext {
+            runtime_id: core.runtime_id.clone(),
+            host_session_id: Some("M03_HOST_MAPPING_SENTINEL".into()),
+            supervisor_generation_id: Some("M03_GENERATION_SENTINEL".into()),
+            runtime_version: env!("CARGO_PKG_VERSION").into(),
+            config_revision: "7".into(),
+        };
+        core.evidence
+            .enqueue(crate::evidence::SafeEvidenceProjector::new(context).project(&event));
+        core.stop_evidence();
+
+        let mut bytes = fs::read(&database).expect("main database bytes");
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = std::path::PathBuf::from(format!("{}{suffix}", database.display()));
+            if let Ok(sidecar_bytes) = fs::read(sidecar) {
+                bytes.extend_from_slice(&sidecar_bytes);
+            }
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        for sentinel in [
+            "M03_API_KEY_SENTINEL",
+            "M03_RAW_FILE_CONTENT_SENTINEL",
+            "M03_LARGE_FILE_CONTENT_SENTINEL",
+            "M03_WORKSPACE_PATH_SENTINEL",
+            "M03_BASH_PREVIEW_SENTINEL",
+            "M03_RAW_ENV_SENTINEL",
+            "M03_STDOUT_SENTINEL",
+            "M03_STDERR_SENTINEL",
+            "M03_PROXY_CREDENTIAL_SENTINEL",
+            "M03_RAW_ERROR_PATH_SENTINEL",
+            "M03_ARBITRARY_JSON_SENTINEL",
+        ] {
+            assert!(
+                !text.contains(sentinel),
+                "durable sentinel leaked: {sentinel}"
+            );
+        }
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]

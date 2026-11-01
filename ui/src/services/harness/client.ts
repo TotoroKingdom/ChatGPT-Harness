@@ -9,6 +9,12 @@ import type {
   ApprovalsResolveResult,
   AppConfig,
   DiagnosticRun,
+  EvidenceStoreStatus,
+  HistoryClearResult,
+  HistoryGetParams,
+  HistoryGetResult,
+  HistoryQueryParams,
+  HistoryQueryResult,
   PoliciesListResult,
   RuntimeState,
   RuntimeStopResult,
@@ -129,6 +135,10 @@ export interface HarnessControlClient extends ControlReadClient {
   setComponentStates(states: ComponentStates): void;
   componentStatesSubscribe(listener: ComponentStatesListener): Promise<Unsubscribe>;
   activityList(params?: ActivityListParams): Promise<ActivityListResult>;
+  historyQuery(params?: HistoryQueryParams): Promise<HistoryQueryResult>;
+  historyGet(params: HistoryGetParams): Promise<HistoryGetResult>;
+  historyStatus(): Promise<EvidenceStoreStatus>;
+  historyClear(): Promise<HistoryClearResult>;
   activitySubscribe(listener: ActivityEventListener, afterSequence?: string): Promise<Unsubscribe>;
   toolsList(): Promise<ToolsListResult>;
   policiesList(): Promise<PoliciesListResult>;

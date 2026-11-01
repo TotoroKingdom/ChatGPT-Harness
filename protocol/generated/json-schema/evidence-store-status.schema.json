@@ -1,0 +1,133 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "EvidenceErrorCode": {
+      "enum": [
+        "EVIDENCE_BUSY",
+        "EVIDENCE_WRITER_OWNERSHIP",
+        "EVIDENCE_IO",
+        "EVIDENCE_FULL",
+        "EVIDENCE_CORRUPT",
+        "EVIDENCE_INCOMPATIBLE_SCHEMA",
+        "EVIDENCE_MIGRATION_FAILED",
+        "EVIDENCE_QUEUE_OVERFLOW",
+        "EVIDENCE_CAPACITY_DEGRADED",
+        "EVIDENCE_INVALID_CURSOR",
+        "EVIDENCE_NOT_FOUND"
+      ],
+      "type": "string"
+    },
+    "EvidenceStoreState": {
+      "enum": [
+        "disabled",
+        "healthy",
+        "degraded",
+        "busy",
+        "incompatible",
+        "corrupt",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "HistoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "maxStorageMiB": {
+          "default": 256,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retentionDays": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "coverageUnknownSinceUtc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "dropCount": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "effectiveHistoryConfig": {
+      "$ref": "#/$defs/HistoryConfig"
+    },
+    "footprintBytes": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "lastCommitAtUtc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lastDropAtUtc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lastErrorCode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvidenceErrorCode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "queueCapacity": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "queueDepth": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schemaVersion": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "state": {
+      "$ref": "#/$defs/EvidenceStoreState"
+    }
+  },
+  "required": [
+    "state",
+    "queueDepth",
+    "queueCapacity",
+    "dropCount",
+    "effectiveHistoryConfig"
+  ],
+  "title": "EvidenceStoreStatus",
+  "type": "object"
+}

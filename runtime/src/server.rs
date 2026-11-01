@@ -95,7 +95,9 @@ fn shutdown_runtime_services(
     if core.config.is_some() {
         let _ = core.stop();
     }
-    mcp_service.shutdown().map_err(io::Error::other)
+    let result = mcp_service.shutdown().map_err(io::Error::other);
+    core.stop_evidence();
+    result
 }
 
 fn empty_request_id() -> harness_control_protocol::RequestId {
@@ -215,7 +217,9 @@ fn handle_request<W: Write>(
                 )?;
                 return Ok(false);
             }
-            if let Err(error) = core.initialize(params.runtime_config) {
+            if let Err(error) =
+                core.initialize_with_host(params.runtime_config, params.host_context)
+            {
                 write_error(
                     output,
                     id,
@@ -299,6 +303,7 @@ fn handle_request<W: Write>(
                 )?;
                 return Ok(true);
             }
+            core.stop_evidence();
             write_result(output, id, RuntimeStopResult { accepted: true })?;
             Ok(true)
         }
@@ -466,6 +471,31 @@ fn handle_request<W: Write>(
             )?;
             Ok(false)
         }
+        "evidence.status" => {
+            let _: EmptyParams = match params_or_default(&request.params) {
+                Ok(value) => value,
+                Err(error) => return write_invalid_params(output, id, error),
+            };
+            write_result(output, id, core.evidence_status())?;
+            Ok(false)
+        }
+        "history.clear" => {
+            let _: EmptyParams = match params_or_default(&request.params) {
+                Ok(value) => value,
+                Err(error) => return write_invalid_params(output, id, error),
+            };
+            match core.clear_history_online() {
+                Ok(result) => write_result(output, id, result)?,
+                Err(code) => write_error(
+                    output,
+                    id,
+                    RUNTIME_NOT_READY_ERROR,
+                    evidence_machine_code(code),
+                    "History storage could not complete the clear barrier.",
+                )?,
+            }
+            Ok(false)
+        }
         _ => {
             write_error(
                 output,
@@ -504,6 +534,23 @@ fn params<T: DeserializeOwned>(value: &Option<Value>) -> Result<T, String> {
         .clone()
         .ok_or_else(|| "Request params are required.".into())
         .and_then(|value| serde_json::from_value(value).map_err(|error| error.to_string()))
+}
+
+fn evidence_machine_code(code: harness_control_protocol::EvidenceErrorCode) -> MachineErrorCode {
+    use harness_control_protocol::EvidenceErrorCode as Evidence;
+    match code {
+        Evidence::EvidenceBusy => MachineErrorCode::EvidenceBusy,
+        Evidence::EvidenceWriterOwnership => MachineErrorCode::EvidenceWriterOwnership,
+        Evidence::EvidenceIo => MachineErrorCode::EvidenceIo,
+        Evidence::EvidenceFull => MachineErrorCode::EvidenceFull,
+        Evidence::EvidenceCorrupt => MachineErrorCode::EvidenceCorrupt,
+        Evidence::EvidenceIncompatibleSchema => MachineErrorCode::EvidenceIncompatibleSchema,
+        Evidence::EvidenceMigrationFailed => MachineErrorCode::EvidenceMigrationFailed,
+        Evidence::EvidenceQueueOverflow => MachineErrorCode::EvidenceQueueOverflow,
+        Evidence::EvidenceCapacityDegraded => MachineErrorCode::EvidenceCapacityDegraded,
+        Evidence::EvidenceInvalidCursor => MachineErrorCode::EvidenceInvalidCursor,
+        Evidence::EvidenceNotFound => MachineErrorCode::EvidenceNotFound,
+    }
 }
 
 fn params_or_default<T: DeserializeOwned + Default>(value: &Option<Value>) -> Result<T, String> {
@@ -803,6 +850,99 @@ mod tests {
             serde_json::from_value(endpoint.result.clone()).expect("endpoint result");
         assert!(endpoint.url.starts_with("http://127.0.0.1:"));
         assert!(endpoint.url.ends_with("/mcp"));
+    }
+
+    #[test]
+    fn evidence_status_is_available_without_host_context_and_stays_disabled() {
+        let workspace = TestWorkspace::new();
+        let output = run_lines(&[
+            request(
+                "initialize",
+                "initialize",
+                initialize_params(PROTOCOL_VERSION, &workspace.root),
+            ),
+            notification("initialized"),
+            request("evidence", "evidence.status", json!({})),
+        ]);
+        let RpcMessage::Response(response) = &output[1] else {
+            panic!("expected evidence.status response");
+        };
+        let status: harness_control_protocol::EvidenceStoreStatus =
+            serde_json::from_value(response.result.clone()).unwrap();
+        assert_eq!(
+            status.state,
+            harness_control_protocol::EvidenceStoreState::Disabled
+        );
+        assert_eq!(status.queue_capacity, 1024);
+    }
+
+    #[test]
+    fn runtime_evidence_status_and_online_clear_rpc_use_the_queue_barrier() {
+        let workspace = TestWorkspace::new();
+        let database = workspace.base.join("history").join("history.sqlite3");
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            runtime_config(&workspace.root),
+            Some(harness_control_protocol::RuntimeHostContext {
+                host_session_id: Some("host".into()),
+                supervisor_generation_id: Some("generation".into()),
+                evidence_store: Some(harness_control_protocol::EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 256,
+                }),
+            }),
+        )
+        .unwrap();
+        core.acknowledge().unwrap();
+        let mut service = McpRuntimeService::new();
+        let mut subscribed = false;
+        let mut output = Vec::new();
+        handle_request(
+            RpcRequest {
+                id: harness_control_protocol::RequestId::String("evidence".into()),
+                method: "evidence.status".into(),
+                params: Some(json!({})),
+            },
+            &mut core,
+            &mut service,
+            &mut subscribed,
+            &mut output,
+        )
+        .unwrap();
+        let message: RpcMessage = serde_json::from_slice(&output).unwrap();
+        let RpcMessage::Response(response) = message else {
+            panic!("expected status response");
+        };
+        let status: harness_control_protocol::EvidenceStoreStatus =
+            serde_json::from_value(response.result).unwrap();
+        assert!(matches!(
+            status.state,
+            harness_control_protocol::EvidenceStoreState::Healthy
+                | harness_control_protocol::EvidenceStoreState::Degraded
+        ));
+        output.clear();
+        handle_request(
+            RpcRequest {
+                id: harness_control_protocol::RequestId::String("clear".into()),
+                method: "history.clear".into(),
+                params: Some(json!({})),
+            },
+            &mut core,
+            &mut service,
+            &mut subscribed,
+            &mut output,
+        )
+        .unwrap();
+        let message: RpcMessage = serde_json::from_slice(&output).unwrap();
+        let RpcMessage::Response(response) = message else {
+            panic!("expected clear response");
+        };
+        let cleared: harness_control_protocol::HistoryClearResult =
+            serde_json::from_value(response.result).unwrap();
+        assert_eq!(cleared.deleted_request_count, 0);
+        core.stop_evidence();
     }
 
     #[test]

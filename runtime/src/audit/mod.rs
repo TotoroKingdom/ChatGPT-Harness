@@ -7,12 +7,14 @@
 //! execution evidence; private grant scopes and logical argv remain internal.
 
 pub(crate) mod event;
+mod fanout;
 mod redaction;
 
 pub(crate) use event::{
     AuditEvent, AuditEventType, AuditFailureCategory, AuditLifecycleState, AuditOutcome,
     WorkspaceValidation,
 };
+pub(crate) use fanout::AuditFanout;
 pub(crate) use redaction::redact_value;
 
 /// Internal observation-only receiver of an already-created audit event.

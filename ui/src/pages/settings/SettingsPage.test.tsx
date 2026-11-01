@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "@protocol/v1";
 import { i18n, initializeLanguage } from "@/i18n";
@@ -88,6 +88,49 @@ describe("M8 Settings section/list workflow", () => {
       expect(document.getElementById(`settings-section-${name}`)).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Save Changes" })).not.toBeInTheDocument();
+  });
+
+  it("saves generation-effective History settings and confirms every clear", async () => {
+    const mutateConfig = vi.fn().mockImplementation(async (intent: (latest: AppConfig) => AppConfig) => {
+      intent(state.context.config);
+      return { ok: true };
+    });
+    const historyClear = vi.fn().mockResolvedValue({
+      deletedRequestCount: 2,
+      deletedEventCount: 5,
+      deletedApprovalCount: 1,
+      footprintBytes: 0,
+      completedAtUtc: "2026-11-01T00:00:00Z",
+    });
+    const historyStatus = vi.fn().mockResolvedValue({
+      state: "healthy",
+      schemaVersion: 1,
+      queueDepth: 0,
+      queueCapacity: 1024,
+      dropCount: 0,
+      effectiveHistoryConfig: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
+      footprintBytes: 4096,
+    });
+    state.context = makeContext({
+      client: { historyClear, historyStatus },
+      mutateConfig,
+      restartRequired: true,
+    });
+    render(<SettingsPage />);
+    expect(document.getElementById("settings-section-history")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Retention days" }), { target: { value: "45" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Maximum storage (MiB)" }), { target: { value: "512" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save History settings" }));
+    await waitFor(() => expect(mutateConfig).toHaveBeenCalledOnce());
+    const next = mutateConfig.mock.calls[0][0](state.context.config);
+    expect(next.history).toEqual({ enabled: true, retentionDays: 45, maxStorageMiB: 512 });
+    expect(screen.getByText("Saved History settings differ from the running Runtime generation.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear History" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clear History" }));
+    await waitFor(() => expect(historyClear).toHaveBeenCalledOnce());
+    expect(screen.getByText("Cleared 2 requests, 5 events and 1 approvals.")).toBeInTheDocument();
   });
 
   it("saves approval and connection notification toggles independently", async () => {

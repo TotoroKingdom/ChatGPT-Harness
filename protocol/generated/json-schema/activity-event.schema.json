@@ -48,6 +48,9 @@
         "null"
       ]
     },
+    "runtimeId": {
+      "type": "string"
+    },
     "sequence": {
       "$ref": "#/$defs/DecimalU64",
       "description": "Runtime-local monotonically increasing sequence number."
@@ -62,6 +65,7 @@
   },
   "required": [
     "eventId",
+    "runtimeId",
     "sequence",
     "eventType",
     "timestamp",

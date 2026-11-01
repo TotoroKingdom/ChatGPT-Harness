@@ -58,6 +58,7 @@ fn activity_sink_dispatch_does_not_block_runtime_reader() {
         .expect("activity sink installed");
     let event = ActivityEvent {
         event_id: "m01-reader-dispatch".into(),
+        runtime_id: "m01-runtime".into(),
         sequence: harness_control_protocol::DecimalU64::new(1),
         event_type: harness_control_protocol::ActivityEventType::ApprovalRequested,
         request_id: Some("m01-request".into()),
@@ -105,6 +106,7 @@ fn activity_sink_preserves_host_refresh_order() {
         .expect("activity sink installed");
     let event = |sequence| ActivityEvent {
         event_id: format!("m01-ordered-{sequence}"),
+        runtime_id: "m01-runtime".into(),
         sequence: harness_control_protocol::DecimalU64::new(sequence),
         event_type: ActivityEventType::ApprovalRequested,
         request_id: Some(format!("m01-request-{sequence}")),

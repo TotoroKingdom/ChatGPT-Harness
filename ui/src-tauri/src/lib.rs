@@ -163,6 +163,10 @@ pub fn run() {
             crate::commands::desktop_continue_in_background,
             crate::commands::desktop_quit,
             crate::commands::config_reset,
+            crate::commands::history_query,
+            crate::commands::history_get,
+            crate::commands::history_status,
+            crate::commands::history_clear,
             crate::commands::secret_api_key_status,
             crate::commands::secret_api_key_delete,
             crate::commands::workspace_choose,
@@ -203,6 +207,7 @@ mod config;
 mod desktop;
 mod diagnostics;
 mod harness;
+mod history;
 mod platform;
 mod runtime;
 mod secrets;

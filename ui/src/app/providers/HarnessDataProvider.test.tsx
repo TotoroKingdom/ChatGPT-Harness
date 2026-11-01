@@ -22,6 +22,7 @@ import { useActivitySubscription } from "./useActivitySubscription";
 function activityEvent(): ActivityEvent {
   return {
     eventId: "event-1",
+    runtimeId: "runtime-1",
     sequence: "1",
     eventType: "runtime_started",
     timestamp: "2026-09-02T00:00:00Z",

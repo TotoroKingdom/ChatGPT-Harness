@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 harness-control-protocol = { path = "../protocol" }
+chatgpt-harness-evidence-store = { path = "evidence-store" }
 chrono = { version = "0.4", features = ["clock"] }
 globset = "0.4"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
@@ -27,3 +28,6 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
+
+[dev-dependencies]
+tempfile = "3"

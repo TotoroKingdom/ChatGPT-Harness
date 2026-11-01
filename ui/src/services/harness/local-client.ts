@@ -11,6 +11,12 @@ import type {
   ApprovalsResolveResult,
   AppConfig,
   DiagnosticRun,
+  EvidenceStoreStatus,
+  HistoryClearResult,
+  HistoryGetParams,
+  HistoryGetResult,
+  HistoryQueryParams,
+  HistoryQueryResult,
   PoliciesListResult,
   RuntimeState,
   RuntimeStopResult,
@@ -356,6 +362,22 @@ export class TauriHarnessControlClient implements HarnessControlClient {
 
   activityList(params: ActivityListParams = {}) {
     return this.call<ActivityListResult>("runtime_activity_list", { params });
+  }
+
+  historyQuery(params: HistoryQueryParams = {}) {
+    return this.call<HistoryQueryResult>("history_query", { params });
+  }
+
+  historyGet(params: HistoryGetParams) {
+    return this.call<HistoryGetResult>("history_get", { params });
+  }
+
+  historyStatus() {
+    return this.call<EvidenceStoreStatus>("history_status");
+  }
+
+  historyClear() {
+    return this.call<HistoryClearResult>("history_clear");
   }
 
   async activitySubscribe(

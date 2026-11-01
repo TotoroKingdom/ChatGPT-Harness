@@ -15,6 +15,7 @@ import { assertUnchanged } from "@/app/providers/config-mutations";
 import type { DesktopPreferencesPatch } from "@/services/harness/client";
 import { validateControlPlaneProxy } from "./configuration";
 import { normalizeThemePreference, type ThemePreference } from "@/theme/theme";
+import { HistorySettingsSection } from "./HistorySettingsSection";
 
 export { validateControlPlaneProxy } from "./configuration";
 
@@ -421,6 +422,8 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
         <InlineFeedback>{t("settings.notifications.fallback")}</InlineFeedback>
         {notificationFeedback && <FeedbackNotice feedback={notificationFeedback} />}
       </Section>)}
+
+      {section("history", <HistorySettingsSection />)}
 
       {section("workspace", <Section title={t("m8Settings.workspace")}>
         <Row title={t("settings.workspace.root")} summary={<code className="mono">{currentConfig?.workspace.rootPath || t("m8.unknown")}</code>} controls={<Button variant="secondary" onClick={() => void chooseFolder()} disabled={workspaceSaving || resetting || !data.config}>{workspaceSaving ? t("settings.languageSaving") : t("settings.workspace.choose")}</Button>} />

@@ -40,6 +40,35 @@
       "description": "A non-negative 64-bit integer represented as a decimal string on the JSON wire.\n\nKeeping revisions and cursors as strings avoids JSON number precision loss and\nmakes the representation identical across Tauri and future JSONL transports.",
       "type": "string"
     },
+    "EvidenceStoreLaunchConfig": {
+      "additionalProperties": false,
+      "description": "Host-only evidence persistence settings. The database path never appears\nin History DTOs, Activity, Tool arguments, or durable event rows.",
+      "properties": {
+        "databasePath": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxStorageMiB": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retentionDays": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled",
+        "databasePath",
+        "retentionDays",
+        "maxStorageMiB"
+      ],
+      "type": "object"
+    },
     "PolicyConfig": {
       "additionalProperties": false,
       "properties": {
@@ -162,6 +191,34 @@
         "runtimeLimits",
         "tools"
       ],
+      "type": "object"
+    },
+    "RuntimeHostContext": {
+      "additionalProperties": false,
+      "properties": {
+        "evidenceStore": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceStoreLaunchConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hostSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "supervisorGenerationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "RuntimeLimits": {
@@ -334,6 +391,16 @@
     },
     "clientInfo": {
       "$ref": "#/$defs/ClientInfo"
+    },
+    "hostContext": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RuntimeHostContext"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "protocolVersion": {
       "format": "uint32",

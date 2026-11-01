@@ -156,6 +156,8 @@ fn control_method_registry_is_exact() {
             "approvals.resolve",
             "diagnostics.run",
             "mcp.endpoint.get",
+            "evidence.status",
+            "history.clear",
             "control.diagnostics.get",
             "control.activity.snapshot",
             "control.effective_tools.get",
@@ -327,4 +329,81 @@ fn startup_and_diagnostic_v1_additions_round_trip_with_unknown_and_safe_fields()
     let attempt: StartupAttempt = validate(startup);
     assert_eq!(attempt.outcome, StartupOutcome::Ready);
     assert_eq!(attempt.phases[0].phase, StartupPhase::HarnessReady);
+}
+
+#[test]
+fn history_v1_contract_is_additive_closed_and_has_no_live_authority_shape() {
+    let params: HistoryQueryParams = serde_json::from_value(serde_json::json!({
+        "fromUtc": "2026-11-01T00:00:00Z",
+        "tool": "read_file",
+        "outcome": "success",
+        "policyDecision": "allow",
+        "approvalState": "none",
+        "limit": 50
+    }))
+    .unwrap();
+    assert_eq!(params.tool.as_deref(), Some("read_file"));
+    assert_eq!(params.outcome, Some(HistoryOutcome::Success));
+    assert_eq!(params.approval_state, Some(HistoryApprovalState::None));
+
+    let initialize: InitializeParams =
+        serde_json::from_value(fixture("initialize.request.json")["params"].clone()).unwrap();
+    assert!(initialize.host_context.is_none());
+
+    let with_host: InitializeParams = serde_json::from_value(serde_json::json!({
+        "clientInfo": {"name": "test", "title": "Test", "version": "1"},
+        "protocolVersion": harness_control_protocol::PROTOCOL_VERSION,
+        "capabilities": {},
+        "runtimeConfig": serde_json::from_value::<Value>(
+            fixture("initialize.request.json")["params"]["runtimeConfig"].clone()
+        ).unwrap(),
+        "hostContext": {
+            "hostSessionId": "host-session",
+            "supervisorGenerationId": "generation",
+            "evidenceStore": {
+                "enabled": true,
+                "databasePath": "C:\\AppData\\history\\history.sqlite3",
+                "retentionDays": 30,
+                "maxStorageMiB": 256
+            }
+        }
+    }))
+    .unwrap();
+    let host = with_host.host_context.expect("host context");
+    assert_eq!(host.host_session_id.as_deref(), Some("host-session"));
+    assert!(host.evidence_store.is_some());
+
+    let evidence = EvidenceEventV1 {
+        schema_version: EVIDENCE_SCHEMA_VERSION,
+        event_id: "event-1".into(),
+        runtime_id: "runtime-1".into(),
+        request_id: "request-1".into(),
+        host_session_id: Some("host-session".into()),
+        supervisor_generation_id: Some("generation".into()),
+        approval_id: None,
+        tool_name: "read_file".into(),
+        occurred_at_utc: "2026-11-01T00:00:00Z".into(),
+        recorded_at_utc: "2026-11-01T00:00:01Z".into(),
+        stage: EvidenceStage::ExecutionCompleted,
+        lifecycle_state: EvidenceLifecycleState::Completed,
+        workspace_validation: EvidenceWorkspaceValidation::Passed,
+        policy_decision: Some(PolicyDecision::Allow),
+        policy_reason: Some(PolicyReason::ToolDefault),
+        matched_rule_ids: vec![],
+        approval_decision: None,
+        outcome: HistoryOutcome::Success,
+        failure_category: None,
+        duration_ms: Some(12),
+        sanitized_arguments: Some(DurableSanitizedArgumentsEvidence::ReadFile {
+            logical_path: "notes.txt".into(),
+        }),
+        result_evidence: Some(ExecutionResultEvidence::ReadFile { bytes_read: 12 }),
+        coverage: EvidenceCoverage::Complete,
+    };
+    let json = serde_json::to_string(&evidence).unwrap();
+    assert!(!json.contains("approvalRequest"));
+    assert!(!json.contains("executionPermit"));
+    assert!(!json.contains("sessionGrant"));
+    assert!(!json.contains("databasePath"));
+    let _: EvidenceEventV1 = serde_json::from_str(&json).unwrap();
 }

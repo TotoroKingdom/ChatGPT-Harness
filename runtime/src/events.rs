@@ -14,6 +14,7 @@ use std::sync::mpsc::Sender;
 /// boundary: no paths, payloads, temporary names, or raw OS errors cross it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ActivityEventInput {
+    pub(crate) event_id: String,
     pub(crate) event_type: ActivityEventType,
     pub(crate) summary: &'static str,
     pub(crate) metadata: Vec<(String, String)>,
@@ -124,6 +125,7 @@ impl ActivityEventInput {
         }
         let summary = activity_summary(event_type.clone());
         Some(Self {
+            event_id: event.event_id.to_string(),
             event_type,
             summary,
             metadata,
@@ -219,14 +221,16 @@ fn failure_category_name(category: crate::audit::AuditFailureCategory) -> &'stat
 pub struct EventBus {
     max_events: usize,
     next_sequence: u64,
+    runtime_id: String,
     history: VecDeque<ActivityEvent>,
 }
 
 impl EventBus {
-    pub fn new(max_events: u32) -> Self {
+    pub fn new(max_events: u32, runtime_id: impl Into<String>) -> Self {
         Self {
             max_events: max_events.max(1) as usize,
             next_sequence: 0,
+            runtime_id: runtime_id.into(),
             history: VecDeque::new(),
         }
     }
@@ -238,12 +242,24 @@ impl EventBus {
         metadata: impl IntoIterator<Item = (String, String)>,
         request_id: Option<String>,
     ) -> ActivityEvent {
+        self.publish_with_event_id(None, event_type, summary, metadata, request_id)
+    }
+
+    pub fn publish_with_event_id(
+        &mut self,
+        event_id: Option<String>,
+        event_type: ActivityEventType,
+        summary: impl Into<String>,
+        metadata: impl IntoIterator<Item = (String, String)>,
+        request_id: Option<String>,
+    ) -> ActivityEvent {
         self.next_sequence = self
             .next_sequence
             .checked_add(1)
             .expect("activity sequence exhausted");
         let event = ActivityEvent {
-            event_id: format!("event_{}", uuid::Uuid::new_v4()),
+            event_id: event_id.unwrap_or_else(|| format!("event_{}", uuid::Uuid::new_v4())),
+            runtime_id: self.runtime_id.clone(),
             sequence: DecimalU64::new(self.next_sequence),
             event_type,
             request_id,
@@ -273,8 +289,8 @@ impl EventBus {
             .collect()
     }
 
-    pub fn from_limits(limits: &RuntimeLimits) -> Self {
-        Self::new(limits.max_activity_events)
+    pub fn from_limits(limits: &RuntimeLimits, runtime_id: impl Into<String>) -> Self {
+        Self::new(limits.max_activity_events, runtime_id)
     }
 }
 
@@ -289,7 +305,7 @@ mod tests {
 
     #[test]
     fn policy_evidence_is_projected_without_raw_or_unsafe_rule_ids() {
-        let input = ActivityEventInput::from_audit(&AuditEvent {
+        let source = AuditEvent {
             tool_enabled: None,
             capability: None,
             sanitized_arguments: None,
@@ -314,8 +330,11 @@ mod tests {
             outcome: AuditOutcome::InProgress,
             failure_category: None,
             bash: None,
-        })
-        .expect("policy audit event projects to activity");
+        };
+        let source_event_id = source.event_id.to_string();
+        let input = ActivityEventInput::from_audit(&source)
+            .expect("policy audit event projects to activity");
+        assert_eq!(input.event_id, source_event_id);
 
         let metadata = input
             .metadata
@@ -338,7 +357,7 @@ mod tests {
 
     #[test]
     fn subscribe_after_sequence_only_replays_missing_events() {
-        let mut bus = EventBus::new(3);
+        let mut bus = EventBus::new(3, "runtime-test");
         for index in 1..=3 {
             bus.publish(
                 ActivityEventType::RuntimeStarted,
@@ -360,7 +379,7 @@ mod tests {
 
     #[test]
     fn history_is_bounded_and_sequences_remain_monotonic() {
-        let mut bus = EventBus::new(2);
+        let mut bus = EventBus::new(2, "runtime-test");
         for index in 1..=3 {
             bus.publish(
                 ActivityEventType::RuntimeStarted,
@@ -375,5 +394,20 @@ mod tests {
         assert_eq!(events[0].sequence, DecimalU64::new(2));
         assert_eq!(events[1].sequence, DecimalU64::new(3));
         assert_eq!(bus.latest_sequence(), DecimalU64::new(3));
+    }
+
+    #[test]
+    fn audit_originated_activity_preserves_canonical_event_and_runtime_identity() {
+        let mut bus = EventBus::new(4, "runtime-canonical");
+        let event = bus.publish_with_event_id(
+            Some("canonical-event-id".into()),
+            ActivityEventType::PolicyEvaluated,
+            "policy",
+            std::iter::empty::<(String, String)>(),
+            Some("request-1".into()),
+        );
+        assert_eq!(event.event_id, "canonical-event-id");
+        assert_eq!(event.runtime_id, "runtime-canonical");
+        assert_eq!(event.request_id.as_deref(), Some("request-1"));
     }
 }

@@ -414,10 +414,15 @@ impl HarnessController {
 
         self.startup
             .start_phase(&session_id, StartupPhase::RuntimeSpawn);
-        let runtime_state = match self.runtime.start(app, &config) {
-            Ok(state) => state,
-            Err(error) => return Err(self.fail_start(app, error.into(), false)),
-        };
+        crate::history::prepare_before_runtime_start(app);
+        let runtime_state =
+            match self
+                .runtime
+                .start_with_host_session(app, &config, Some(session_id.as_str()))
+            {
+                Ok(state) => state,
+                Err(error) => return Err(self.fail_start(app, error.into(), false)),
+            };
         // RuntimeSupervisor emits finer-grained hooks in production. These
         // idempotent completions keep direct/unit construction deterministic.
         self.startup
@@ -1017,6 +1022,10 @@ fn validate_harness_config(config: &AppConfig) -> Result<(), String> {
     {
         return Err("Choose an accessible Workspace folder.".into());
     }
+    config
+        .history
+        .validate()
+        .map_err(|error| format!("History configuration needs attention: {error}"))?;
     let security_consistent = (matches!(config.security.mode, SecurityMode::Normal)
         && !config.security.developer_test_mode)
         || (matches!(config.security.mode, SecurityMode::DeveloperTest)
