@@ -197,6 +197,25 @@ fn checksum_mismatch_is_preserved_and_never_recreated() {
 }
 
 #[test]
+fn sqlite_busy_maps_to_retryable_status_without_becoming_policy_state() {
+    let busy = rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error {
+            code: rusqlite::ErrorCode::DatabaseBusy,
+            extended_code: 5,
+        },
+        Some("database is locked".to_owned()),
+    );
+    let error = StoreError::from_sqlite(busy);
+    assert!(matches!(error, StoreError::Busy));
+    let status = status_for_error(&error, HistoryConfig::default());
+    assert_eq!(status.state, EvidenceStoreState::Busy);
+    assert_eq!(
+        status.last_error_code,
+        Some(EvidenceErrorCode::EvidenceBusy)
+    );
+}
+
+#[test]
 fn legacy_migration_uses_backup_and_failed_migration_preserves_source() {
     let (_directory, path) = database();
     migration::create_legacy_v0(&path).unwrap();
