@@ -1,0 +1,82 @@
+{
+  "caseId": "m04-c3-01",
+  "caseVersion": 1,
+  "category": "content_search",
+  "prompt": "Search the small text files under notes/ for the line beginning 'marker ='. Exactly one file contains it. Report that marker value exactly as TOKEN=ORCHID-7. Use a bounded glob first and then read candidate files.",
+  "fixtureRef": "m04-c3-01",
+  "fixtureHash": "0c01b04ba49644dca3473147aeaf82acde4fd6901044ee1b7b5bc71f2e285812",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "content_search",
+        "steps": [
+          {
+            "tool": "glob",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one_or_more"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "glob",
+      "patternMustMatchAny": [
+        "notes/alpha.txt",
+        "notes/beta.txt",
+        "notes/gamma.txt",
+        "notes/delta.txt",
+        "notes/epsilon.txt"
+      ]
+    },
+    {
+      "tool": "read_file",
+      "pathAny": [
+        "notes/alpha.txt",
+        "notes/beta.txt",
+        "notes/gamma.txt",
+        "notes/delta.txt",
+        "notes/epsilon.txt"
+      ]
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "295f89f76f11bfdafe112a90db38759699415b0618afe4abf5d44ecd05315b90"
+    }
+  ],
+  "tags": [
+    "content_search"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "TOKEN=ORCHID-7"
+  }
+}

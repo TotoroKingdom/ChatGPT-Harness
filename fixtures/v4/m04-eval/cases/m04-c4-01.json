@@ -1,0 +1,78 @@
+{
+  "caseId": "m04-c4-01",
+  "caseVersion": 1,
+  "category": "write_state",
+  "prompt": "Create the workspace file report_output.txt with exactly this content and no trailing newline: report=ok . Then answer exactly DONE.",
+  "fixtureRef": "m04-c4-01",
+  "fixtureHash": "6feb5cc700494b73d35609fac5019c8e87164f35d92a2ea67f524e9a86e96804",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "write_state",
+        "steps": [
+          {
+            "tool": "write",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "write",
+      "path": "report_output.txt",
+      "content": "report=ok"
+    },
+    {
+      "tool": "read_file",
+      "path": "report_output.txt",
+      "optional": true
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "write",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "allow_once",
+  "finalStateAssertions": [
+    {
+      "kind": "file_exact",
+      "path": "report_output.txt",
+      "content": "report=ok"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "e56c6a822216322f16aafaa88afac35360bd1a2903a4f7c4d315fe66f105a9c2"
+    }
+  ],
+  "tags": [
+    "write_state"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "DONE"
+  }
+}

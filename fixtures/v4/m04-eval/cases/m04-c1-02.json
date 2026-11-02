@@ -1,0 +1,62 @@
+{
+  "caseId": "m04-c1-02",
+  "caseVersion": 1,
+  "category": "exact_read",
+  "prompt": "Read the workspace file release/version.txt. Report its value exactly as VERSION=2.4.1. Do not read any other file.",
+  "fixtureRef": "m04-c1-02",
+  "fixtureHash": "21f7600faa22b746f1449d33c45fe39621077b8d8e29967ba03219d2f0fc9998",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "exact_read",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "release/version.txt"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "5b5af3ebd13ff0b3c3abf46a25049e6bc9068964b8ae87fa295418cf68b3ba85"
+    }
+  ],
+  "tags": [
+    "exact_read"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "VERSION=2.4.1"
+  }
+}

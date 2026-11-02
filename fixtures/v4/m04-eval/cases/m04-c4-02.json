@@ -1,0 +1,78 @@
+{
+  "caseId": "m04-c4-02",
+  "caseVersion": 1,
+  "category": "write_state",
+  "prompt": "Create or overwrite the workspace file state/counter.txt with exactly this content and no trailing newline: count=2 . Then answer exactly DONE.",
+  "fixtureRef": "m04-c4-02",
+  "fixtureHash": "6fe13cfc384e2d9f791ad3d2493421702c0b075060d6351386de08eb8746e0ab",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "write_state",
+        "steps": [
+          {
+            "tool": "write",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "write",
+      "path": "state/counter.txt",
+      "content": "count=2"
+    },
+    {
+      "tool": "read_file",
+      "path": "state/counter.txt",
+      "optional": true
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "write",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "allow_once",
+  "finalStateAssertions": [
+    {
+      "kind": "file_exact",
+      "path": "state/counter.txt",
+      "content": "count=2"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "4c75025812fba4f37d5de72913d42ff0f778824c82910740bdf8a207de6db4a4"
+    }
+  ],
+  "tags": [
+    "write_state"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "DONE"
+  }
+}

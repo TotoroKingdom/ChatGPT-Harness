@@ -1,0 +1,84 @@
+{
+  "caseId": "m04-c5-04",
+  "caseVersion": 1,
+  "category": "edit_state",
+  "prompt": "Edit the workspace file notes/todo.txt: replace the unique exact text task=open with task=done. Do not change anything else. Then answer exactly DONE.",
+  "fixtureRef": "m04-c5-04",
+  "fixtureHash": "0f9655aa93b8a6d23e315f30fc78649bd62b2867ecb11fc4eb8aab739ecb700d",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "edit_state",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          },
+          {
+            "tool": "edit",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "notes/todo.txt",
+      "optional": true
+    },
+    {
+      "tool": "edit",
+      "path": "notes/todo.txt",
+      "oldText": "task=open",
+      "newText": "task=done"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "edit",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "allow_once",
+  "finalStateAssertions": [
+    {
+      "kind": "file_exact",
+      "path": "notes/todo.txt",
+      "content": "task=done\nowner=kim\n"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "f69a4bddf9249ad057207037f6b2ef2decd5bb0df39339fadf13ddca778bc593"
+    }
+  ],
+  "tags": [
+    "edit_state"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "DONE"
+  }
+}

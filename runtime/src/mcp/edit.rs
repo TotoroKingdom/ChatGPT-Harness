@@ -32,6 +32,7 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
             new_text: arguments.new_text,
         })
     });
+    let request_id = report.context.request_id;
     match report.result {
         Ok(output) => {
             let mut result = CallToolResult::structured(json!({
@@ -42,9 +43,14 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
             result
                 .content
                 .push(ContentBlock::text("Edited workspace file."));
+            context.attach_correlation(&mut result, request_id);
             result
         }
-        Err(error) => execution_error(&error),
+        Err(error) => {
+            let mut result = execution_error(&error);
+            context.attach_correlation(&mut result, request_id);
+            result
+        }
     }
 }
 
@@ -63,6 +69,7 @@ pub(crate) async fn execute_async(
             })
         })
         .await;
+    let request_id = report.context.request_id;
     match report.result {
         Ok(output) => {
             let mut result = CallToolResult::structured(json!({
@@ -73,8 +80,13 @@ pub(crate) async fn execute_async(
             result
                 .content
                 .push(ContentBlock::text("Edited workspace file."));
+            context.attach_correlation(&mut result, request_id);
             result
         }
-        Err(error) => execution_error(&error),
+        Err(error) => {
+            let mut result = execution_error(&error);
+            context.attach_correlation(&mut result, request_id);
+            result
+        }
     }
 }

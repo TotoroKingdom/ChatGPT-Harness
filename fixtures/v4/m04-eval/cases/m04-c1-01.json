@@ -1,0 +1,62 @@
+{
+  "caseId": "m04-c1-01",
+  "caseVersion": 1,
+  "category": "exact_read",
+  "prompt": "Read the workspace file config/service.txt. Report its value exactly as PORT=4317. Do not read any other file.",
+  "fixtureRef": "m04-c1-01",
+  "fixtureHash": "ffe093c2a30b8e0842a846c9f86eaec993ef7b231120675ba1975f3c21fa2182",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "exact_read",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "config/service.txt"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "1f4d0ff58cf5bd2c5f45f519b02ab9a8a7fcc960d109deebcf41d142ba090d5b"
+    }
+  ],
+  "tags": [
+    "exact_read"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "PORT=4317"
+  }
+}

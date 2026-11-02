@@ -424,7 +424,7 @@ impl RuntimeCore {
         self.execution_pipeline
             .as_ref()
             .cloned()
-            .map(McpExecutionContext::new)
+            .map(|pipeline| McpExecutionContext::with_runtime_id(self.runtime_id.clone(), pipeline))
             .ok_or(McpContextError::RuntimeNotInitialized)
     }
     #[allow(dead_code)]
