@@ -1,10 +1,20 @@
 #![allow(dead_code)]
 
+use super::adapter::{scripted_call, ModelAdapter, ScriptedAdapter, ScriptedTurn};
+use super::agent_loop::{execute_case, CaseExecution};
 use super::aggregate::{
     compare_m05, compare_provider_drift, AggregateMetrics, BaselineVerdict, RegressionComparison,
 };
+use super::case::{
+    ApprovalPlan, ArgumentConstraint, EvalCaseV1, EvalCategory, FinalResponseAssertion,
+    PolicyDefaults, PolicyExpectation, PolicyExpectationValue, ResponseMatchKind, SelectionOracle,
+    SelectionStep, SelectionStrategy, StepRepeat,
+};
+use super::dataset::{DatasetFileV1, EvalDataset};
 use super::fixture::{fixture_tree_hash, safe_relative};
-use super::manifest::canonical_hash;
+use super::manifest::{canonical_hash, sha256_text, SCORER_VERSION};
+use super::mcp_client::{tool_catalog_hash, tool_schema_map, EvalRuntimeHarness, McpClient};
+use super::profile::EvalProfile;
 use super::{EvalError, EvalResult};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -18,6 +28,69 @@ pub(crate) const ADMISSION_CASE_COUNT: usize = 4;
 pub(crate) const ADMISSION_REPETITIONS: u32 = 3;
 pub(crate) const ADMISSION_LOGICAL_RUNS: usize = 12;
 pub(crate) const ACCEPTED_BASELINE_SOURCE: &str = "accepted-m04-formal-run";
+
+#[derive(Clone, Debug)]
+pub(crate) struct AdmissionIdentity {
+    pub(crate) tool_schema_hash: String,
+    pub(crate) tool_schemas: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+pub(crate) async fn admission_identity(
+    dataset: &AdmissionDataset,
+    binary: &Path,
+) -> EvalResult<AdmissionIdentity> {
+    let case = dataset
+        .cases
+        .first()
+        .ok_or_else(|| EvalError::new("HARNESS_CONTRACT_ERROR", "admission set is empty"))?;
+    let (eval_case, synthetic) = synthetic_case_dataset(dataset, case)?;
+    let harness = EvalRuntimeHarness::start_with_profile(
+        binary,
+        &eval_case,
+        &synthetic.fixture_path(&eval_case)?,
+        EvalProfile::M05GrepCandidate,
+    )
+    .await?;
+    let mut mcp = McpClient::connect(&harness.endpoint_url).await?;
+    let tools = mcp.list_tools().await?;
+    EvalProfile::M05GrepCandidate.validate_catalog(&tools)?;
+    let tool_schema_hash = tool_catalog_hash(&tools)?;
+    let tool_schemas = tool_schema_map(&tools)?;
+    harness.shutdown().await?;
+    Ok(AdmissionIdentity {
+        tool_schema_hash,
+        tool_schemas,
+    })
+}
+
+pub(crate) async fn execute_admission_case(
+    dataset: &AdmissionDataset,
+    identity: &AdmissionIdentity,
+    binary: &Path,
+    case: &AdmissionCaseV1,
+    repetition: u32,
+    logical_run_index: usize,
+    adapter: Box<dyn ModelAdapter>,
+) -> EvalResult<super::aggregate::EvalRunResult> {
+    let (eval_case, synthetic) = synthetic_case_dataset(dataset, case)?;
+    Ok(execute_case(
+        CaseExecution {
+            dataset: &synthetic,
+            case: &eval_case,
+            runtime_binary: binary,
+            base_tool_schema_hash: identity.tool_schema_hash.clone(),
+            base_tool_schemas: identity.tool_schemas.clone(),
+            runner_commit: super::manifest::env_commit("M05_EVAL_RUNNER_COMMIT"),
+            runtime_commit: super::manifest::env_commit("M05_EVAL_RUNTIME_COMMIT"),
+            logical_run_index,
+            repetition,
+            cleanup_failure_injection: false,
+            profile: EvalProfile::M05GrepCandidate,
+        },
+        adapter,
+    )
+    .await)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -189,6 +262,68 @@ impl AdmissionDataset {
     }
 }
 
+fn synthetic_case_dataset(
+    dataset: &AdmissionDataset,
+    case: &AdmissionCaseV1,
+) -> EvalResult<(EvalCaseV1, EvalDataset)> {
+    let eval_case = EvalCaseV1 {
+        case_id: case.case_id.clone(),
+        case_version: 1,
+        category: EvalCategory::ContentSearch,
+        prompt: case.prompt.clone(),
+        fixture_ref: case.fixture_ref.clone(),
+        fixture_hash: case.fixture_hash.clone(),
+        preconditions: Vec::new(),
+        selection_oracle: SelectionOracle {
+            strategies: vec![SelectionStrategy {
+                id: "admission-observe".into(),
+                steps: vec![SelectionStep {
+                    tool: "read_file".into(),
+                    optional: true,
+                    repeat: StepRepeat::One,
+                }],
+            }],
+        },
+        argument_constraints: Vec::<ArgumentConstraint>::new(),
+        expected_runtime_outcomes: Vec::new(),
+        policy_expectation: PolicyExpectation {
+            defaults: PolicyDefaults {
+                read_file: PolicyExpectationValue::Allow,
+                glob: PolicyExpectationValue::Allow,
+                write: PolicyExpectationValue::Allow,
+                edit: PolicyExpectationValue::Allow,
+                bash: PolicyExpectationValue::Allow,
+            },
+            deny_tools: Vec::new(),
+        },
+        approval_plan: ApprovalPlan::None,
+        final_state_assertions: Vec::new(),
+        final_response_assertion: Some(FinalResponseAssertion {
+            kind: ResponseMatchKind::Contains,
+            text: case.expected_final_response_contains.clone(),
+        }),
+        max_turns: case.max_turns,
+        max_tool_calls: case.max_tool_calls,
+        tags: vec!["m05-grep-admission".into()],
+    };
+    let synthetic = EvalDataset {
+        root: dataset.root.clone(),
+        dataset_file: DatasetFileV1 {
+            dataset_id: ADMISSION_SET_ID.into(),
+            dataset_version: 1,
+            repetitions: ADMISSION_REPETITIONS,
+            system_prompt_ref: "system_prompt.txt".into(),
+            case_files: vec![format!("cases/{}.json", case.case_id)],
+        },
+        cases: vec![eval_case.clone()],
+        dataset_hash: dataset.dataset_hash.clone(),
+        system_prompt: dataset.system_prompt.clone(),
+        system_prompt_hash: sha256_text(&dataset.system_prompt),
+        scorer_hash: sha256_text(SCORER_VERSION),
+    };
+    Ok((eval_case, synthetic))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AdmissionRunRecord {
@@ -255,6 +390,45 @@ pub(crate) fn validate_admission_runs(
         BaselineVerdict::Inconclusive
     });
     validity
+}
+
+pub(crate) fn scripted_admission_adapter(case: &AdmissionCaseV1) -> ScriptedAdapter {
+    let arguments = match case.category {
+        AdmissionCategory::Literal => {
+            json!({"query": "TEST_ORCHID_71"})
+        }
+        AdmissionCategory::Regex => {
+            json!({"query": "req=(4|5)\\d\\d", "mode": "regex"})
+        }
+        AdmissionCategory::ScopeFilter => {
+            json!({
+                "query": "NEEDLE=scope",
+                "scope": "src",
+                "include": ["src/**/*.rs"],
+                "exclude": ["src/**/*.tmp"]
+            })
+        }
+        AdmissionCategory::TruncationFollowUp => {
+            json!({"query": "ROW_", "maxResults": 5})
+        }
+    };
+    ScriptedAdapter::new(vec![
+        ScriptedTurn {
+            tool_calls: vec![scripted_call(
+                format!("admission-{}", case.case_id),
+                "grep",
+                arguments,
+            )],
+            final_text: None,
+        },
+        ScriptedTurn {
+            tool_calls: Vec::new(),
+            final_text: Some(format!(
+                "{} {}",
+                case.expected_final_response_contains, "completed"
+            )),
+        },
+    ])
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

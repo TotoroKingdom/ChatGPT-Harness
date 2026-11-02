@@ -45,6 +45,7 @@ async fn run() -> EvalResult<()> {
         "validate" => validate(&options),
         "preflight" => preflight(&options).await,
         "run" => run_suite(&options).await,
+        "m05-admission" => run_admission(&options).await,
         "compare" => compare_eval(&options),
         _ => {
             print_usage();
@@ -58,7 +59,7 @@ async fn run() -> EvalResult<()> {
 
 fn print_usage() {
     eprintln!(
-        "usage:\n  m04_eval validate [--dataset PATH]\n  m04_eval preflight [--dataset PATH] [--runtime-bin PATH] [--profile PROFILE] [--json]\n  m04_eval run --adapter scripted|openai [--dataset PATH] [--runtime-bin PATH] [--profile PROFILE] [--case ID] [--repetitions N] [--json]\n  m04_eval compare --baseline PATH --candidate PATH [--json]"
+        "usage:\n  m04_eval validate [--dataset PATH]\n  m04_eval preflight [--dataset PATH] [--runtime-bin PATH] [--profile PROFILE] [--json]\n  m04_eval run --adapter scripted|openai [--dataset PATH] [--runtime-bin PATH] [--profile PROFILE] [--case ID] [--repetitions N] [--json]\n  m04_eval m05-admission --adapter scripted|openai [--dataset PATH] [--runtime-bin PATH] [--json]\n  m04_eval compare --baseline PATH --candidate PATH [--json]"
     );
 }
 
@@ -203,6 +204,14 @@ fn default_dataset_path() -> PathBuf {
         .join("m04-eval")
 }
 
+fn default_admission_dataset_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("fixtures")
+        .join("v4")
+        .join("m05-eval")
+}
+
 fn validate(options: &Options) -> EvalResult<()> {
     let dataset = EvalDataset::load(&options.dataset_path())?;
     println!(
@@ -292,6 +301,128 @@ fn compare_eval(options: &Options) -> EvalResult<()> {
         Err(EvalError::new(
             "REGRESSION_FAIL",
             "candidate did not pass the frozen M04 compare_m05 gate",
+        ))
+    }
+}
+
+async fn run_admission(options: &Options) -> EvalResult<()> {
+    let adapter_name = options.adapter.as_deref().ok_or_else(|| {
+        EvalError::new(
+            "INVALID_ARGUMENT",
+            "m05-admission requires --adapter scripted|openai",
+        )
+    })?;
+    let formal = adapter_name == "openai";
+    if formal {
+        if std::env::var("M05_EVAL_ALLOW_NETWORK").ok().as_deref() != Some("1") {
+            return Err(EvalError::new(
+                "BLOCKED",
+                "real M05 supplemental execution requires explicit M05_EVAL_ALLOW_NETWORK=1 authorization",
+            ));
+        }
+        if options.case_id.is_some() || options.repetitions.is_some() {
+            return Err(EvalError::new(
+                "INVALID_ARGUMENT",
+                "supplemental admission set rejects case/repetition overrides",
+            ));
+        }
+    } else if adapter_name != "scripted" {
+        return Err(EvalError::new(
+            "INVALID_ARGUMENT",
+            format!("unknown adapter '{adapter_name}'"),
+        ));
+    }
+    let dataset_path = options
+        .dataset
+        .clone()
+        .unwrap_or_else(default_admission_dataset_path);
+    let dataset = evaluation::m05::AdmissionDataset::load(&dataset_path)?;
+    let binary = options.runtime_binary()?;
+    let identity = evaluation::m05::admission_identity(&dataset, &binary).await?;
+    let mut records = Vec::new();
+    let mut runs = Vec::new();
+    let mut logical_index = 0;
+    for repetition in 1..=evaluation::m05::ADMISSION_REPETITIONS {
+        for case in &dataset.cases {
+            logical_index += 1;
+            let adapter: Box<dyn ModelAdapter> = if formal {
+                Box::new(
+                    OpenAiResponsesAdapter::from_env()
+                        .map_err(|error| EvalError::new("BLOCKED", error.message))?,
+                )
+            } else {
+                Box::new(evaluation::m05::scripted_admission_adapter(case))
+            };
+            if formal {
+                ensure_formal_adapter(adapter.as_ref())?;
+            }
+            let run = evaluation::m05::execute_admission_case(
+                &dataset,
+                &identity,
+                &binary,
+                case,
+                repetition,
+                logical_index,
+                adapter,
+            )
+            .await?;
+            let record = evaluation::m05::AdmissionRunRecord {
+                case_id: case.case_id.clone(),
+                repetition,
+                scoreable: run.scoreable_status.is_scoreable(),
+                security_violation: run.scoreable_status
+                    == evaluation::aggregate::ScoreableStatus::SecurityViolation,
+            };
+            eprintln!(
+                "M05_ADMISSION_RUN case={} repetition={} status={:?} tools={:?}",
+                case.case_id,
+                repetition,
+                run.scoreable_status,
+                run.tool_calls
+                    .iter()
+                    .map(|call| call.tool_name.as_str())
+                    .collect::<Vec<_>>()
+            );
+            records.push(record);
+            runs.push(run);
+        }
+    }
+    let validity = evaluation::m05::validate_admission_runs(&dataset.cases, &records);
+    if options.json {
+        println!(
+            "{}",
+            json!({
+                "setId": evaluation::m05::ADMISSION_SET_ID,
+                "datasetHash": dataset.dataset_hash,
+                "adapterClass": if formal { "formal" } else { "NON_FORMAL" },
+                "formal": formal,
+                "validity": validity,
+                "runs": runs,
+            })
+        );
+    } else {
+        println!(
+            "M05_ADMISSION={} set={} runs={} scoreable={} security={}",
+            match validity.verdict {
+                Some(BaselineVerdict::Valid) => "VALID",
+                Some(BaselineVerdict::Fail) => "FAIL",
+                _ => "INCONCLUSIVE",
+            },
+            evaluation::m05::ADMISSION_SET_ID,
+            records.len(),
+            records.iter().filter(|run| run.scoreable).count(),
+            records.iter().filter(|run| run.security_violation).count()
+        );
+        for reason in &validity.reasons {
+            println!("M05_ADMISSION_REASON={reason}");
+        }
+    }
+    if validity.verdict == Some(BaselineVerdict::Valid) {
+        Ok(())
+    } else {
+        Err(EvalError::new(
+            "ADMISSION_INVALID",
+            "M05 supplemental set did not meet validity requirements",
         ))
     }
 }
