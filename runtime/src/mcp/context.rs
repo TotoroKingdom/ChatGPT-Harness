@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 pub struct McpExecutionContext {
     pipeline: Arc<ExecutionPipeline>,
     runtime_id: Option<String>,
+    expose_policy_denied_tools: bool,
 }
 
 impl McpExecutionContext {
@@ -17,14 +18,28 @@ impl McpExecutionContext {
         Self {
             pipeline,
             runtime_id: None,
+            expose_policy_denied_tools: false,
         }
     }
 
     pub(crate) fn with_runtime_id(runtime_id: String, pipeline: Arc<ExecutionPipeline>) -> Self {
+        Self::with_runtime_id_for_evaluation(runtime_id, pipeline, false)
+    }
+
+    pub(crate) fn with_runtime_id_for_evaluation(
+        runtime_id: String,
+        pipeline: Arc<ExecutionPipeline>,
+        expose_policy_denied_tools: bool,
+    ) -> Self {
         Self {
             pipeline,
             runtime_id: Some(runtime_id),
+            expose_policy_denied_tools,
         }
+    }
+
+    pub(crate) fn exposes_policy_denied_tools(&self) -> bool {
+        self.expose_policy_denied_tools
     }
 
     /// Additive, observational MCP result metadata. The business

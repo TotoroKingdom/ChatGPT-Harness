@@ -12,9 +12,10 @@ use super::mcp_client::{
     base_policy_config_hash, exposed_tool_names, runtime_binary_hash, tool_catalog_hash,
     tool_schema_map, EvalRuntimeHarness, McpClient,
 };
+use super::privacy::sanitize_bounded_text;
 use super::scoring::{
-    normalize_runtime_outcome, score_arguments, score_final_state, score_runtime_outcomes,
-    score_selection, validate_schema, ToolCallRecord,
+    bounded_argument_evidence, normalize_runtime_outcome, score_arguments, score_final_state,
+    score_runtime_outcomes, score_selection, validate_schema, ToolCallRecord,
 };
 use super::{EvalError, EvalResult};
 use serde_json::{json, Value};
@@ -32,6 +33,7 @@ pub(crate) struct CaseExecution<'a> {
     pub(crate) runtime_commit: String,
     pub(crate) logical_run_index: usize,
     pub(crate) repetition: u32,
+    pub(crate) cleanup_failure_injection: bool,
 }
 
 #[derive(Default)]
@@ -78,6 +80,10 @@ pub(crate) async fn execute_case(
     let workspace_root = harness.workspace_root.clone();
     let evidence_database = harness.evidence_database.clone();
     let runtime_id = harness.runtime_id.clone();
+    let policy_config_hash = harness.policy_config_hash.clone();
+    if execution.cleanup_failure_injection {
+        harness.inject_cleanup_failure();
+    }
     let mut mcp = match McpClient::connect(&harness.endpoint_url).await {
         Ok(value) => value,
         Err(error) => {
@@ -98,6 +104,20 @@ pub(crate) async fn execute_case(
     }
     let observed_catalog_hash =
         tool_catalog_hash(&tools_result).unwrap_or_else(|_| "unknown".into());
+    if observed_catalog_hash != execution.base_tool_schema_hash {
+        let _ = harness.shutdown().await;
+        return contract_result(
+            execution,
+            run_id,
+            started,
+            binary_hash,
+            runtime_id,
+            EvalError::new(
+                "HARNESS_CONTRACT_ERROR",
+                "MCP Tool catalog hash differs from the frozen formal profile",
+            ),
+        );
+    }
     let model_tools = match model_tools(&tools_result) {
         Ok(value) => value,
         Err(error) => {
@@ -153,12 +173,20 @@ pub(crate) async fn execute_case(
         }
     }
 
-    let mut final_state = score_final_state(
+    let mut final_state = match score_final_state(
         execution.case,
         &workspace_root,
         state.final_response.as_deref(),
-    )
-    .unwrap_or_else(|_| Default::default());
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            if state.status_override != Some(ScoreableStatus::SecurityViolation) {
+                state.diagnostic_code = Some(error.code.to_owned());
+                state.status_override = Some(ScoreableStatus::HarnessContractError);
+            }
+            Default::default()
+        }
+    };
     let shutdown = harness.shutdown().await;
     let cleanup_status = match shutdown {
         Ok(value) => value,
@@ -199,7 +227,7 @@ pub(crate) async fn execute_case(
         adapter.requested_model(),
     )
     .unwrap_or_else(|_| "unknown".into());
-    let policy_hash = base_policy_config_hash().unwrap_or_else(|_| "unknown".into());
+    let policy_hash = policy_config_hash;
     let resolved_model = if state.resolved_model.is_empty() {
         "unknown".to_owned()
     } else {
@@ -401,8 +429,8 @@ async fn forward_call(
         .get(&call.name)
         .is_some_and(|schema| validate_schema(schema, parsed.parsed.as_ref()));
     let mut record = ToolCallRecord {
-        model_tool_call_id: call.id.clone(),
-        tool_name: call.name.clone(),
+        model_tool_call_id: sanitize_bounded_text(&call.id, None, 128),
+        tool_name: sanitize_bounded_text(&call.name, None, 64),
         schema_valid,
         semantic_valid: false,
         forwarded: false,
@@ -411,6 +439,8 @@ async fn forward_call(
         runtime_outcome: None,
         safe_error_code: None,
         approval_decision: None,
+        approval_request_id: None,
+        argument_evidence: bounded_argument_evidence(&call.arguments),
         evidence_verified: false,
         unnecessary: false,
     };
@@ -472,18 +502,15 @@ async fn forward_call(
                     approvals::resolve(harness, &approval.request_id, decision).await?;
                     observed_approval = true;
                     record.approval_decision = Some(decision.into());
+                    record.approval_request_id = Some(approval.request_id);
                 }
             }
         }
     };
-    let call_failed = result
-        .get("isError")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if expects_approval && !observed_approval && !call_failed {
+    if expects_approval && !observed_approval {
         return Err(EvalError::new(
             "SECURITY_VIOLATION",
-            "expected ASK invocation completed without the real approval path",
+            "expected ASK invocation did not use the real approval path",
         ));
     }
     let key: CorrelationKey = correlation::extract(&result).ok_or_else(|| {
@@ -498,6 +525,15 @@ async fn forward_call(
             "MCP Tool result runtime_id does not match the isolated Runtime",
         ));
     }
+    if let Some(approval_request_id) = &record.approval_request_id {
+        if approval_request_id != &key.request_id {
+            return Err(EvalError::new(
+                "HARNESS_CONTRACT_ERROR",
+                "ASK approval request_id does not match the forwarded invocation identity",
+            ));
+        }
+    }
+    correlation::verify_live_activity(harness, &key).await?;
     let evidence =
         correlation::verify_evidence(evidence_database, &key, Duration::from_secs(5)).await?;
     record.evidence_verified = evidence.summary.request_id == key.request_id;
@@ -547,8 +583,8 @@ fn emitted_record(
         .get(&call.name)
         .is_some_and(|schema| validate_schema(schema, parsed.parsed.as_ref()));
     let mut record = ToolCallRecord {
-        model_tool_call_id: call.id.clone(),
-        tool_name: call.name.clone(),
+        model_tool_call_id: sanitize_bounded_text(&call.id, None, 128),
+        tool_name: sanitize_bounded_text(&call.name, None, 64),
         schema_valid,
         semantic_valid: false,
         forwarded: false,
@@ -557,6 +593,8 @@ fn emitted_record(
         runtime_outcome: None,
         safe_error_code: None,
         approval_decision: None,
+        approval_request_id: None,
+        argument_evidence: bounded_argument_evidence(&call.arguments),
         evidence_verified: false,
         unnecessary: false,
     };
@@ -591,9 +629,12 @@ fn model_tools(tools_result: &Value) -> EvalResult<Vec<ModelToolSpec>> {
         .collect()
 }
 
-fn validate_catalog(case: &EvalCaseV1, tools_result: &Value) -> EvalResult<()> {
+fn validate_catalog(_case: &EvalCaseV1, tools_result: &Value) -> EvalResult<()> {
     let names = exposed_tool_names(tools_result)?;
-    let expected = expected_catalog(case);
+    let expected = super::BASELINE_TOOLS
+        .iter()
+        .map(|tool| (*tool).to_owned())
+        .collect::<Vec<_>>();
     if names != expected {
         return Err(EvalError::new(
             "HARNESS_CONTRACT_ERROR",
@@ -607,27 +648,6 @@ fn validate_catalog(case: &EvalCaseV1, tools_result: &Value) -> EvalResult<()> {
         ));
     }
     Ok(())
-}
-
-fn expected_catalog(case: &EvalCaseV1) -> Vec<String> {
-    let mut tools = Vec::new();
-    for tool in super::BASELINE_TOOLS {
-        let value = case.policy_expectation_value(tool);
-        let denied = case
-            .policy_expectation
-            .deny_tools
-            .iter()
-            .any(|denied| denied == tool);
-        if !denied
-            && !matches!(
-                value,
-                Some(PolicyExpectationValue::Deny) | Some(PolicyExpectationValue::Disabled)
-            )
-        {
-            tools.push(tool.to_owned());
-        }
-    }
-    tools
 }
 
 fn merge_usage(total: &mut ProviderUsage, value: &ProviderUsage) {
@@ -847,4 +867,56 @@ pub(crate) fn prepare_tool_schemas_for_run(
     tools_result: &Value,
 ) -> EvalResult<BTreeMap<String, Value>> {
     tool_schema_map(tools_result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn case() -> EvalCaseV1 {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("fixtures")
+            .join("v4")
+            .join("m04-eval")
+            .join("cases")
+            .join("m04-c1-01.json");
+        serde_json::from_str(&std::fs::read_to_string(root).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn catalog_drift_is_rejected_instead_of_becoming_a_fuzzy_profile() {
+        let exact = json!({
+            "tools": [
+                {"name": "read_file"},
+                {"name": "glob"},
+                {"name": "write"},
+                {"name": "edit"}
+            ]
+        });
+        assert!(validate_catalog(&case(), &exact).is_ok());
+
+        let missing = json!({
+            "tools": [
+                {"name": "read_file"},
+                {"name": "glob"},
+                {"name": "write"}
+            ]
+        });
+        let error = validate_catalog(&case(), &missing).unwrap_err();
+        assert_eq!(error.code, "HARNESS_CONTRACT_ERROR");
+
+        let extra = json!({
+            "tools": [
+                {"name": "read_file"},
+                {"name": "glob"},
+                {"name": "write"},
+                {"name": "edit"},
+                {"name": "grep"}
+            ]
+        });
+        let error = validate_catalog(&case(), &extra).unwrap_err();
+        assert_eq!(error.code, "HARNESS_CONTRACT_ERROR");
+    }
 }

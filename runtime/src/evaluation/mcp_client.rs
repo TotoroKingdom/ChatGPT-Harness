@@ -31,7 +31,8 @@ pub(crate) struct EvalRuntimeHarness {
     pub(crate) policy_config_hash: String,
     pub(crate) config_hash: String,
     pub(crate) fixture_hash: String,
-    temp_root: tempfile::TempDir,
+    temp_root: Option<tempfile::TempDir>,
+    cleanup_failure_injection: bool,
 }
 
 impl EvalRuntimeHarness {
@@ -87,12 +88,7 @@ impl EvalRuntimeHarness {
         let config_value = serde_json::to_value(&config)
             .map_err(|error| EvalError::new("HARNESS_CONTRACT_ERROR", error.to_string()))?;
 
-        let mut command = Command::new(binary);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.as_std_mut().creation_flags(0x0800_0000);
-        }
+        let mut command = runtime_command(binary);
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -163,7 +159,8 @@ impl EvalRuntimeHarness {
             policy_config_hash,
             config_hash,
             fixture_hash: materialized_hash,
-            temp_root,
+            temp_root: Some(temp_root),
+            cleanup_failure_injection: false,
         };
         let initialize = harness
             .control_request(
@@ -175,7 +172,10 @@ impl EvalRuntimeHarness {
                         "version": super::manifest::RUNNER_VERSION
                     },
                     "protocolVersion": 1,
-                    "capabilities": { "activityReplay": true },
+                    "capabilities": {
+                        "activityReplay": true,
+                        "m04ExposePolicyDeniedTools": true
+                    },
                     "runtimeConfig": config_value,
                     "hostContext": {
                         "hostSessionId": format!("m04-{}", uuid::Uuid::new_v4()),
@@ -294,14 +294,15 @@ impl EvalRuntimeHarness {
     }
 
     pub(crate) async fn shutdown(mut self) -> EvalResult<String> {
-        let result = self.control_request("runtime.stop", json!({})).await;
+        let stop = self.control_request("runtime.stop", json!({})).await;
         let _ = self.child.start_kill();
         let wait = tokio::time::timeout(Duration::from_secs(5), self.child.wait()).await;
         let mut stderr = String::new();
         if let Some(task) = self.stderr_task.take() {
             stderr = task.await.unwrap_or_default();
         }
-        match result {
+        let cleanup_status = self.cleanup_temp_root();
+        match stop {
             Ok(value) if value.get("accepted") == Some(&Value::Bool(true)) => {}
             Ok(_) => {
                 return Err(EvalError::new(
@@ -318,10 +319,38 @@ impl EvalRuntimeHarness {
             ));
         }
         if !stderr.trim().is_empty() {
-            return Ok("stopped".into());
+            return Ok(cleanup_status);
         }
-        Ok("stopped".into())
+        Ok(cleanup_status)
     }
+
+    pub(crate) fn inject_cleanup_failure(&mut self) {
+        self.cleanup_failure_injection = true;
+    }
+
+    fn cleanup_temp_root(&mut self) -> String {
+        let Some(temp_root) = self.temp_root.take() else {
+            return "already_cleaned".into();
+        };
+        let injected = self.cleanup_failure_injection;
+        match temp_root.close() {
+            Ok(()) if injected => "cleanup_failed: injected_failure".into(),
+            Ok(()) => "stopped_cleaned".into(),
+            Err(error) => format!("cleanup_failed: {:?}", error.kind()),
+        }
+    }
+}
+
+fn runtime_command(binary: &Path) -> Command {
+    let mut command = Command::new(binary);
+    command.env_remove(super::openai_responses::API_KEY_ENV);
+    command.env_remove("OPENAI_API_KEY");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.as_std_mut().creation_flags(0x0800_0000);
+    }
+    command
 }
 
 impl Drop for EvalRuntimeHarness {
@@ -672,5 +701,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(value["id"], 1);
+    }
+
+    #[test]
+    fn runtime_command_removes_provider_credentials_from_child_environment() {
+        std::env::set_var("M04_EVAL_OPENAI_API_KEY", "sk-integration-sentinel");
+        let command = runtime_command(Path::new("runtime.exe"));
+        let removed = command
+            .as_std()
+            .get_envs()
+            .any(|(key, value)| key == "M04_EVAL_OPENAI_API_KEY" && value.is_none());
+        std::env::remove_var("M04_EVAL_OPENAI_API_KEY");
+        assert!(removed);
     }
 }

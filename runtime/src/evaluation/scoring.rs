@@ -4,6 +4,7 @@ use super::case::{
 };
 use super::fixture::{safe_relative, workspace_file_exists, workspace_file_sha256};
 use super::manifest::{normalize_lf, sha256_hex};
+use super::privacy::sanitize_bounded_text;
 use super::{EvalError, EvalResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -54,10 +55,63 @@ pub(crate) struct ToolCallRecord {
     pub(crate) safe_error_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) approval_decision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) approval_request_id: Option<String>,
+    pub(crate) argument_evidence: ArgumentEvidence,
     #[serde(default)]
     pub(crate) evidence_verified: bool,
     #[serde(default)]
     pub(crate) unnecessary: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArgumentEvidence {
+    pub(crate) sha256: String,
+    pub(crate) parseable: bool,
+    pub(crate) keys: Vec<String>,
+    pub(crate) bounded_preview: String,
+}
+
+pub(crate) fn bounded_argument_evidence(raw: &str) -> ArgumentEvidence {
+    let parsed = serde_json::from_str::<Value>(raw).ok();
+    let keys = parsed
+        .as_ref()
+        .and_then(Value::as_object)
+        .map(|object| {
+            object
+                .keys()
+                .take(16)
+                .map(|key| sanitize_bounded_text(key, None, 64))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let bounded_preview = match &parsed {
+        Some(Value::Object(object)) => {
+            let mut parts = Vec::new();
+            for (key, value) in object.iter().take(16) {
+                let kind = match value {
+                    Value::Array(_) => "<array>",
+                    Value::Object(_) => "<object>",
+                    Value::String(_) => "<string>",
+                    Value::Number(_) => "<number>",
+                    Value::Bool(_) => "<boolean>",
+                    Value::Null => "<null>",
+                };
+                let key = sanitize_bounded_text(key, None, 64);
+                parts.push(format!("\"{key}\":\"{kind}\""));
+            }
+            format!("{{{}}}", parts.join(","))
+        }
+        Some(_) => "<non-object-json>".into(),
+        None => "<invalid-json>".into(),
+    };
+    ArgumentEvidence {
+        sha256: sha256_hex(raw.as_bytes()),
+        parseable: parsed.is_some(),
+        keys,
+        bounded_preview: bounded_preview.chars().take(512).collect(),
+    }
 }
 
 pub(crate) fn validate_schema(schema: &Value, arguments: Option<&Value>) -> bool {
@@ -367,11 +421,8 @@ pub(crate) fn score_final_state(
         .as_ref()
         .map(|assertion| score_response(assertion, final_response));
     evidence.response_pass = response_pass;
-    evidence.final_response = final_response.map(|value| {
-        let mut text = value.trim().to_owned();
-        text.truncate(256);
-        text
-    });
+    evidence.final_response =
+        final_response.map(|value| sanitize_bounded_text(value.trim(), Some(workspace_root), 256));
     evidence.task_completion_pass =
         evidence.assertions.iter().all(|item| item.pass) && response_pass.unwrap_or(true);
     Ok(evidence)
@@ -479,6 +530,8 @@ mod tests {
             runtime_outcome: Some(RuntimeOutcome::Success),
             safe_error_code: None,
             approval_decision: None,
+            approval_request_id: None,
+            argument_evidence: bounded_argument_evidence("{\"path\":\"config/service.txt\"}"),
             evidence_verified: false,
             unnecessary: false,
         }
@@ -509,6 +562,41 @@ mod tests {
     }
 
     #[test]
+    fn selection_matrix_covers_every_frozen_strategy() {
+        let cases = [
+            ("m04-c1-01", vec!["read_file"]),
+            ("m04-c2-01", vec!["glob", "read_file"]),
+            ("m04-c3-01", vec!["glob", "read_file", "read_file"]),
+            ("m04-c4-01", vec!["write", "read_file"]),
+            ("m04-c5-01", vec!["read_file", "edit", "read_file"]),
+            ("m04-c6-01", vec!["write"]),
+            ("m04-c6-02", vec!["edit"]),
+            ("m04-c6-03", vec!["read_file"]),
+            ("m04-c6-04", vec!["read_file"]),
+        ];
+        for (case_id, tools) in cases {
+            let case = load_case(case_id);
+            let mut calls = tools.into_iter().map(record).collect::<Vec<_>>();
+            assert!(score_selection(&case, &mut calls), "{case_id}");
+            assert!(calls.iter().all(|call| !call.unnecessary), "{case_id}");
+        }
+    }
+
+    #[test]
+    fn selection_rejects_no_call_wrong_tool_and_disallowed_extra_tool() {
+        let case = load_case("m04-c1-01");
+        assert!(!score_selection(&case, &mut []));
+
+        let mut wrong = vec![record("glob")];
+        assert!(!score_selection(&case, &mut wrong));
+        assert!(wrong[0].unnecessary);
+
+        let mut extra = vec![record("read_file"), record("write")];
+        assert!(!score_selection(&case, &mut extra));
+        assert!(extra.iter().all(|call| call.unnecessary));
+    }
+
+    #[test]
     fn argument_validity_separates_schema_and_semantics() {
         let case = load_case("m04-c1-01");
         let mut call = record("read_file");
@@ -531,6 +619,21 @@ mod tests {
     }
 
     #[test]
+    fn argument_evidence_is_bounded_and_redacted() {
+        let evidence = bounded_argument_evidence(
+            r#"{"path":"C:\\private\\workspace","content":"sk-live-secret"}"#,
+        );
+        assert!(evidence.parseable);
+        assert_eq!(evidence.keys.len(), 2);
+        assert!(!evidence.bounded_preview.contains("private"));
+        assert!(!evidence.bounded_preview.contains("sk-live"));
+        assert!(evidence.bounded_preview.len() <= 512);
+        let invalid = bounded_argument_evidence("not-json");
+        assert!(!invalid.parseable);
+        assert_eq!(invalid.bounded_preview, "<invalid-json>");
+    }
+
+    #[test]
     fn runtime_outcome_normalization_handles_denial_and_unknown() {
         assert_eq!(
             normalize_runtime_outcome(Some(&json!({
@@ -545,6 +648,20 @@ mod tests {
                 "structuredContent": {"code": "SOMETHING_NEW"}
             }))),
             RuntimeOutcome::Unknown
+        );
+        assert_eq!(
+            normalize_runtime_outcome(Some(&json!({
+                "isError": true,
+                "structuredContent": {"code": "CANCELLED"}
+            }))),
+            RuntimeOutcome::Cancelled
+        );
+        assert_eq!(
+            normalize_runtime_outcome(Some(&json!({
+                "isError": true,
+                "structuredContent": {"code": "TIMED_OUT"}
+            }))),
+            RuntimeOutcome::TimedOut
         );
         assert_eq!(
             normalize_runtime_outcome(Some(&json!({"isError": false}))),
@@ -586,6 +703,75 @@ mod tests {
         std::fs::write(workspace.path().join("blocked.txt"), "should-not-exist").unwrap();
         let evidence = score_final_state(&case, workspace.path(), Some("BLOCKED")).unwrap();
         assert!(!evidence.task_completion_pass);
+    }
+
+    #[test]
+    fn final_state_golden_matrix_is_independent_from_runtime_success() {
+        let c4 = load_case("m04-c4-01");
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(
+            workspace.path().join("sentinel.txt"),
+            "sentinel-m04-c4-01\n",
+        )
+        .unwrap();
+        std::fs::write(workspace.path().join("report_output.txt"), "report=ok").unwrap();
+        let good = score_final_state(&c4, workspace.path(), Some("DONE")).unwrap();
+        assert!(good.task_completion_pass);
+
+        let mut wrong_selection = vec![record("glob")];
+        assert!(!score_selection(&c4, &mut wrong_selection));
+        assert!(good.task_completion_pass);
+
+        std::fs::write(workspace.path().join("sentinel.txt"), "changed").unwrap();
+        let sentinel_changed = score_final_state(&c4, workspace.path(), Some("DONE")).unwrap();
+        assert!(!sentinel_changed.task_completion_pass);
+
+        let c5 = load_case("m04-c5-01");
+        let edit_workspace = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(edit_workspace.path().join("settings")).unwrap();
+        std::fs::write(
+            edit_workspace.path().join("settings/app.txt"),
+            "name=demo\nmode=new\nkeep=yes\n",
+        )
+        .unwrap();
+        std::fs::write(
+            edit_workspace.path().join("sentinel.txt"),
+            "sentinel-m04-c5-01\n",
+        )
+        .unwrap();
+        let edited = score_final_state(&c5, edit_workspace.path(), Some("DONE")).unwrap();
+        assert!(edited.task_completion_pass);
+
+        std::fs::write(
+            edit_workspace.path().join("settings/app.txt"),
+            "name=demo\nmode=new\nkeep=no\n",
+        )
+        .unwrap();
+        let wrong_edit = score_final_state(&c5, edit_workspace.path(), Some("DONE")).unwrap();
+        assert!(!wrong_edit.task_completion_pass);
+
+        let c6 = load_case("m04-c6-01");
+        let denied_workspace = tempfile::tempdir().unwrap();
+        std::fs::write(
+            denied_workspace.path().join("sentinel.txt"),
+            "sentinel-m04-c6-01\n",
+        )
+        .unwrap();
+        assert!(
+            score_final_state(&c6, denied_workspace.path(), Some("BLOCKED"))
+                .unwrap()
+                .task_completion_pass
+        );
+        std::fs::write(
+            denied_workspace.path().join("blocked.txt"),
+            "should-not-exist",
+        )
+        .unwrap();
+        assert!(
+            !score_final_state(&c6, denied_workspace.path(), Some("BLOCKED"))
+                .unwrap()
+                .task_completion_pass
+        );
     }
 
     #[test]

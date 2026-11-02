@@ -413,6 +413,7 @@ async fn run_suite(options: &Options) -> EvalResult<()> {
                     runtime_commit: runtime_commit.clone(),
                     logical_run_index: logical_index,
                     repetition,
+                    cleanup_failure_injection: false,
                 },
                 adapter,
             )

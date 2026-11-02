@@ -183,6 +183,8 @@ pub(crate) fn aggregate(
     let mut case_values = BTreeMap::<String, CaseMetrics>::new();
     let mut tool_call_counts = Vec::new();
     let mut usage = ProviderUsage::default();
+    let mut usage_seen = false;
+    let mut usage_complete = true;
 
     for run in runs {
         match run.scoreable_status {
@@ -211,10 +213,12 @@ pub(crate) fn aggregate(
         }
         if run.scoreable_status.is_scoreable() {
             tool_call_counts.push(run.tool_calls.len() as u64);
-        }
-        if let Some(run_usage) = &run.usage {
-            add_usage(&mut usage, run_usage);
-            metrics.usage = Some(usage.clone());
+            if let Some(run_usage) = &run.usage {
+                usage_seen = true;
+                add_usage(&mut usage, run_usage);
+            } else {
+                usage_complete = false;
+            }
         }
         let category = categories
             .get(&run.case_id)
@@ -286,9 +290,7 @@ pub(crate) fn aggregate(
             tool_call_counts[middle] as f64
         }
     };
-    if metrics.usage.is_none() {
-        metrics.usage = None;
-    }
+    metrics.usage = (usage_seen && usage_complete).then_some(usage);
     metrics
 }
 
@@ -335,7 +337,27 @@ pub(crate) fn validate_baseline(
     if metrics.scoreable_runs < 70 {
         validity.reasons.push("scoreable runs must be >= 70".into());
     }
+    if metrics.cases.len() != super::CASE_COUNT {
+        validity.reasons.push(format!(
+            "batch must cover exactly {} cases, observed {}",
+            super::CASE_COUNT,
+            metrics.cases.len()
+        ));
+    }
+    if metrics.categories.len() != super::CATEGORY_COUNT {
+        validity.reasons.push(format!(
+            "batch must cover exactly {} categories, observed {}",
+            super::CATEGORY_COUNT,
+            metrics.categories.len()
+        ));
+    }
     for case in &metrics.cases {
+        if case.total_runs != super::REPETITIONS as u64 {
+            validity.reasons.push(format!(
+                "case {} must have exactly 3 logical repetitions, observed {}",
+                case.case_id, case.total_runs
+            ));
+        }
         if case.scoreable_runs < 2 {
             validity.reasons.push(format!(
                 "case {} has fewer than 2/3 scoreable runs",
@@ -344,6 +366,12 @@ pub(crate) fn validate_baseline(
         }
     }
     for category in &metrics.categories {
+        if category.total_runs != (super::CASES_PER_CATEGORY * super::REPETITIONS as usize) as u64 {
+            validity.reasons.push(format!(
+                "category {} must have exactly 12 logical runs, observed {}",
+                category.category, category.total_runs
+            ));
+        }
         if category.scoreable_runs < 11 {
             validity.reasons.push(format!(
                 "category {} has fewer than 11/12 scoreable runs",
@@ -775,6 +803,168 @@ mod tests {
     }
 
     #[test]
+    fn baseline_gate_rejects_each_identity_field_drift() {
+        let runs = synthetic_runs();
+        let metrics = aggregate(&runs, &categories());
+        let base = identity("model-resolved");
+        let variants = [
+            RunIdentity {
+                dataset_hash: "other-dataset".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                scorer_hash: "other-scorer".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                tool_schema_hash: "other-tool".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                requested_model: "other-requested".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                resolved_model: "other-resolved".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                system_prompt_hash: "other-prompt".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                eval_profile_hash: "other-profile".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                adapter_id: "other-adapter".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                adapter_version: "2".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                runtime_binary_hash: "other-binary".into(),
+                ..base.clone()
+            },
+            RunIdentity {
+                runtime_commit: "other-commit".into(),
+                ..base.clone()
+            },
+        ];
+        for variant in variants {
+            let identities = BTreeSet::from([base.clone(), variant]);
+            let validity = validate_baseline(&runs, &metrics, &identities, true);
+            assert_eq!(validity.verdict, Some(BaselineVerdict::Inconclusive));
+        }
+    }
+
+    #[test]
+    fn baseline_gate_rejects_wrong_case_or_category_shape() {
+        let mut runs = synthetic_runs();
+        runs.retain(|run| run.case_id != "case-0");
+        let metrics = aggregate(&runs, &categories());
+        let identities = BTreeSet::from([identity("model-resolved")]);
+        let validity = validate_baseline(&runs, &metrics, &identities, true);
+        assert_eq!(validity.verdict, Some(BaselineVerdict::Inconclusive));
+        assert!(validity
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("exactly 24 cases")));
+    }
+
+    #[test]
+    fn baseline_gate_keeps_quality_failures_in_denominator() {
+        let mut runs = synthetic_runs();
+        runs[0].task_completion_pass = false;
+        runs[0].selection_pass = false;
+        let metrics = aggregate(&runs, &categories());
+        let identities = BTreeSet::from([identity("model-resolved")]);
+        assert_eq!(metrics.scoreable_runs, 72);
+        assert_eq!(metrics.task_completion.denominator, 72);
+        assert_eq!(metrics.task_completion.numerator, 71);
+        assert_eq!(
+            validate_baseline(&runs, &metrics, &identities, true).verdict,
+            Some(BaselineVerdict::Valid)
+        );
+    }
+
+    #[test]
+    fn aggregate_classifies_infra_limit_quality_and_security_independently() {
+        let mut runs = synthetic_runs();
+        runs[0].scoreable_status = ScoreableStatus::InfraError;
+        runs[0].termination_reason = "provider_error".into();
+        runs[1].scoreable_status = ScoreableStatus::LimitExceeded;
+        runs[1].termination_reason = "limit_exceeded".into();
+        runs[1].task_completion_pass = false;
+        runs[2].task_completion_pass = false;
+        runs[3].scoreable_status = ScoreableStatus::SecurityViolation;
+        let metrics = aggregate(&runs, &categories());
+        assert_eq!(metrics.total_runs, 72);
+        assert_eq!(metrics.scoreable_runs, 70);
+        assert_eq!(metrics.infra_error_runs, 1);
+        assert_eq!(metrics.limit_exceeded_runs, 1);
+        assert_eq!(metrics.security_violation_runs, 1);
+        assert_eq!(metrics.task_completion.denominator, 70);
+        assert_eq!(metrics.task_completion.numerator, 68);
+        assert_eq!(metrics.termination_reasons.get("provider_error"), Some(&1));
+        assert_eq!(metrics.termination_reasons.get("limit_exceeded"), Some(&1));
+        assert!(metrics.usage.is_none());
+    }
+
+    #[test]
+    fn aggregate_usage_is_unavailable_when_any_scoreable_run_lacks_it() {
+        let mut runs = synthetic_runs();
+        runs[0].usage = Some(ProviderUsage {
+            input_tokens: Some(10),
+            output_tokens: Some(2),
+            total_tokens: Some(12),
+            cost_usd: Some(0.01),
+        });
+        let metrics = aggregate(&runs, &categories());
+        assert!(metrics.usage.is_none());
+
+        for run in &mut runs {
+            run.usage = Some(ProviderUsage {
+                input_tokens: Some(1),
+                output_tokens: Some(1),
+                total_tokens: Some(2),
+                cost_usd: Some(0.001),
+            });
+        }
+        let metrics = aggregate(&runs, &categories());
+        assert_eq!(metrics.usage.as_ref().unwrap().total_tokens, Some(144));
+    }
+
+    #[test]
+    fn aggregate_reports_per_case_zero_through_three_pass_counts() {
+        let mut runs = synthetic_runs();
+        for run in &mut runs {
+            let index = run
+                .case_id
+                .strip_prefix("case-")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap();
+            if index < 4 {
+                run.selection_pass = run.repetition <= index as u32;
+                run.task_completion_pass = run.repetition <= index as u32;
+            }
+        }
+        let metrics = aggregate(&runs, &categories());
+        for index in 0..4 {
+            let entry = metrics
+                .cases
+                .iter()
+                .find(|case| case.case_id == format!("case-{index}"))
+                .unwrap();
+            assert_eq!(entry.total_runs, 3);
+            assert_eq!(entry.selection_passes, index as u64);
+            assert_eq!(entry.task_completion_passes, index as u64);
+        }
+    }
+
+    #[test]
     fn baseline_gate_security_violation_is_fail() {
         let mut runs = synthetic_runs();
         runs[0].scoreable_status = ScoreableStatus::SecurityViolation;
@@ -810,5 +1000,91 @@ mod tests {
             .failures
             .iter()
             .any(|failure| failure.contains("category") || failure.contains("stable")));
+    }
+
+    #[test]
+    fn comparator_category_guards_have_frozen_boundaries() {
+        let baseline = AggregateMetrics {
+            categories: vec![CategoryMetrics {
+                category: "exact_read".into(),
+                total_runs: 12,
+                scoreable_runs: 12,
+                selection: Metric {
+                    numerator: 12,
+                    denominator: 12,
+                },
+                task_completion: Metric {
+                    numerator: 12,
+                    denominator: 12,
+                },
+                ..CategoryMetrics::default()
+            }],
+            ..AggregateMetrics::default()
+        };
+        let mut exact = baseline.clone();
+        exact.categories[0].task_completion = Metric {
+            numerator: 92,
+            denominator: 100,
+        };
+        exact.categories[0].selection = Metric {
+            numerator: 90,
+            denominator: 100,
+        };
+        assert!(compare_m05(&baseline, &exact).pass);
+
+        let mut task_over = exact.clone();
+        task_over.categories[0].task_completion = Metric {
+            numerator: 91,
+            denominator: 100,
+        };
+        assert!(!compare_m05(&baseline, &task_over).pass);
+
+        let mut selection_over = exact.clone();
+        selection_over.categories[0].selection = Metric {
+            numerator: 89,
+            denominator: 100,
+        };
+        assert!(!compare_m05(&baseline, &selection_over).pass);
+    }
+
+    #[test]
+    fn comparator_each_metric_has_exact_boundary_and_over_boundary_control() {
+        let baseline = metrics(0.80, 0.80, 0.80, 0.80, 0.20);
+        let cases = [
+            metrics(0.78, 0.80, 0.80, 0.80, 0.20),
+            metrics(0.80, 0.77, 0.80, 0.80, 0.20),
+            metrics(0.80, 0.80, 0.79, 0.80, 0.20),
+            metrics(0.80, 0.80, 0.80, 0.79, 0.20),
+            metrics(0.80, 0.80, 0.80, 0.80, 0.25),
+        ];
+        for candidate in cases {
+            assert!(compare_m05(&baseline, &candidate).pass);
+        }
+        let over = [
+            metrics(0.77, 0.80, 0.80, 0.80, 0.20),
+            metrics(0.80, 0.76, 0.80, 0.80, 0.20),
+            metrics(0.80, 0.80, 0.78, 0.80, 0.20),
+            metrics(0.80, 0.80, 0.80, 0.78, 0.20),
+            metrics(0.80, 0.80, 0.80, 0.80, 0.26),
+        ];
+        for candidate in over {
+            assert!(!compare_m05(&baseline, &candidate).pass);
+        }
+    }
+
+    #[test]
+    fn provider_drift_each_metric_exact_boundary_and_exceed() {
+        let baseline = metrics(0.80, 0.80, 0.80, 0.80, 0.20);
+        let exact = metrics(0.85, 0.85, 0.82, 0.82, 0.25);
+        assert!(!compare_provider_drift(&baseline, &exact).inconclusive);
+        for candidate in [
+            metrics(0.86, 0.85, 0.82, 0.82, 0.25),
+            metrics(0.85, 0.86, 0.82, 0.82, 0.25),
+            metrics(0.85, 0.85, 0.83, 0.82, 0.25),
+            metrics(0.85, 0.85, 0.82, 0.83, 0.25),
+            metrics(0.85, 0.85, 0.82, 0.82, 0.26),
+        ] {
+            assert!(compare_provider_drift(&baseline, &candidate).inconclusive);
+        }
     }
 }

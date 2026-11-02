@@ -45,7 +45,8 @@ impl McpService {
                 matches!(
                     tool.availability,
                     ToolAvailability::Available | ToolAvailability::AvailableWithApproval
-                )
+                ) || (self.context.exposes_policy_denied_tools()
+                    && tool.availability == ToolAvailability::UnavailableByPolicy)
             })
             .filter_map(tool_from_effective)
             .collect()

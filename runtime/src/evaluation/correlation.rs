@@ -1,7 +1,7 @@
 use super::{EvalError, EvalResult};
 use chatgpt_harness_evidence_store::EvidenceReader;
 use harness_control_protocol::{HistoryGetResult, HistoryTerminalState};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 use std::time::Duration;
 
@@ -66,6 +66,28 @@ pub(crate) async fn verify_evidence(
                     "M03 evidence identity does not match the exact MCP correlation key",
                 ));
             }
+            if found.events.is_empty() {
+                return Err(EvalError::new(
+                    "HARNESS_CONTRACT_ERROR",
+                    "M03 evidence_events are missing for the exact request identity",
+                ));
+            }
+            if found.events.iter().any(|event| {
+                event.runtime_id != key.runtime_id || event.request_id != key.request_id
+            }) {
+                return Err(EvalError::new(
+                    "HARNESS_CONTRACT_ERROR",
+                    "M03 evidence_events do not share the exact request identity",
+                ));
+            }
+            if let Some(approval) = &found.terminal_approval {
+                if approval.runtime_id != key.runtime_id || approval.request_id != key.request_id {
+                    return Err(EvalError::new(
+                        "HARNESS_CONTRACT_ERROR",
+                        "M03 approval evidence does not share the exact request identity",
+                    ));
+                }
+            }
             if found.summary.terminal_state != HistoryTerminalState::Open {
                 return Ok(found);
             }
@@ -81,6 +103,31 @@ pub(crate) async fn verify_evidence(
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+pub(crate) async fn verify_live_activity(
+    harness: &mut super::mcp_client::EvalRuntimeHarness,
+    key: &CorrelationKey,
+) -> EvalResult<usize> {
+    let value = harness.control_request("activity.list", json!({})).await?;
+    let items = value
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or_else(|| EvalError::new("HARNESS_CONTRACT_ERROR", "activity.list omitted items"))?;
+    let matches = items
+        .iter()
+        .filter(|event| {
+            event.get("runtimeId").and_then(Value::as_str) == Some(key.runtime_id.as_str())
+                && event.get("requestId").and_then(Value::as_str) == Some(key.request_id.as_str())
+        })
+        .count();
+    if matches == 0 {
+        return Err(EvalError::new(
+            "HARNESS_CONTRACT_ERROR",
+            "live Activity has no event for the exact MCP request identity",
+        ));
+    }
+    Ok(matches)
 }
 
 #[cfg(test)]

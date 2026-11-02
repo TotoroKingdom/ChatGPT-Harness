@@ -15,10 +15,14 @@ pub(crate) mod manifest;
 pub(crate) mod mcp_client;
 pub(crate) mod openai_responses;
 pub(crate) mod output;
+pub(crate) mod privacy;
 pub(crate) mod scoring;
 
 #[cfg(test)]
 mod integration_tests;
+
+#[cfg(test)]
+mod formal_integration_tests;
 
 use std::fmt;
 

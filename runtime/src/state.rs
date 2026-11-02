@@ -149,6 +149,7 @@ pub struct RuntimeCore {
     activity: Arc<ActivityStore>,
     evidence: Arc<EvidenceService>,
     host_context: Option<RuntimeHostContext>,
+    expose_policy_denied_tools: bool,
     pub last_error: Option<RuntimeErrorSummary>,
 }
 
@@ -182,6 +183,7 @@ impl RuntimeCore {
             approval_manager: ApprovalManager::new(runtime_id.clone()),
             session_grants: Arc::new(SessionGrantStore::new(runtime_id)),
             host_context: None,
+            expose_policy_denied_tools: false,
             last_error: None,
         }
     }
@@ -194,6 +196,19 @@ impl RuntimeCore {
         &mut self,
         config: RuntimeConfigSnapshot,
         host_context: Option<RuntimeHostContext>,
+    ) -> Result<(), WorkspaceError> {
+        self.initialize_with_host_capabilities(
+            config,
+            host_context,
+            &std::collections::BTreeMap::new(),
+        )
+    }
+
+    pub(crate) fn initialize_with_host_capabilities(
+        &mut self,
+        config: RuntimeConfigSnapshot,
+        host_context: Option<RuntimeHostContext>,
+        capabilities: &std::collections::BTreeMap<String, bool>,
     ) -> Result<(), WorkspaceError> {
         let workspace = Workspace::new(&config.workspace.root_path)?;
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
@@ -289,6 +304,10 @@ impl RuntimeCore {
         self.activity = activity;
         self.evidence = evidence;
         self.host_context = host_context;
+        self.expose_policy_denied_tools = capabilities
+            .get("m04ExposePolicyDeniedTools")
+            .copied()
+            .unwrap_or(false);
         self.events = Some(events);
         self.activity_event_receiver = Some(activity_event_receiver);
         self.config = Some(config);
@@ -424,7 +443,13 @@ impl RuntimeCore {
         self.execution_pipeline
             .as_ref()
             .cloned()
-            .map(|pipeline| McpExecutionContext::with_runtime_id(self.runtime_id.clone(), pipeline))
+            .map(|pipeline| {
+                McpExecutionContext::with_runtime_id_for_evaluation(
+                    self.runtime_id.clone(),
+                    pipeline,
+                    self.expose_policy_denied_tools,
+                )
+            })
             .ok_or(McpContextError::RuntimeNotInitialized)
     }
     #[allow(dead_code)]

@@ -208,18 +208,29 @@ impl ModelAdapter for OpenAiResponsesAdapter {
                     if attempts == 1 && error.retryable_before_output {
                         continue;
                     }
-                    return Err(AdapterError::new(
+                    return Err(self.sanitize_error(AdapterError::new(
                         AdapterErrorKind::ProviderUnavailable,
                         error.message,
                         error.retryable_before_output,
-                    ));
+                    )));
                 }
             };
             if (response.status == 429 || (500..=599).contains(&response.status)) && attempts == 1 {
                 continue;
             }
-            return parse_response(response, &self.requested_model, attempts);
+            return parse_response(response, &self.requested_model, attempts)
+                .map_err(|error| self.sanitize_error(error));
         }
+    }
+}
+
+impl OpenAiResponsesAdapter {
+    fn sanitize_error(&self, mut error: AdapterError) -> AdapterError {
+        if !self.api_key.is_empty() {
+            error.message = error.message.replace(&self.api_key, "[REDACTED]");
+        }
+        error.message = super::privacy::sanitize_bounded_text(&error.message, None, 4096);
+        error
     }
 }
 
@@ -432,11 +443,15 @@ mod tests {
             requests: Mutex::new(Vec::new()),
         });
         let mut adapter = OpenAiResponsesAdapter::with_transport("test-key", transport.clone());
+        assert_eq!(adapter.requested_model(), "gpt-6.1-terra");
         let turn = adapter.respond(&request()).await.unwrap();
         assert_eq!(turn.resolved_model, "gpt-6.1-terra-2026-01-01");
+        assert_eq!(turn.tool_calls[0].id, "call-1");
+        assert_eq!(turn.tool_calls[0].name, "read_file");
         assert_eq!(turn.tool_calls[0].arguments, "{\"path\":\"a.txt\"}");
         assert_eq!(turn.final_text.as_deref(), Some("PORT=1"));
         assert_eq!(turn.usage.total_tokens, Some(14));
+        assert_eq!(turn.usage.cost_usd, None);
         assert_eq!(turn.stop_reason, "completed");
         let body = &transport.requests.lock().unwrap()[0];
         assert!(body.get("temperature").is_none());
@@ -482,6 +497,114 @@ mod tests {
         let mut adapter = OpenAiResponsesAdapter::with_transport("sk-secret", transport);
         let error = adapter.respond(&request()).await.unwrap_err();
         assert!(!error.message.contains("sk-secret"));
+    }
+
+    #[tokio::test]
+    async fn provider_error_body_credentials_are_redacted() {
+        let transport = Arc::new(FakeTransport {
+            responses: Mutex::new(vec![Ok(TransportResponse {
+                status: 401,
+                body: r#"{"error":{"message":"bad key sk-secret and https://user:pass@example.test"}}"#
+                    .into(),
+            })]),
+            requests: Mutex::new(Vec::new()),
+        });
+        let mut adapter = OpenAiResponsesAdapter::with_transport("sk-secret", transport);
+        let error = adapter.respond(&request()).await.unwrap_err();
+        assert!(!error.message.contains("sk-secret"));
+        assert!(!error.message.contains("user:pass"));
+    }
+
+    #[tokio::test]
+    async fn retries_once_for_5xx_and_transport_reset() {
+        let transport = Arc::new(FakeTransport {
+            responses: Mutex::new(vec![
+                Ok(TransportResponse {
+                    status: 503,
+                    body: "{}".into(),
+                }),
+                Ok(TransportResponse {
+                    status: 200,
+                    body: json!({
+                        "model": "gpt-6.1-terra",
+                        "status": "completed",
+                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "DONE"}]}]
+                    })
+                    .to_string(),
+                }),
+            ]),
+            requests: Mutex::new(Vec::new()),
+        });
+        let mut adapter = OpenAiResponsesAdapter::with_transport("key", transport);
+        let turn = adapter.respond(&request()).await.unwrap();
+        assert_eq!(turn.attempts, 2);
+
+        let transport = Arc::new(FakeTransport {
+            responses: Mutex::new(vec![
+                Err(TransportError::new("connection reset", true)),
+                Ok(TransportResponse {
+                    status: 200,
+                    body: json!({
+                        "model": "gpt-6.1-terra",
+                        "status": "completed",
+                        "output": [{"type": "message", "content": [{"type": "output_text", "text": "DONE"}]}]
+                    })
+                    .to_string(),
+                }),
+            ]),
+            requests: Mutex::new(Vec::new()),
+        });
+        let mut adapter = OpenAiResponsesAdapter::with_transport("key", transport);
+        assert_eq!(adapter.respond(&request()).await.unwrap().attempts, 2);
+    }
+
+    #[tokio::test]
+    async fn request_has_only_function_tools_and_no_builtin_provider_tools() {
+        let transport = Arc::new(FakeTransport {
+            responses: Mutex::new(vec![Ok(TransportResponse {
+                status: 200,
+                body: json!({
+                    "model": "gpt-6.1-terra",
+                    "status": "completed",
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": "DONE"}]}]
+                })
+                .to_string(),
+            })]),
+            requests: Mutex::new(Vec::new()),
+        });
+        let mut adapter = OpenAiResponsesAdapter::with_transport("key", transport.clone());
+        adapter.respond(&request()).await.unwrap();
+        let body = &transport.requests.lock().unwrap()[0];
+        let tools = body["tools"].as_array().unwrap();
+        assert!(tools.iter().all(|tool| tool["type"] == "function"));
+        assert!(body.get("builtin_tools").is_none());
+        assert!(body.get("web_search").is_none());
+        assert_eq!(body["max_output_tokens"], 2048);
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("seed").is_none());
+    }
+
+    #[tokio::test]
+    async fn hidden_reasoning_is_not_exposed_as_text_or_tool_calls() {
+        let transport = Arc::new(FakeTransport {
+            responses: Mutex::new(vec![Ok(TransportResponse {
+                status: 200,
+                body: json!({
+                    "model": "gpt-6.1-terra",
+                    "status": "completed",
+                    "output": [
+                        {"type": "reasoning", "summary": [{"type": "summary_text", "text": "hidden"}]},
+                        {"type": "message", "content": [{"type": "output_text", "text": "DONE"}]}
+                    ]
+                })
+                .to_string(),
+            })]),
+            requests: Mutex::new(Vec::new()),
+        });
+        let mut adapter = OpenAiResponsesAdapter::with_transport("key", transport);
+        let turn = adapter.respond(&request()).await.unwrap();
+        assert_eq!(turn.final_text.as_deref(), Some("DONE"));
+        assert!(turn.tool_calls.is_empty());
     }
 
     #[tokio::test]
