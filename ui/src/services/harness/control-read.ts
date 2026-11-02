@@ -153,7 +153,7 @@ const capabilities = ["workspace_read", "workspace_write", "developer_shell"] as
 const statusReasons = ["available", "approval_required", "tool_disabled", "developer_mode_required", "runtime_not_ready", "capability_unavailable", "bash_executable_unavailable", "policy_denied", "invalid_policy_snapshot", "invalid_policy_context", "unsupported_capability", "metadata_invalid"] as const;
 const availability = ["available", "available_with_approval", "unavailable_by_mode", "unavailable_by_policy", "unavailable_by_runtime", "disabled"] as const;
 const readiness = ["ready", "unavailable"] as const;
-const failureCategories = ["approval_denied", "approval_expired", "approval_cancelled", "tool_disabled", "target_changed", "atomic_failure", "io_failure", "workspace_violation", "invalid_arguments", "execution_failed", "bash_unavailable", "bash_invalid_command", "bash_command_too_long", "bash_timeout", "bash_output_limit", "bash_concurrency_limit", "bash_spawn_failed", "bash_cancelled", "bash_process_failed"] as const;
+const failureCategories = ["approval_denied", "approval_expired", "approval_cancelled", "tool_disabled", "target_changed", "atomic_failure", "io_failure", "workspace_violation", "invalid_arguments", "execution_failed", "bash_unavailable", "bash_invalid_command", "bash_command_too_long", "bash_timeout", "bash_output_limit", "bash_concurrency_limit", "bash_spawn_failed", "bash_cancelled", "bash_process_failed", "grep_timeout", "grep_cancelled"] as const;
 const activityCategories = ["request", "workspace", "policy", "execution", "approval"] as const;
 const activityEventTypes = ["request_received", "workspace_validated", "policy_evaluated", "execution_started", "execution_completed", "execution_failed", "request_denied", "approval_required", "approval_resolved", "approval_expired", "approval_cancelled", "session_grant_matched"] as const;
 const lifecycleStates = ["received", "validating", "workspace_validating", "policy_evaluating", "denied", "awaiting_approval", "executing", "completed", "failed"] as const;
@@ -249,8 +249,20 @@ export function parseTools(value: unknown): ToolDiagnostic[] {
 
 function parseArguments(value: unknown): SanitizedArgumentsEvidence {
   const args = record(value);
-  const tool = enumeration(args.tool, ["read_file", "glob", "write", "edit", "bash"] as const);
+  const tool = enumeration(args.tool, ["read_file", "glob", "grep", "write", "edit", "bash"] as const);
   if (tool === "glob") return { tool, pattern: boundedText(args.pattern, 1027) };
+  if (tool === "grep") {
+    return {
+      tool,
+      mode: enumeration(args.mode, ["literal", "regex"] as const),
+      logicalScope: boundedText(args.logicalScope),
+      queryBytes: count(args.queryBytes),
+      includeCount: count(args.includeCount),
+      excludeCount: count(args.excludeCount),
+      maxResults: count(args.maxResults),
+      maxOutputBytes: count(args.maxOutputBytes),
+    };
+  }
   if (tool === "bash") return { tool, commandPreview: boundedText(args.commandPreview, 1027) };
   const logicalPath = boundedText(args.logicalPath);
   if (!logicalPath || logicalPath.startsWith("/") || logicalPath.includes("\\") || logicalPath.includes(":") || logicalPath.split("/").includes("..")) return invalid();
@@ -258,10 +270,18 @@ function parseArguments(value: unknown): SanitizedArgumentsEvidence {
 }
 function parseResult(value: unknown): ExecutionResultEvidence {
   const result = record(value);
-  const tool = enumeration(result.tool, ["read_file", "glob", "write", "edit", "bash"] as const);
+  const tool = enumeration(result.tool, ["read_file", "glob", "grep", "write", "edit", "bash"] as const);
   switch (tool) {
     case "read_file": return { tool, bytesRead: count(result.bytesRead) };
     case "glob": return { tool, matchCount: count(result.matchCount) };
+    case "grep": return {
+      tool,
+      matchCount: count(result.matchCount),
+      scannedFiles: count(result.scannedFiles),
+      scannedBytes: count(result.scannedBytes),
+      skippedFiles: count(result.skippedFiles),
+      truncated: Boolean(result.truncated),
+    };
     case "write": return { tool, bytesWritten: count(result.bytesWritten), disposition: enumeration(result.disposition, ["created", "overwritten"] as const) };
     case "edit": return { tool, replacements: count(result.replacements), bytesWritten: count(result.bytesWritten) };
     case "bash": return { tool, exitCode: integer(result.exitCode) };

@@ -29,6 +29,7 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
         }
         Ok(request)
     });
+    let request_id = report.context.request_id;
     match report.result {
         Ok(output) => {
             let matches = output
@@ -64,9 +65,14 @@ pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallTo
             result
                 .content
                 .push(ContentBlock::text("Listed workspace paths."));
+            context.attach_correlation(&mut result, request_id);
             result
         }
-        Err(error) => execution_error(&error),
+        Err(error) => {
+            let mut result = execution_error(&error);
+            context.attach_correlation(&mut result, request_id);
+            result
+        }
     }
 }
 
@@ -85,6 +91,7 @@ pub(crate) async fn execute_async(
             Ok(request)
         })
         .await;
+    let request_id = report.context.request_id;
     match report.result {
         Ok(output) => {
             let matches = output
@@ -120,8 +127,13 @@ pub(crate) async fn execute_async(
             result
                 .content
                 .push(ContentBlock::text("Listed workspace paths."));
+            context.attach_correlation(&mut result, request_id);
             result
         }
-        Err(error) => execution_error(&error),
+        Err(error) => {
+            let mut result = execution_error(&error);
+            context.attach_correlation(&mut result, request_id);
+            result
+        }
     }
 }

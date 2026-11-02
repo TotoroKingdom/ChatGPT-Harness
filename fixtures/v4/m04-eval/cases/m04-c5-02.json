@@ -1,0 +1,84 @@
+{
+  "caseId": "m04-c5-02",
+  "caseVersion": 1,
+  "category": "edit_state",
+  "prompt": "Edit the workspace file docs/readme.txt: replace the unique exact text version=1 with version=2. Do not change anything else. Then answer exactly DONE.",
+  "fixtureRef": "m04-c5-02",
+  "fixtureHash": "206979a55b166ee6c9708190eef816130bb95c57abf880885949fc3e19bd0b30",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "edit_state",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          },
+          {
+            "tool": "edit",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "docs/readme.txt",
+      "optional": true
+    },
+    {
+      "tool": "edit",
+      "path": "docs/readme.txt",
+      "oldText": "version=1",
+      "newText": "version=2"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "edit",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "allow_once",
+  "finalStateAssertions": [
+    {
+      "kind": "file_exact",
+      "path": "docs/readme.txt",
+      "content": "version=2\nstatus=draft\n"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "86c5dda1b4829e4dbdacaac8119583bc64af756067df0f6474be70019ce3fbc4"
+    }
+  ],
+  "tags": [
+    "edit_state"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "DONE"
+  }
+}

@@ -18,9 +18,9 @@ function config(userRules: UserPolicyRuleConfig[] = []): AppConfig {
     tunnel: { tunnelId: "tunnel", autoDetect: true },
     security: { mode: "normal", developerTestMode: false },
     ui: {},
-    tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
+    tools: { readFile: { enabled: true }, glob: { enabled: true }, grep: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
     bash: { autoDetect: true },
-    policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules },
+    policies: { toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules },
     desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
     history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
   };
@@ -33,7 +33,7 @@ function effective(valid = true): PolicyEffectiveSnapshot {
     statusReason: valid ? undefined : "invalid_policy_snapshot",
     systemRules: [{ id: "system-read-workspace", name: "Allow workspace reads", decision: "allow", reason: "Workspace baseline", source: "system", editable: false, enabled: true }],
     userRules: [],
-    toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" },
+    toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" },
     perTool: [{ tool: "read_file", decision: valid ? "allow" : "deny", matchedRuleIds: valid ? [] : ["invalid-rule"], reason: valid ? "tool_default" : "invalid_policy_snapshot", availability: valid ? "available" : "unavailable_by_policy" }],
   };
 }

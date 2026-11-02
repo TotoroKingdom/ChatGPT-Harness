@@ -1,0 +1,2 @@
+topic=alpha
+note=ordinary

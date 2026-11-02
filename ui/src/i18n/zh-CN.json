@@ -196,6 +196,8 @@
       "bashSpawnFailed": "无法启动 Bash",
       "bashCancelled": "Bash 命令已取消",
       "bashProcessFailed": "Bash 进程失败",
+      "grepTimeout": "grep 搜索超时",
+      "grepCancelled": "grep 搜索已取消",
       "approvalDenied": "审批已拒绝",
       "approvalExpired": "审批已过期",
       "approvalCancelled": "审批已取消"
@@ -378,6 +380,7 @@
     "builtInDescriptions": {
       "readFile": "读取工作区文件。",
       "glob": "查找工作区路径。",
+      "grep": "在当前工作区内搜索文本内容。",
       "write": "写入工作区文件。",
       "edit": "编辑工作区文本文件。",
       "bash": "从当前工作区运行受控 Git Bash 命令。cwd 是初始工作目录，不是文件系统沙箱。"
@@ -730,6 +733,11 @@
       "bashSpawnFailed": "无法启动 Bash 进程。",
       "bashCancelled": "Bash 命令已取消。",
       "bashProcessFailed": "Bash 进程失败。",
+      "invalidRegex": "搜索正则表达式无效。",
+      "invalidFilterPattern": "搜索 include 或 exclude 模式无效。",
+      "invalidScope": "搜索范围无效。",
+      "searchTimeout": "搜索超过 Runtime 时间限制。",
+      "searchCancelled": "搜索已取消。",
       "evidenceBusy": "History 存储繁忙，请稍后重试。",
       "evidenceWriterOwnership": "无法取得 History 存储所有权。",
       "evidenceIo": "无法访问 History 存储。",

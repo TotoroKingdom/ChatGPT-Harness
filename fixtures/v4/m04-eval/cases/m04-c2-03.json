@@ -1,0 +1,77 @@
+{
+  "caseId": "m04-c2-03",
+  "caseVersion": 1,
+  "category": "path_discovery",
+  "prompt": "Locate the file named notes_alpha.md somewhere in the workspace, then read it and report its value exactly as CODE=ALPHA-9. Use a narrow glob rather than listing unrelated files.",
+  "fixtureRef": "m04-c2-03",
+  "fixtureHash": "cc67e3413af0c87db1d1254abd28cb341a9b0fffd758c87179091a443f5ac240",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "path_discovery_then_read",
+        "steps": [
+          {
+            "tool": "glob",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "glob",
+      "patternMustMatchAny": [
+        "teams/alpha/notes_alpha.md"
+      ]
+    },
+    {
+      "tool": "read_file",
+      "path": "teams/alpha/notes_alpha.md"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "occurrence": 1,
+      "outcome": "success"
+    },
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "9017a4c628468da78311f4922b408e8808c094e756396eb6435e8fcf2cdf7b60"
+    }
+  ],
+  "tags": [
+    "path_discovery"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "CODE=ALPHA-9"
+  }
+}

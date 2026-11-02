@@ -1,0 +1,82 @@
+{
+  "caseId": "m04-c3-02",
+  "caseVersion": 1,
+  "category": "content_search",
+  "prompt": "Search the small text files under notes/ for the line beginning 'marker ='. Exactly one file contains it. Report that marker value exactly as TOKEN=COBALT-3. Use a bounded glob first and then read candidate files.",
+  "fixtureRef": "m04-c3-02",
+  "fixtureHash": "cbc17deb55eda22ef34bf27918618502ca4ab053049ba5eb67dc974f118cd2f0",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "content_search",
+        "steps": [
+          {
+            "tool": "glob",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one_or_more"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "glob",
+      "patternMustMatchAny": [
+        "notes/alpha.txt",
+        "notes/beta.txt",
+        "notes/gamma.txt",
+        "notes/delta.txt",
+        "notes/epsilon.txt"
+      ]
+    },
+    {
+      "tool": "read_file",
+      "pathAny": [
+        "notes/alpha.txt",
+        "notes/beta.txt",
+        "notes/gamma.txt",
+        "notes/delta.txt",
+        "notes/epsilon.txt"
+      ]
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "1b90de02816a20b60cd2fbcb3f8aafcc64fc1e6e246049658e954565b3146344"
+    }
+  ],
+  "tags": [
+    "content_search"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "TOKEN=COBALT-3"
+  }
+}

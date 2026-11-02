@@ -1,4 +1,6 @@
-use harness_control_protocol::{AppConfig, BashConfig, RuntimeConfigSnapshot};
+use harness_control_protocol::{
+    AppConfig, BashConfig, PolicyDecision, RuntimeConfigSnapshot, ToolConfig, ToolPolicyDefaults,
+};
 use serde_json::{Value, json};
 
 fn legacy_fixture(name: &str) -> Value {
@@ -69,4 +71,52 @@ fn bash_config_defaults_partial_values_and_rejects_unknown_authority_fields() {
             "unexpected authority: {field}"
         );
     }
+}
+
+#[test]
+fn m05_grep_defaults_distinguish_new_install_from_legacy_missing_field() {
+    let defaults = ToolConfig::default();
+    assert!(defaults.grep.enabled);
+    assert_eq!(ToolPolicyDefaults::default().grep, PolicyDecision::Allow);
+
+    let legacy: ToolConfig = serde_json::from_value(json!({
+        "readFile": {"enabled": true},
+        "glob": {"enabled": true},
+        "write": {"enabled": true},
+        "edit": {"enabled": true},
+        "bash": {"enabled": false}
+    }))
+    .unwrap();
+    assert!(!legacy.grep.enabled);
+
+    let legacy_policy: ToolPolicyDefaults = serde_json::from_value(json!({
+        "readFile": "allow",
+        "glob": "allow",
+        "write": "allow",
+        "edit": "allow",
+        "bash": "ask"
+    }))
+    .unwrap();
+    assert_eq!(legacy_policy.grep, PolicyDecision::Allow);
+    assert_eq!(
+        legacy_policy.decision_for("grep"),
+        Some(PolicyDecision::Allow)
+    );
+}
+
+#[test]
+fn m05_grep_tool_config_is_closed_and_round_trips() {
+    let value = json!({
+        "readFile": {"enabled": true},
+        "glob": {"enabled": true},
+        "grep": {"enabled": true},
+        "write": {"enabled": true},
+        "edit": {"enabled": true},
+        "bash": {"enabled": false}
+    });
+    let config: ToolConfig = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(config).unwrap(), value);
+    let mut invalid = value;
+    invalid["grep"]["maximum"] = json!(1);
+    assert!(serde_json::from_value::<ToolConfig>(invalid).is_err());
 }

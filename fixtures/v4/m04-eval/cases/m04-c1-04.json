@@ -1,0 +1,62 @@
+{
+  "caseId": "m04-c1-04",
+  "caseVersion": 1,
+  "category": "exact_read",
+  "prompt": "Read the workspace file docs/checksum.txt. Report its value exactly as CHECK=7f3a9c. Do not read any other file.",
+  "fixtureRef": "m04-c1-04",
+  "fixtureHash": "9d9d2f252bac83279a68465f65db8a99d19c457f67c4b13647690fd64b684578",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "exact_read",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "docs/checksum.txt"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "0d13cffb250a344baab309e601840dc9c6b402c5f4abbcde6f54d20f64f95026"
+    }
+  ],
+  "tags": [
+    "exact_read"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "CHECK=7f3a9c"
+  }
+}

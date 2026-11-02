@@ -39,6 +39,7 @@ pub(crate) async fn execute(
             request_cancel,
         )
         .await;
+    let request_id = report.context.request_id;
     match report.result {
         Ok(output) => {
             let mut result = CallToolResult::structured(json!({
@@ -50,8 +51,13 @@ pub(crate) async fn execute(
             result
                 .content
                 .push(ContentBlock::text("Executed controlled Bash command."));
+            context.attach_correlation(&mut result, request_id);
             result
         }
-        Err(error) => execution_error(&error),
+        Err(error) => {
+            let mut result = execution_error(&error);
+            context.attach_correlation(&mut result, request_id);
+            result
+        }
     }
 }

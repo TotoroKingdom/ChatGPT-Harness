@@ -1,0 +1,78 @@
+{
+  "caseId": "m04-c4-04",
+  "caseVersion": 1,
+  "category": "write_state",
+  "prompt": "Create the workspace file generated.ini with exactly this content and no trailing newline: mode=eval . Then answer exactly DONE.",
+  "fixtureRef": "m04-c4-04",
+  "fixtureHash": "12f4611edd8bd3f5d4c57374ea2d31a1394be3f61ccb846ddebab3f8c05a36e7",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "write_state",
+        "steps": [
+          {
+            "tool": "write",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "write",
+      "path": "generated.ini",
+      "content": "mode=eval"
+    },
+    {
+      "tool": "read_file",
+      "path": "generated.ini",
+      "optional": true
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "write",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "allow_once",
+  "finalStateAssertions": [
+    {
+      "kind": "file_exact",
+      "path": "generated.ini",
+      "content": "mode=eval"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "fda1df6a7349bb373d0524cc2b06f31450589d8fae9e7d22ecf452e1e4310109"
+    }
+  ],
+  "tags": [
+    "write_state"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "DONE"
+  }
+}

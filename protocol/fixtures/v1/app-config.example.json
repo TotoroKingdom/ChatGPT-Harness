@@ -4,6 +4,14 @@
   "workspace": { "rootPath": "<workspace>" },
   "tunnel": { "tunnelId": "example-tunnel-id", "autoDetect": true, "apiKeyRef": { "provider": "os_secret_store", "key": "chatgpt-harness-api-key" } },
   "security": { "mode": "normal", "developerTestMode": false },
+  "tools": {
+    "readFile": { "enabled": true },
+    "glob": { "enabled": true },
+    "grep": { "enabled": true },
+    "write": { "enabled": true },
+    "edit": { "enabled": true },
+    "bash": { "enabled": false }
+  },
   "bash": { "autoDetect": true },
   "ui": { "theme": "system" },
   "desktop": {

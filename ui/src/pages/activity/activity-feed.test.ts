@@ -3,6 +3,7 @@ import type { ActivityEntry } from "@/services/harness/control-read";
 import {
   activityOutcomeKind,
   activityRows,
+  activityTarget,
   filterActivityRows,
   reconcileActivitySelection,
 } from "./activity-feed";
@@ -64,5 +65,21 @@ describe("M8 T7 activity presentation", () => {
     const duplicated = activityRows([entry({ eventId: "same" }), entry({ eventId: "same" })], 3);
     expect(duplicated.every((row) => row.snapshotLocal)).toBe(true);
     expect(duplicated[0].rowKey).not.toBe(duplicated[1].rowKey);
+  });
+
+  it("shows only the logical grep scope as the activity target", () => {
+    expect(activityTarget(entry({
+      toolName: "grep",
+      sanitizedArguments: {
+        tool: "grep",
+        mode: "literal",
+        logicalScope: "docs",
+        queryBytes: 20,
+        includeCount: 1,
+        excludeCount: 0,
+        maxResults: 100,
+        maxOutputBytes: 65536,
+      },
+    }))).toEqual({ kind: "target", value: "docs" });
   });
 });

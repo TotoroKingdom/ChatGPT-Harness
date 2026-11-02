@@ -1,0 +1,62 @@
+{
+  "caseId": "m04-c1-03",
+  "caseVersion": 1,
+  "category": "exact_read",
+  "prompt": "Read the workspace file meta/owner.txt. Report its value exactly as OWNER=orion. Do not read any other file.",
+  "fixtureRef": "m04-c1-03",
+  "fixtureHash": "8189bbb68c4024d8d711fd793dd00a207d5c9dc5e7aed8a7a683433d16374eab",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "exact_read",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "meta/owner.txt"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "245f0f9fb9308be9b954a2fe81cc7bb5106316dc8207bb006c8c9e92e3641222"
+    }
+  ],
+  "tags": [
+    "exact_read"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "OWNER=orion"
+  }
+}

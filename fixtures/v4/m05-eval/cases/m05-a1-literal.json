@@ -1,0 +1,9 @@
+{
+  "caseId": "m05-a1-literal",
+  "caseVersion": 1,
+  "category": "literal",
+  "prompt": "Search the Workspace text files for the exact marker TEST_ORCHID_71. Report each file and its 1-based line number, then answer with LITERAL_OK.",
+  "fixtureRef": "literal",
+  "fixtureHash": "27a26a71f7a13641495f81eeaa3d2f5d0be9a783fc198e08eb41aafb198cdf6a",
+  "expectedFinalResponseContains": "LITERAL_OK"
+}

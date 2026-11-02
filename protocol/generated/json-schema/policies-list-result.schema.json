@@ -272,6 +272,10 @@
         "glob": {
           "$ref": "#/$defs/PolicyDecision"
         },
+        "grep": {
+          "$ref": "#/$defs/PolicyDecision",
+          "default": "allow"
+        },
         "readFile": {
           "$ref": "#/$defs/PolicyDecision"
         },

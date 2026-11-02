@@ -9,8 +9,8 @@ use crate::events::{ActivityEventInput, ActivityEventSender};
 use crate::policy::PolicyEngine;
 use crate::session_grant::SessionGrantStore;
 use crate::tools::{
-    EditError, EffectiveTool, EffectiveToolCatalog, GlobError, ReadFileError, ToolRegistry,
-    WriteError,
+    EditError, EffectiveTool, EffectiveToolCatalog, GlobError, GrepError, ReadFileError,
+    ToolRegistry, WriteError,
 };
 use crate::workspace::WorkspaceGuard;
 use harness_control_protocol::PolicyDecision;
@@ -35,6 +35,7 @@ pub(crate) enum ExecutionError {
     InvalidTransition(TransitionError),
     ReadFile(ReadFileError),
     Glob(GlobError),
+    Grep(GrepError),
     Write(crate::tools::WriteError),
     Edit(crate::tools::EditError),
     BashWorkspace(crate::workspace::WorkspaceError),
@@ -928,6 +929,7 @@ impl ExecutionPipeline {
                 if matches!(
                     error,
                     ExecutionError::BashRuntime(BashRuntimeError::Cancelled)
+                        | ExecutionError::Grep(GrepError::Cancelled)
                 ) {
                     self.emit(context, PipelineEvent::ExecutionCancelled, audit_events);
                 } else {
@@ -1089,6 +1091,7 @@ fn audit_failure_category(error: &ExecutionError) -> AuditFailureCategory {
     match error {
         ExecutionError::ReadFile(ReadFileError::Workspace(_))
         | ExecutionError::Glob(GlobError::Workspace(_))
+        | ExecutionError::Grep(GrepError::Workspace(_))
         | ExecutionError::Write(WriteError::Workspace(_))
         | ExecutionError::Edit(EditError::Workspace(_)) => AuditFailureCategory::WorkspaceViolation,
         ExecutionError::Write(WriteError::TargetChanged { .. })
@@ -1101,6 +1104,7 @@ fn audit_failure_category(error: &ExecutionError) -> AuditFailureCategory {
         }
         ExecutionError::ReadFile(ReadFileError::IoFailure { .. })
         | ExecutionError::Glob(GlobError::IoFailure { .. })
+        | ExecutionError::Grep(GrepError::IoFailure { .. })
         | ExecutionError::Write(WriteError::IoFailure { .. })
         | ExecutionError::Edit(EditError::IoFailure { .. }) => AuditFailureCategory::IoFailure,
         ExecutionError::BashWorkspace(_) => AuditFailureCategory::WorkspaceViolation,
@@ -1115,9 +1119,12 @@ fn audit_failure_category(error: &ExecutionError) -> AuditFailureCategory {
             BashRuntimeError::Cancelled => AuditFailureCategory::BashCancelled,
             BashRuntimeError::ProcessFailed => AuditFailureCategory::BashProcessFailed,
         },
+        ExecutionError::Grep(GrepError::SearchTimeout) => AuditFailureCategory::GrepTimeout,
+        ExecutionError::Grep(GrepError::Cancelled) => AuditFailureCategory::GrepCancelled,
         ExecutionError::ToolDisabled => AuditFailureCategory::ToolDisabled,
         ExecutionError::InvalidArguments
         | ExecutionError::ReadFile(ReadFileError::InvalidArguments { .. })
+        | ExecutionError::Grep(GrepError::InvalidArguments { .. })
         | ExecutionError::Write(WriteError::InvalidArguments { .. })
         | ExecutionError::Edit(EditError::InvalidArguments { .. }) => {
             AuditFailureCategory::InvalidArguments

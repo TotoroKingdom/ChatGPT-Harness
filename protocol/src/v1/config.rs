@@ -132,9 +132,15 @@ impl Default for BashConfig {
 pub struct ToolPolicyDefaults {
     pub read_file: PolicyDecision,
     pub glob: PolicyDecision,
+    #[serde(default = "default_allow")]
+    pub grep: PolicyDecision,
     pub write: PolicyDecision,
     pub edit: PolicyDecision,
     pub bash: PolicyDecision,
+}
+
+fn default_allow() -> PolicyDecision {
+    PolicyDecision::Allow
 }
 
 impl Default for ToolPolicyDefaults {
@@ -142,6 +148,7 @@ impl Default for ToolPolicyDefaults {
         Self {
             read_file: PolicyDecision::Allow,
             glob: PolicyDecision::Allow,
+            grep: PolicyDecision::Allow,
             write: PolicyDecision::Allow,
             edit: PolicyDecision::Allow,
             bash: PolicyDecision::Ask,
@@ -154,6 +161,7 @@ impl ToolPolicyDefaults {
         match tool {
             "read_file" => Some(self.read_file.clone()),
             "glob" => Some(self.glob.clone()),
+            "grep" => Some(self.grep.clone()),
             "write" => Some(self.write.clone()),
             "edit" => Some(self.edit.clone()),
             "bash" => Some(self.bash.clone()),
@@ -209,7 +217,7 @@ impl PolicyConfig {
                 super::policies::PolicyMatcherConfig::Tool { tool }
                     if matches!(
                         tool.as_str(),
-                        "read_file" | "glob" | "write" | "edit" | "bash"
+                        "read_file" | "glob" | "grep" | "write" | "edit" | "bash"
                     ) => {}
                 super::policies::PolicyMatcherConfig::Tool { .. } => {
                     return Err(format!(
@@ -237,9 +245,15 @@ pub struct ToolEnabledConfig {
 pub struct ToolConfig {
     pub read_file: ToolEnabledConfig,
     pub glob: ToolEnabledConfig,
+    #[serde(default = "default_false")]
+    pub grep: ToolEnabledConfig,
     pub write: ToolEnabledConfig,
     pub edit: ToolEnabledConfig,
     pub bash: ToolEnabledConfig,
+}
+
+fn default_false() -> ToolEnabledConfig {
+    ToolEnabledConfig { enabled: false }
 }
 
 impl Default for ToolConfig {
@@ -247,6 +261,7 @@ impl Default for ToolConfig {
         Self {
             read_file: ToolEnabledConfig { enabled: true },
             glob: ToolEnabledConfig { enabled: true },
+            grep: ToolEnabledConfig { enabled: true },
             write: ToolEnabledConfig { enabled: true },
             edit: ToolEnabledConfig { enabled: true },
             bash: ToolEnabledConfig { enabled: false },

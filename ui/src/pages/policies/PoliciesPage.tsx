@@ -57,12 +57,13 @@ import {
 
 const decisions: PolicyDecision[] = ["allow", "ask", "deny"];
 const defaultPolicyConfig: PolicyConfig = {
-  toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" },
+  toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" },
   userRules: [],
 };
 const defaultToolRows: Array<{ name: string; key: keyof ToolPolicyDefaults }> = [
   { name: "read_file", key: "readFile" },
   { name: "glob", key: "glob" },
+  { name: "grep", key: "grep" },
   { name: "write", key: "write" },
   { name: "edit", key: "edit" },
   { name: "bash", key: "bash" },

@@ -1,5 +1,5 @@
 use crate::mcp::context::McpExecutionContext;
-use crate::mcp::{bash, edit, glob, read_file, write};
+use crate::mcp::{bash, edit, glob, grep, read_file, write};
 use crate::tools::{EffectiveTool, ToolAvailability};
 use rmcp::handler::server::common::schema_for_input;
 use rmcp::handler::server::ServerHandler;
@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 const READ_FILE: &str = "read_file";
 const GLOB: &str = "glob";
+const GREP: &str = "grep";
 const WRITE: &str = "write";
 const EDIT: &str = "edit";
 const BASH: &str = "bash";
@@ -45,7 +46,8 @@ impl McpService {
                 matches!(
                     tool.availability,
                     ToolAvailability::Available | ToolAvailability::AvailableWithApproval
-                )
+                ) || (self.context.exposes_policy_denied_tools()
+                    && tool.availability == ToolAvailability::UnavailableByPolicy)
             })
             .filter_map(tool_from_effective)
             .collect()
@@ -60,6 +62,7 @@ impl McpService {
         match name {
             READ_FILE => Ok(read_file::execute(&self.context, arguments)),
             GLOB => Ok(glob::execute(&self.context, arguments)),
+            GREP => Ok(grep::execute(&self.context, arguments)),
             WRITE => Ok(write::execute(&self.context, arguments)),
             EDIT => Ok(edit::execute(&self.context, arguments)),
             BASH => Err(McpProtocolError::AsyncOnly),
@@ -85,6 +88,7 @@ impl McpService {
         match name {
             READ_FILE => Ok(read_file::execute_async(&self.context, arguments).await),
             GLOB => Ok(glob::execute_async(&self.context, arguments).await),
+            GREP => Ok(grep::execute_async(&self.context, arguments, request_cancel).await),
             WRITE => Ok(write::execute_async(&self.context, arguments).await),
             EDIT => Ok(edit::execute_async(&self.context, arguments).await),
             BASH => Ok(bash::execute(&self.context, arguments, request_cancel).await),
@@ -149,6 +153,7 @@ fn tool_from_effective(tool: EffectiveTool) -> Option<Tool> {
     match tool.name.as_str() {
         READ_FILE => Some(read_file_tool_with_metadata(&tool.name, &tool.description)),
         GLOB => Some(glob_tool_with_metadata(&tool.name, &tool.description)),
+        GREP => Some(grep_tool_with_metadata(&tool.name, &tool.description)),
         WRITE => Some(write_tool_with_metadata(&tool.name, &tool.description)),
         EDIT => Some(edit_tool_with_metadata(&tool.name, &tool.description)),
         BASH => Some(bash_tool_with_metadata(&tool.name, &tool.description)),
@@ -171,6 +176,15 @@ fn glob_tool_with_metadata(name: &str, description: &str) -> Tool {
         name.to_owned(),
         description.to_owned(),
         schema_for_input::<glob::GlobArguments>().expect("glob MCP schema is statically valid"),
+    )
+    .with_annotations(ToolAnnotations::new().read_only(true).destructive(false))
+}
+
+fn grep_tool_with_metadata(name: &str, description: &str) -> Tool {
+    Tool::new(
+        name.to_owned(),
+        description.to_owned(),
+        schema_for_input::<grep::GrepArguments>().expect("grep MCP schema is statically valid"),
     )
     .with_annotations(ToolAnnotations::new().read_only(true).destructive(false))
 }
@@ -1193,7 +1207,7 @@ mod tests {
             .into_iter()
             .map(|tool| tool.name.into_owned())
             .collect::<Vec<_>>();
-        assert_eq!(names, [READ_FILE, GLOB, WRITE, EDIT]);
+        assert_eq!(names, [READ_FILE, GLOB, GREP, WRITE, EDIT]);
         for forbidden in [
             "bash",
             "tree",
@@ -1215,12 +1229,13 @@ mod tests {
 
     #[test]
     fn disabled_tools_are_absent_from_mcp_tools_list_but_enabled_siblings_remain() {
-        for disabled in [READ_FILE, GLOB, WRITE, EDIT] {
+        for disabled in [READ_FILE, GLOB, GREP, WRITE, EDIT] {
             let workspace = TestWorkspace::new();
             let mut config = config_for(&workspace.root);
             match disabled {
                 READ_FILE => config.tools.read_file.enabled = false,
                 GLOB => config.tools.glob.enabled = false,
+                GREP => config.tools.grep.enabled = false,
                 WRITE => config.tools.write.enabled = false,
                 EDIT => config.tools.edit.enabled = false,
                 _ => unreachable!(),
@@ -1233,7 +1248,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             assert!(!names.iter().any(|name| name == disabled));
-            assert_eq!(names.len(), 3);
+            assert_eq!(names.len(), 4);
         }
     }
 
@@ -1402,6 +1417,311 @@ mod tests {
         assert_eq!(structured["truncated"], false);
         assert_eq!(structured["diagnostics"], json!([]));
         assert_eq!(structured["diagnosticsTruncated"], false);
+    }
+
+    #[test]
+    fn grep_exposes_exact_schema_and_routes_literal_regex_filters() {
+        let workspace = TestWorkspace::new();
+        workspace.write("docs/a.md", "GREP_MATCH_SENTINEL 4317\nalpha\n");
+        workspace.write("docs/b.md", "4317\n");
+        workspace.write("docs/skip.md", "4317\n");
+        workspace.write("src/main.rs", "4317\n");
+        let service = workspace.service();
+
+        let tool = service.get_tool(GREP).expect("grep tool");
+        let schema = serde_json::to_value(tool.input_schema.as_ref()).unwrap();
+        let properties = schema["properties"].as_object().expect("properties");
+        for field in [
+            "query",
+            "mode",
+            "scope",
+            "include",
+            "exclude",
+            "maxResults",
+            "maxOutputBytes",
+        ] {
+            assert!(properties.contains_key(field), "grep missing {field}");
+        }
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["properties"]["query"]["minLength"], 1);
+        assert_eq!(schema["properties"]["query"]["maxLength"], 4096);
+        assert_eq!(schema["properties"]["mode"]["default"], "literal");
+        assert_eq!(schema["properties"]["scope"]["default"], ".");
+        assert_eq!(schema["properties"]["scope"]["minLength"], 1);
+        assert_eq!(schema["properties"]["scope"]["maxLength"], 1024);
+        assert_eq!(schema["properties"]["include"]["maxItems"], 32);
+        assert_eq!(schema["properties"]["include"]["items"]["minLength"], 1);
+        assert_eq!(schema["properties"]["include"]["items"]["maxLength"], 512);
+        assert_eq!(schema["properties"]["exclude"]["maxItems"], 32);
+        assert_eq!(schema["properties"]["exclude"]["items"]["maxLength"], 512);
+        assert_eq!(schema["properties"]["maxResults"]["minimum"], 1);
+        assert_eq!(schema["properties"]["maxResults"]["maximum"], 1000);
+        assert_eq!(schema["properties"]["maxResults"]["default"], 100);
+        assert_eq!(schema["properties"]["maxOutputBytes"]["minimum"], 1024);
+        assert_eq!(schema["properties"]["maxOutputBytes"]["maximum"], 262_144);
+        assert_eq!(schema["properties"]["maxOutputBytes"]["default"], 65_536);
+        let validator = jsonschema::validator_for(&schema).expect("grep schema is valid");
+        for invalid in [
+            json!({ "query": "" }),
+            json!({ "query": "x", "maxResults": 0 }),
+            json!({ "query": "x", "maxResults": 1001 }),
+            json!({ "query": "x", "maxOutputBytes": 1023 }),
+            json!({ "query": "x", "maxOutputBytes": 262_145 }),
+            json!({ "query": "x", "scope": "a".repeat(1025) }),
+            json!({ "query": "x", "include": vec!["*"; 33] }),
+            json!({ "query": "x", "include": ["a".repeat(513)] }),
+            json!({ "query": "x", "exclude": vec!["*"; 33] }),
+        ] {
+            assert!(
+                validator.validate(&invalid).is_err(),
+                "grep schema accepted invalid arguments: {invalid}"
+            );
+        }
+        let annotations = tool.annotations.expect("grep annotations");
+        assert_eq!(annotations.read_only_hint, Some(true));
+        assert_eq!(annotations.destructive_hint, Some(false));
+
+        let literal = call(
+            &service,
+            GREP,
+            json!({
+                "query": "GREP_MATCH_SENTINEL",
+                "scope": "docs",
+                "include": ["docs/*.md"],
+                "exclude": ["docs/skip.*"]
+            }),
+        );
+        assert_eq!(literal.is_error, Some(false));
+        let structured = literal.structured_content.as_ref().unwrap();
+        assert_eq!(structured["matches"][0]["path"], "docs/a.md");
+        assert_eq!(structured["matches"][0]["lineNumber"], 1);
+        assert_eq!(structured["matches"][0]["previewStartByte"], 0);
+        assert_eq!(structured["matches"][0]["matchStartByte"], 0);
+        assert_eq!(structured["truncated"], false);
+        assert_eq!(structured["truncationReasons"], json!([]));
+        assert_eq!(structured["diagnostics"], json!([]));
+
+        let regex = call(
+            &service,
+            GREP,
+            json!({
+                "query": "(?m)^4\\d{3}$",
+                "mode": "regex",
+                "scope": "docs"
+            }),
+        );
+        assert_eq!(regex.is_error, Some(false));
+        let regex = regex.structured_content.unwrap();
+        assert_eq!(regex["matches"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn grep_argument_scope_filter_and_disabled_errors_are_typed_and_sanitized() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "needle\n");
+        let service = workspace.service();
+        for (arguments, code) in [
+            (json!({}), "INVALID_ARGUMENTS"),
+            (json!({"query": ""}), "INVALID_ARGUMENTS"),
+            (
+                json!({"query": "needle", "maxResults": 0}),
+                "INVALID_ARGUMENTS",
+            ),
+            (
+                json!({"query": "needle", "maxOutputBytes": 1023}),
+                "INVALID_ARGUMENTS",
+            ),
+            (
+                json!({"query": "needle", "unknown": true}),
+                "INVALID_ARGUMENTS",
+            ),
+            (json!({"query": "(", "mode": "regex"}), "INVALID_REGEX"),
+            (
+                json!({"query": "needle", "include": ["["]}),
+                "INVALID_FILTER_PATTERN",
+            ),
+            (
+                json!({"query": "needle", "scope": "file.txt"}),
+                "INVALID_SCOPE",
+            ),
+            (
+                json!({"query": "needle", "scope": "../outside"}),
+                "INVALID_SCOPE",
+            ),
+        ] {
+            let result = call(&service, GREP, arguments);
+            assert_eq!(error_code(&result), code);
+            assert!(!serde_json::to_string(&result)
+                .unwrap()
+                .contains(&*workspace.root.to_string_lossy()));
+        }
+
+        let mut config = config_for(&workspace.root);
+        config.tools.grep.enabled = false;
+        let disabled = call(
+            &workspace.service_with_config(config),
+            GREP,
+            json!({"query": "needle"}),
+        );
+        assert_eq!(error_code(&disabled), "TOOL_DISABLED");
+    }
+
+    #[test]
+    fn grep_policy_deny_and_ask_deny_do_not_scan_and_allow_once_resumes_exact_request() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "needle\n");
+
+        let mut deny_config = config_for(&workspace.root);
+        deny_config.policies.tool_defaults.grep = harness_control_protocol::PolicyDecision::Deny;
+        let mut deny_core = RuntimeCore::new();
+        deny_core.initialize(deny_config).unwrap();
+        deny_core.acknowledge().unwrap();
+        let deny_service = deny_core.mcp_service().unwrap();
+        let denied = call(&deny_service, GREP, json!({"query": "GREP_QUERY_SENTINEL"}));
+        assert_eq!(error_code(&denied), "POLICY_DENIED");
+        assert!(!deny_core
+            .activity_snapshot(100)
+            .iter()
+            .any(|entry| entry.event_type == crate::audit::AuditEventType::ExecutionStarted));
+
+        let mut ask_config = config_for(&workspace.root);
+        ask_config.policies.tool_defaults.grep = harness_control_protocol::PolicyDecision::Ask;
+        let mut ask_core = RuntimeCore::new();
+        ask_core.initialize(ask_config).unwrap();
+        ask_core.acknowledge().unwrap();
+        let ask_service = ask_core.mcp_service().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let allow = tokio::spawn({
+                let service = ask_service.clone();
+                async move {
+                    service
+                        .call_tool_async(
+                            GREP,
+                            json!({"query": "needle", "scope": ".", "include": []}),
+                        )
+                        .await
+                        .unwrap()
+                }
+            });
+            wait_for_pending(&ask_core, 1).await;
+            let pending = ask_core
+                .approval_manager()
+                .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+            assert_eq!(pending[0].tool, GREP);
+            assert_eq!(pending[0].sanitized_arguments["queryBytes"], "6");
+            assert!(!pending[0].sanitized_arguments.contains_key("query"));
+            assert!(!serde_json::to_string(&pending[0])
+                .unwrap()
+                .contains("needle"));
+            assert!(!ask_core
+                .activity_snapshot(100)
+                .iter()
+                .any(|entry| entry.event_type == crate::audit::AuditEventType::ExecutionStarted));
+            ask_core
+                .approval_manager()
+                .resolve(
+                    &pending[0].request_id,
+                    harness_control_protocol::ApprovalDecision::AllowOnce,
+                )
+                .unwrap();
+            let result = allow.await.unwrap();
+            assert_eq!(result.is_error, Some(false));
+            assert_eq!(
+                result.structured_content.unwrap()["matches"][0]["path"],
+                "file.txt"
+            );
+
+            let deny = tokio::spawn({
+                let service = ask_service.clone();
+                async move {
+                    service
+                        .call_tool_async(GREP, json!({"query": "needle"}))
+                        .await
+                        .unwrap()
+                }
+            });
+            wait_for_pending(&ask_core, 1).await;
+            let pending = ask_core
+                .approval_manager()
+                .list(Some(harness_control_protocol::ApprovalStatus::Pending));
+            ask_core
+                .approval_manager()
+                .resolve(
+                    &pending[0].request_id,
+                    harness_control_protocol::ApprovalDecision::Deny,
+                )
+                .unwrap();
+            assert_eq!(error_code(&deny.await.unwrap()), "APPROVAL_DENIED");
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn grep_mcp_cancellation_stops_active_scan_before_partial_success() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "needle\nneedle\n");
+        let service = workspace.service();
+        let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let hook_entered = entered.clone();
+        let hook_release = release.clone();
+        let _hook = crate::tools::install_scan_hook(move |scanned| {
+            if scanned.file_name().is_some_and(|name| name == "file.txt") {
+                hook_entered.wait();
+                hook_release.wait();
+            }
+        });
+        let cancel = CancellationToken::new();
+        let task = tokio::spawn({
+            let service = service.clone();
+            let cancel = cancel.clone();
+            async move {
+                service
+                    .call_tool_async_with_cancel(GREP, json!({ "query": "needle" }), cancel)
+                    .await
+                    .expect("known MCP tool")
+            }
+        });
+        tokio::task::spawn_blocking(move || entered.wait())
+            .await
+            .expect("scan start waiter");
+        cancel.cancel();
+        tokio::task::spawn_blocking(move || release.wait())
+            .await
+            .expect("scan release waiter");
+        let result = task.await.expect("MCP task");
+        assert_eq!(error_code(&result), "CANCELLED");
+    }
+
+    #[test]
+    fn grep_activity_uses_typed_scalars_without_query_filter_or_preview_text() {
+        let workspace = TestWorkspace::new();
+        workspace.write("docs/file.txt", "GREP_MATCH_SENTINEL needle needle\n");
+        let mut core = RuntimeCore::new();
+        core.initialize(config_for(&workspace.root)).unwrap();
+        core.acknowledge().unwrap();
+        let service = core.mcp_service().unwrap();
+        let result = call(
+            &service,
+            GREP,
+            json!({
+                "query": "GREP_QUERY_SENTINEL",
+                "include": ["docs/GREP_FILTER_SENTINEL*.txt"]
+            }),
+        );
+        assert_eq!(result.is_error, Some(false));
+        let activity = serde_json::to_string(&core.activity_snapshot(100)).unwrap();
+        for sentinel in [
+            "GREP_QUERY_SENTINEL",
+            "GREP_FILTER_SENTINEL",
+            "GREP_MATCH_SENTINEL",
+        ] {
+            assert!(!activity.contains(sentinel), "activity leaked {sentinel}");
+        }
+        assert!(activity.contains("\"tool\":\"grep\""));
     }
 
     #[test]

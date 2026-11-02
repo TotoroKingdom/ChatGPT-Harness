@@ -1,0 +1,77 @@
+{
+  "caseId": "m04-c2-01",
+  "caseVersion": 1,
+  "category": "path_discovery",
+  "prompt": "Locate the file named invoice_q4.txt somewhere in the workspace, then read it and report its value exactly as TOTAL=1280. Use a narrow glob rather than listing unrelated files.",
+  "fixtureRef": "m04-c2-01",
+  "fixtureHash": "845305272112459e17fdc5763c559b799be928ae76ee392edfa7954814a0cba6",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "path_discovery_then_read",
+        "steps": [
+          {
+            "tool": "glob",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "glob",
+      "patternMustMatchAny": [
+        "archive/2024/invoice_q4.txt"
+      ]
+    },
+    {
+      "tool": "read_file",
+      "path": "archive/2024/invoice_q4.txt"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "occurrence": 1,
+      "outcome": "success"
+    },
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "c67bc5968027c272abac64091925f0a670e06b6b1a0573744cf966d4d5e7381f"
+    }
+  ],
+  "tags": [
+    "path_discovery"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "TOTAL=1280"
+  }
+}

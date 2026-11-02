@@ -196,6 +196,8 @@
       "bashSpawnFailed": "Could not start Bash",
       "bashCancelled": "Bash command cancelled",
       "bashProcessFailed": "Bash process failed",
+      "grepTimeout": "grep search timed out",
+      "grepCancelled": "grep search cancelled",
       "approvalDenied": "Approval denied",
       "approvalExpired": "Approval expired",
       "approvalCancelled": "Approval cancelled"
@@ -378,6 +380,7 @@
     "builtInDescriptions": {
       "readFile": "Read a workspace file.",
       "glob": "Find workspace paths.",
+      "grep": "Search text content inside the active Workspace.",
       "write": "Write a workspace file.",
       "edit": "Edit a workspace text file.",
       "bash": "Run a controlled Git Bash command from the active Workspace. The cwd is an initial working directory, not a filesystem sandbox."
@@ -730,6 +733,11 @@
       "bashSpawnFailed": "The Bash process could not be started.",
       "bashCancelled": "The Bash command was cancelled.",
       "bashProcessFailed": "The Bash process failed.",
+      "invalidRegex": "The search regular expression is invalid.",
+      "invalidFilterPattern": "A search include or exclude pattern is invalid.",
+      "invalidScope": "The search scope is invalid.",
+      "searchTimeout": "The search exceeded the Runtime time limit.",
+      "searchCancelled": "The search was cancelled.",
       "evidenceBusy": "History storage is busy. Retry later.",
       "evidenceWriterOwnership": "History storage ownership is unavailable.",
       "evidenceIo": "History storage could not be accessed.",

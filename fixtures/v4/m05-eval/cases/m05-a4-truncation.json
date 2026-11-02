@@ -1,0 +1,9 @@
+{
+  "caseId": "m05-a4-truncation",
+  "caseVersion": 1,
+  "category": "truncation_follow_up",
+  "prompt": "Run a content search bounded to at most 5 matching rows for ROW_ in the Workspace. Report whether the result was truncated and state the fifth returned row exactly, then answer with TRUNCATE_OK.",
+  "fixtureRef": "truncation",
+  "fixtureHash": "9767cd6ec9966c5a9fb2b6db7c4f9ae45a9f3e4c2957309245c2b37dc0059269",
+  "expectedFinalResponseContains": "TRUNCATE_OK"
+}

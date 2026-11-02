@@ -341,6 +341,8 @@ const activityFailureCategoryKeys: Record<ActivityFailureCategory, TranslationKe
   bash_spawn_failed: "enum.activityFailure.bashSpawnFailed",
   bash_cancelled: "enum.activityFailure.bashCancelled",
   bash_process_failed: "enum.activityFailure.bashProcessFailed",
+  grep_timeout: "enum.activityFailure.grepTimeout",
+  grep_cancelled: "enum.activityFailure.grepCancelled",
 };
 
 export function activityFailureCategoryKey(value: ActivityFailureCategory): TranslationKey {
@@ -397,6 +399,11 @@ export type HostErrorCode =
   | "READ_LIMIT_EXCEEDED"
   | "INVALID_PATTERN"
   | "INVALID_BASE_PATH"
+  | "INVALID_REGEX"
+  | "INVALID_FILTER_PATTERN"
+  | "INVALID_SCOPE"
+  | "SEARCH_TIMEOUT"
+  | "CANCELLED"
   | "EDIT_MATCH_NOT_FOUND"
   | "EDIT_MATCH_NOT_UNIQUE"
   | "TARGET_CHANGED"
@@ -486,6 +493,11 @@ const errorKeys: Record<KnownErrorCode, TranslationKey> = {
   READ_LIMIT_EXCEEDED: "errors.codes.readLimitExceeded",
   INVALID_PATTERN: "errors.codes.invalidPattern",
   INVALID_BASE_PATH: "errors.codes.invalidBasePath",
+  INVALID_REGEX: "errors.codes.invalidRegex",
+  INVALID_FILTER_PATTERN: "errors.codes.invalidFilterPattern",
+  INVALID_SCOPE: "errors.codes.invalidScope",
+  SEARCH_TIMEOUT: "errors.codes.searchTimeout",
+  CANCELLED: "errors.codes.searchCancelled",
   EDIT_MATCH_NOT_FOUND: "errors.codes.editMatchNotFound",
   EDIT_MATCH_NOT_UNIQUE: "errors.codes.editMatchNotUnique",
   TARGET_CHANGED: "errors.codes.targetChanged",

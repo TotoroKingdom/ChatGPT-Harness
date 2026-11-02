@@ -98,8 +98,11 @@ fn coverage(event_type: AuditEventType) -> Coverage {
 }
 
 fn allowed_tool_name(tool_name: &str) -> Option<String> {
-    matches!(tool_name, "read_file" | "glob" | "write" | "edit" | "bash")
-        .then(|| tool_name.to_owned())
+    matches!(
+        tool_name,
+        "read_file" | "glob" | "grep" | "write" | "edit" | "bash"
+    )
+    .then(|| tool_name.to_owned())
 }
 
 fn result_bytes(result: Option<&ExecutionResultEvidence>) -> Option<u64> {
@@ -159,7 +162,7 @@ fn project(event: &AuditEvent) -> EvidenceFixture {
 fn real_audit_event(tool: &'static str, event: PipelineEvent) -> AuditEvent {
     let mut context = RequestContext::for_evidence_test(tool, SecurityMode::Normal);
     context.capability = Some(match tool {
-        "read_file" | "glob" => {
+        "read_file" | "glob" | "grep" => {
             harness_control_protocol::control_read::ToolCapability::WorkspaceRead
         }
         "write" | "edit" => harness_control_protocol::control_read::ToolCapability::WorkspaceWrite,
@@ -171,6 +174,15 @@ fn real_audit_event(tool: &'static str, event: PipelineEvent) -> AuditEvent {
         },
         "glob" => SanitizedArgumentsEvidence::Glob {
             pattern: "**/*.rs".into(),
+        },
+        "grep" => SanitizedArgumentsEvidence::Grep {
+            mode: harness_control_protocol::GrepMode::Literal,
+            logical_scope: "src".into(),
+            query_bytes: 7,
+            include_count: 1,
+            exclude_count: 0,
+            max_results: 100,
+            max_output_bytes: 65_536,
         },
         "write" => SanitizedArgumentsEvidence::Write {
             logical_path: "notes.txt".into(),

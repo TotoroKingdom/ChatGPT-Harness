@@ -8,6 +8,7 @@ mod context;
 mod edit;
 mod errors;
 mod glob;
+mod grep;
 mod http;
 mod read_file;
 mod runtime;

@@ -96,8 +96,12 @@ fn stage_and_outcome(event: &AuditEvent) -> (EvidenceStage, HistoryOutcome) {
         }
         AuditEventType::ExecutionFailed => {
             let outcome = match event.failure_category {
-                Some(AuditFailureCategory::BashTimeout) => HistoryOutcome::TimedOut,
-                Some(AuditFailureCategory::BashCancelled) => HistoryOutcome::Cancelled,
+                Some(AuditFailureCategory::BashTimeout | AuditFailureCategory::GrepTimeout) => {
+                    HistoryOutcome::TimedOut
+                }
+                Some(AuditFailureCategory::BashCancelled | AuditFailureCategory::GrepCancelled) => {
+                    HistoryOutcome::Cancelled
+                }
                 Some(AuditFailureCategory::ApprovalExpired) => HistoryOutcome::ApprovalExpired,
                 Some(AuditFailureCategory::ApprovalCancelled) => HistoryOutcome::ApprovalCancelled,
                 _ => HistoryOutcome::Failed,
@@ -189,6 +193,8 @@ fn failure_category(value: AuditFailureCategory) -> ActivityFailureCategory {
         AuditFailureCategory::BashSpawnFailed => ActivityFailureCategory::BashSpawnFailed,
         AuditFailureCategory::BashCancelled => ActivityFailureCategory::BashCancelled,
         AuditFailureCategory::BashProcessFailed => ActivityFailureCategory::BashProcessFailed,
+        AuditFailureCategory::GrepTimeout => ActivityFailureCategory::GrepTimeout,
+        AuditFailureCategory::GrepCancelled => ActivityFailureCategory::GrepCancelled,
     }
 }
 
@@ -214,6 +220,23 @@ fn durable_arguments(event: &AuditEvent) -> Option<DurableSanitizedArgumentsEvid
         SanitizedArgumentsEvidence::Glob { pattern } => {
             Some(DurableSanitizedArgumentsEvidence::Glob { pattern })
         }
+        SanitizedArgumentsEvidence::Grep {
+            mode,
+            logical_scope,
+            query_bytes,
+            include_count,
+            exclude_count,
+            max_results,
+            max_output_bytes,
+        } => Some(DurableSanitizedArgumentsEvidence::Grep {
+            mode,
+            logical_scope,
+            query_bytes,
+            include_count,
+            exclude_count,
+            max_results,
+            max_output_bytes,
+        }),
         SanitizedArgumentsEvidence::Write { logical_path } => {
             Some(DurableSanitizedArgumentsEvidence::Write { logical_path })
         }

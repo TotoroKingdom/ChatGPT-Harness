@@ -91,13 +91,24 @@ impl ConfigStore {
         let text = fs::read_to_string(&self.file).map_err(|e| ConfigError::Io(e.to_string()))?;
         let raw: serde_json::Value =
             serde_json::from_str(&text).map_err(|_| ConfigError::Invalid("invalid JSON".into()))?;
-        let migrated = match raw.get("schemaVersion").and_then(|v| v.as_u64()) {
+        let schema_version = raw.get("schemaVersion").and_then(|v| v.as_u64());
+        let migrated = match schema_version {
             Some(1) => true,
             Some(2) => true,
             Some(3) => false,
             _ => return Err(ConfigError::UnsupportedSchema),
         };
-        let mut config = match raw.get("schemaVersion").and_then(|v| v.as_u64()) {
+        let additive_m05_normalization = schema_version == Some(3)
+            && (raw
+                .get("tools")
+                .and_then(|tools| tools.get("grep"))
+                .is_none()
+                || raw
+                    .get("policies")
+                    .and_then(|policies| policies.get("toolDefaults"))
+                    .and_then(|defaults| defaults.get("grep"))
+                    .is_none());
+        let mut config = match schema_version {
             Some(1) => migration::migrate_v1_to_v3(raw)?,
             Some(2) => migration::migrate_v2_to_v3(raw)?,
             Some(3) => {
@@ -116,7 +127,7 @@ impl ConfigStore {
                 error
             }
         })?;
-        if migrated {
+        if migrated || additive_m05_normalization {
             let bytes = serde_json::to_vec_pretty(&config)
                 .map_err(|_| ConfigError::Migration("serialization"))?;
             atomic_write(&self.file, &bytes).map_err(|_| {
@@ -450,9 +461,14 @@ mod tests {
 
         assert!(tools.read_file.enabled);
         assert!(tools.glob.enabled);
+        assert!(tools.grep.enabled);
         assert!(tools.write.enabled);
         assert!(tools.edit.enabled);
         assert!(!tools.bash.enabled);
+        assert_eq!(
+            ConfigStore::safe_defaults().policies.tool_defaults.grep,
+            PolicyDecision::Allow
+        );
     }
 
     #[test]
@@ -472,7 +488,103 @@ mod tests {
             .unwrap()
             .unwrap()
             .tools;
-        assert_eq!(tools, ToolConfig::default());
+        let mut expected = ToolConfig::default();
+        expected.grep.enabled = false;
+        assert_eq!(tools, expected);
+    }
+
+    #[test]
+    fn m05_pre_upgrade_v1_v2_v3_configs_gain_explicit_disabled_grep_without_revision_drift() {
+        for schema_version in [1, 2, 3] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = ConfigStore::new(directory.path().into());
+            let mut value = serde_json::to_value(c()).unwrap();
+            value["schemaVersion"] = serde_json::json!(schema_version);
+            value["configRevision"] = serde_json::json!("47");
+            if let Some(tools) = value
+                .get_mut("tools")
+                .and_then(|value| value.as_object_mut())
+            {
+                tools.remove("grep");
+            }
+            if let Some(defaults) = value
+                .get_mut("policies")
+                .and_then(|value| value.get_mut("toolDefaults"))
+                .and_then(|value| value.as_object_mut())
+            {
+                defaults.remove("grep");
+            }
+            if schema_version < 3 {
+                value.as_object_mut().unwrap().remove("desktop");
+                value.as_object_mut().unwrap().remove("history");
+            }
+            let source = serde_json::to_vec_pretty(&value).unwrap();
+            fs::write(&store.file, &source).unwrap();
+
+            let loaded = store.load().unwrap().unwrap();
+            assert_eq!(loaded.schema_version, CURRENT_SCHEMA_VERSION);
+            assert_eq!(loaded.config_revision, DecimalU64::new(47));
+            assert!(!loaded.tools.grep.enabled);
+            assert_eq!(loaded.policies.tool_defaults.grep, PolicyDecision::Allow);
+            let persisted: serde_json::Value =
+                serde_json::from_slice(&fs::read(&store.file).unwrap()).unwrap();
+            assert_eq!(persisted["schemaVersion"], CURRENT_SCHEMA_VERSION);
+            assert_eq!(persisted["tools"]["grep"]["enabled"], false);
+            assert_eq!(persisted["policies"]["toolDefaults"]["grep"], "allow");
+
+            let before = fs::read(&store.file).unwrap();
+            let inspected = store.inspect_read_only().unwrap().unwrap();
+            assert!(!inspected.tools.grep.enabled);
+            assert_eq!(fs::read(&store.file).unwrap(), before);
+            assert!(!store.file.with_extension("json.tmp").exists());
+        }
+    }
+
+    #[test]
+    fn m05_explicit_grep_enable_advances_revision_and_preserves_new_install_default() {
+        assert!(ToolConfig::default().grep.enabled);
+        assert_eq!(
+            PolicyConfig::default().tool_defaults.grep,
+            PolicyDecision::Allow
+        );
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(directory.path().into());
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["configRevision"] = serde_json::json!("47");
+        value["tools"].as_object_mut().unwrap().remove("grep");
+        value["policies"]["toolDefaults"]
+            .as_object_mut()
+            .unwrap()
+            .remove("grep");
+        fs::write(&store.file, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let mut loaded = store.load().unwrap().unwrap();
+        assert_eq!(loaded.config_revision, DecimalU64::new(47));
+        assert!(!loaded.tools.grep.enabled);
+        loaded.tools.grep.enabled = true;
+        let saved = store.save(loaded).unwrap();
+        assert_eq!(saved.config_revision, DecimalU64::new(48));
+        assert!(saved.tools.grep.enabled);
+        assert_eq!(
+            store.load().unwrap().unwrap().config_revision,
+            DecimalU64::new(48)
+        );
+    }
+
+    #[test]
+    fn m05_failed_additive_persist_preserves_the_original_v3_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(directory.path().into());
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["configRevision"] = serde_json::json!("47");
+        value["tools"].as_object_mut().unwrap().remove("grep");
+        let source = serde_json::to_vec_pretty(&value).unwrap();
+        fs::write(&store.file, &source).unwrap();
+        fs::create_dir(store.file.with_extension("json.tmp")).unwrap();
+
+        assert_eq!(store.load().unwrap_err().code(), "CONFIG_WRITE_FAILED");
+        assert_eq!(fs::read(&store.file).unwrap(), source);
     }
 
     #[test]
@@ -1220,12 +1332,16 @@ mod tests {
             assert_eq!(migrated.security.mode, original.security.mode);
             assert!(migrated.security.developer_test_mode);
             if transitional {
-                assert_eq!(migrated.tools, original.tools);
+                let mut expected_tools = original.tools.clone();
+                expected_tools.grep.enabled = false;
+                assert_eq!(migrated.tools, expected_tools);
                 assert_eq!(migrated.policies, original.policies);
                 assert_eq!(migrated.bash, original.bash);
                 assert_eq!(migrated.ui.language, original.ui.language);
             } else {
-                assert_eq!(migrated.tools, ToolConfig::default());
+                let mut expected_tools = ToolConfig::default();
+                expected_tools.grep.enabled = false;
+                assert_eq!(migrated.tools, expected_tools);
                 assert_eq!(migrated.policies, PolicyConfig::default());
                 assert_eq!(migrated.bash, BashConfig::default());
                 assert_eq!(migrated.ui.language, None);
@@ -1443,7 +1559,9 @@ mod tests {
                 assert_eq!(config.security.mode, original.security.mode);
                 assert!(config.security.developer_test_mode);
                 assert_eq!(config.ui, original.ui);
-                assert_eq!(config.tools, original.tools);
+                let mut expected_tools = original.tools.clone();
+                expected_tools.grep.enabled = false;
+                assert_eq!(config.tools, expected_tools);
                 assert_eq!(config.policies, original.policies);
                 assert_eq!(config.bash, original.bash);
                 let after = fs::read(&store.file).unwrap();

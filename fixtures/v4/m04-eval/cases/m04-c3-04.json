@@ -1,0 +1,82 @@
+{
+  "caseId": "m04-c3-04",
+  "caseVersion": 1,
+  "category": "content_search",
+  "prompt": "Search the small text files under notes/ for the line beginning 'marker ='. Exactly one file contains it. Report that marker value exactly as TOKEN=WILLOW-2. Use a bounded glob first and then read candidate files.",
+  "fixtureRef": "m04-c3-04",
+  "fixtureHash": "519ddd1aa1e723c7fc97f32a24c145d48c720404dbc7fd2fd83ca3772f93d738",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "content_search",
+        "steps": [
+          {
+            "tool": "glob",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one_or_more"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "glob",
+      "patternMustMatchAny": [
+        "notes/alpha.txt",
+        "notes/beta.txt",
+        "notes/gamma.txt",
+        "notes/delta.txt",
+        "notes/epsilon.txt"
+      ]
+    },
+    {
+      "tool": "read_file",
+      "pathAny": [
+        "notes/alpha.txt",
+        "notes/beta.txt",
+        "notes/gamma.txt",
+        "notes/delta.txt",
+        "notes/epsilon.txt"
+      ]
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "7baab1a37b4044b42bb6b783639216ab96f08b1558a627c7aab0c70b5bbcfc85"
+    }
+  ],
+  "tags": [
+    "content_search"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "TOKEN=WILLOW-2"
+  }
+}

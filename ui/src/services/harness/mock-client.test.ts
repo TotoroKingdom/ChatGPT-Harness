@@ -9,8 +9,8 @@ describe("MockHarnessControlClient", () => {
   it("returns the stable M5 catalog, including the mode-gated Bash row", async () => {
     const client = new MockHarnessControlClient();
     const result = await client.toolsList();
-    expect(result.items.map((tool) => tool.name)).toEqual(["read_file", "glob", "write", "edit", "bash"]);
-    expect(result.items.filter((tool) => tool.exposed).map((tool) => tool.name)).toEqual(["read_file", "glob", "write", "edit"]);
+    expect(result.items.map((tool) => tool.name)).toEqual(["read_file", "glob", "grep", "write", "edit", "bash"]);
+    expect(result.items.filter((tool) => tool.exposed).map((tool) => tool.name)).toEqual(["read_file", "glob", "grep", "write", "edit"]);
   });
 
   it("reports Bash mode, disabled, and Runtime observations separately", async () => {
@@ -45,9 +45,9 @@ const testConfig = (): AppConfig => ({
   tunnel: { tunnelId: "tunnel", tunnelClientPath: "D:\\tunnel-client-v0.0.13-windows-amd64", autoDetect: true, apiKeyRef: { provider: "memory-development", key: "tunnel-api-key" } },
   security: { mode: "normal", developerTestMode: false },
   ui: {},
-  tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
+  tools: { readFile: { enabled: true }, glob: { enabled: true }, grep: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
   bash: { autoDetect: true },
-  policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
+  policies: { toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
   desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
   history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
 });

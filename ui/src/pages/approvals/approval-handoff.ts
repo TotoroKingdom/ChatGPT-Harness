@@ -3,7 +3,7 @@ import { normalizeExecutable, parseLiteralMatcher } from "@/pages/policies/match
 
 /** This creates only a configuration draft, never a decision or session grant. */
 export function safeApprovalMatcher(request: ApprovalRequest): PolicyMatcherConfig | undefined {
-  if (["read_file", "glob", "write", "edit"].includes(request.tool)) return { type: "tool", tool: request.tool };
+  if (["read_file", "glob", "grep", "write", "edit"].includes(request.tool)) return { type: "tool", tool: request.tool };
   if (request.tool !== "bash") return undefined;
   const details = request.bashDetails;
   if (!details || details.classification !== "classified" || details.previewRedacted !== false || details.previewTruncated !== false || !Array.isArray(details.normalizedSegments) || details.normalizedSegments.length !== 1) return undefined;

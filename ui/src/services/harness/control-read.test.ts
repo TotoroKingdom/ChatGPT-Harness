@@ -12,6 +12,22 @@ describe("machine-only control read error boundary", () => {
 });
 
 describe("control-read M5 projections", () => {
+  it("accepts the M05 grep failure categories without changing their identity", () => {
+    const entries = ["grep_timeout", "grep_cancelled"].map((failureCategory) => parseActivity([{
+      eventId: `event-${failureCategory}`,
+      requestId: `request-${failureCategory}`,
+      timestamp: "2026-11-02T09:00:00.000Z",
+      eventType: "execution_failed",
+      toolName: "grep",
+      decisionSummary: "allow",
+      matchedRuleIds: [],
+      policyReason: "tool_default",
+      outcomeSummary: "failed",
+      failureCategory,
+    }])[0].failureCategory);
+    expect(entries).toEqual(["grep_timeout", "grep_cancelled"]);
+  });
+
   it("preserves Runtime-owned Bash availability and readiness observations", () => {
     expect(parseTools([{
       name: "bash",
@@ -136,6 +152,52 @@ describe("M7 typed evidence boundary", () => {
     expect(() => parseActivity([{ ...entry, sanitizedArguments: { tool: "glob", pattern: "x".repeat(1100) } }])).toThrow();
     expect(() => parseActivity([{ ...entry, durationMs: -1 }])).toThrow();
     expect(() => parseActivity([{ ...entry, resultEvidence: { tool: "read_file", bytesRead: -1 } }])).toThrow();
+  });
+  it("keeps grep typed scalars and drops any raw query or preview sentinel", () => {
+    const parsed = parseActivity([{
+      ...entry,
+      toolName: "grep",
+      capability: "workspace_read",
+      sanitizedArguments: {
+        tool: "grep",
+        mode: "regex",
+        logicalScope: "docs",
+        queryBytes: 17,
+        includeCount: 2,
+        excludeCount: 1,
+        maxResults: 25,
+        maxOutputBytes: 65536,
+        query: "RAW_QUERY_SENTINEL",
+      },
+      resultEvidence: {
+        tool: "grep",
+        matchCount: 3,
+        scannedFiles: 4,
+        scannedBytes: 128,
+        skippedFiles: 1,
+        truncated: true,
+        preview: "PREVIEW_SENTINEL",
+      },
+    }])[0];
+    expect(parsed.sanitizedArguments).toEqual({
+      tool: "grep",
+      mode: "regex",
+      logicalScope: "docs",
+      queryBytes: 17,
+      includeCount: 2,
+      excludeCount: 1,
+      maxResults: 25,
+      maxOutputBytes: 65536,
+    });
+    expect(parsed.resultEvidence).toEqual({
+      tool: "grep",
+      matchCount: 3,
+      scannedFiles: 4,
+      scannedBytes: 128,
+      skippedFiles: 1,
+      truncated: true,
+    });
+    expect(JSON.stringify(parsed)).not.toContain("SENTINEL");
   });
 });
 

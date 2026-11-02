@@ -1,0 +1,84 @@
+{
+  "caseId": "m04-c5-01",
+  "caseVersion": 1,
+  "category": "edit_state",
+  "prompt": "Edit the workspace file settings/app.txt: replace the unique exact text mode=old with mode=new. Do not change anything else. Then answer exactly DONE.",
+  "fixtureRef": "m04-c5-01",
+  "fixtureHash": "100ddcfe2b4ef6c57323ebc504fb0d964eb1fab34da129cd730230f6e00302ca",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "edit_state",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          },
+          {
+            "tool": "edit",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "settings/app.txt",
+      "optional": true
+    },
+    {
+      "tool": "edit",
+      "path": "settings/app.txt",
+      "oldText": "mode=old",
+      "newText": "mode=new"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "edit",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "allow_once",
+  "finalStateAssertions": [
+    {
+      "kind": "file_exact",
+      "path": "settings/app.txt",
+      "content": "name=demo\nmode=new\nkeep=yes\n"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "f2df51df5265fb595c5bf5a9702b15b5de1cc776b2655109207d84262f1cccd6"
+    }
+  ],
+  "tags": [
+    "edit_state"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "DONE"
+  }
+}

@@ -119,7 +119,9 @@ fn int_01(fixture: &Fixture) -> QaResult<()> {
     check!(loaded.policies.tool_defaults.edit == PolicyDecision::Allow);
     check!(loaded.policies.tool_defaults.bash == PolicyDecision::Ask);
     check!(loaded.policies.user_rules.is_empty());
-    check!(loaded.tools == base_config(fixture).tools);
+    let mut expected_tools = base_config(fixture).tools;
+    expected_tools.grep.enabled = false;
+    check!(loaded.tools == expected_tools);
     Ok(())
 }
 

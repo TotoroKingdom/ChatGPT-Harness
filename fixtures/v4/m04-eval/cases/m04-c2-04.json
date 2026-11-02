@@ -1,0 +1,77 @@
+{
+  "caseId": "m04-c2-04",
+  "caseVersion": 1,
+  "category": "path_discovery",
+  "prompt": "Locate the file named ledger_final.txt somewhere in the workspace, then read it and report its value exactly as BALANCE=730. Use a narrow glob rather than listing unrelated files.",
+  "fixtureRef": "m04-c2-04",
+  "fixtureHash": "778d977abfa7f51485ff64d66835a577e13f60d93bff053c0fa5a9b84bbe564c",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "path_discovery_then_read",
+        "steps": [
+          {
+            "tool": "glob",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "glob",
+      "patternMustMatchAny": [
+        "legacy/2019/ledger_final.txt"
+      ]
+    },
+    {
+      "tool": "read_file",
+      "path": "legacy/2019/ledger_final.txt"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "occurrence": 1,
+      "outcome": "success"
+    },
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "a25703b36129749088711bad3a474e7ae80c72a16b3331da8fab56403a1bec55"
+    }
+  ],
+  "tags": [
+    "path_discovery"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "BALANCE=730"
+  }
+}

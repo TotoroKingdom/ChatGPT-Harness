@@ -1,0 +1,9 @@
+{
+  "caseId": "m05-a2-regex",
+  "caseVersion": 1,
+  "category": "regex",
+  "prompt": "Find lines whose text contains a request status token matching the regular expression req=(4|5)\\d\\d. Report the matching file, line and text, then answer with REGEX_OK.",
+  "fixtureRef": "regex",
+  "fixtureHash": "aac0800a8924a70bf8c2e574d3feaffd3736eead3d57deebb4f910423df6c542",
+  "expectedFinalResponseContains": "REGEX_OK"
+}

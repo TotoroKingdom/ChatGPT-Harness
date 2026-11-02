@@ -1,0 +1,78 @@
+{
+  "caseId": "m04-c4-03",
+  "caseVersion": 1,
+  "category": "write_state",
+  "prompt": "Create the workspace file summary.md with exactly this content and no trailing newline: summary=complete . Then answer exactly DONE.",
+  "fixtureRef": "m04-c4-03",
+  "fixtureHash": "b17fdfe2dc656a2cf74d9d48d6a6df313c316905f0b2114ce2813206aedf4c2f",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "write_state",
+        "steps": [
+          {
+            "tool": "write",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "write",
+      "path": "summary.md",
+      "content": "summary=complete"
+    },
+    {
+      "tool": "read_file",
+      "path": "summary.md",
+      "optional": true
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "write",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "allow_once",
+  "finalStateAssertions": [
+    {
+      "kind": "file_exact",
+      "path": "summary.md",
+      "content": "summary=complete"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "d857b1f02e5b5e377bdb3240e721828dd47678db194464eda8dbd2fd31b8c696"
+    }
+  ],
+  "tags": [
+    "write_state"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "DONE"
+  }
+}

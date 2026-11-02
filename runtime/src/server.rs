@@ -217,9 +217,11 @@ fn handle_request<W: Write>(
                 )?;
                 return Ok(false);
             }
-            if let Err(error) =
-                core.initialize_with_host(params.runtime_config, params.host_context)
-            {
+            if let Err(error) = core.initialize_with_host_capabilities(
+                params.runtime_config,
+                params.host_context,
+                &params.capabilities,
+            ) {
                 write_error(
                     output,
                     id,
@@ -968,7 +970,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit", "bash"]
+            ["read_file", "glob", "grep", "write", "edit", "bash"]
         );
         let bash = result
             .items

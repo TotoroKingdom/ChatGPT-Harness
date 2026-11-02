@@ -74,13 +74,14 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     tools: {
       readFile: { enabled: true },
       glob: { enabled: true },
+      grep: { enabled: true },
       write: { enabled: true },
       edit: { enabled: true },
       bash: { enabled: false },
     },
     bash: { autoDetect: true, executablePath: "C:\\Program Files\\Git\\bin\\bash.exe" },
     policies: {
-      toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" },
+      toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" },
       userRules: [],
     },
     desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
@@ -195,7 +196,7 @@ function policySnapshot(): PolicyEffectiveSnapshot {
     status: "valid",
     systemRules: [{ id: "system-deny-outside", name: "System raw name", decision: "deny", reason: "System raw reason", source: "system", editable: false, enabled: true }],
     userRules: [{ id: "user-rule-1", name: "Keep this exact user name", decision: "ask", matcher: { type: "tool", tool: "write" }, reason: "Keep this exact user reason", source: "user", editable: true, enabled: true }],
-    toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" },
+    toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" },
     perTool: [{ tool: "read_file", decision: "allow", matchedRuleIds: ["user-rule-1"], reason: "matched_user_rules", availability: "available" }],
   };
 }

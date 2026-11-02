@@ -1,0 +1,71 @@
+{
+  "caseId": "m04-c6-02",
+  "caseVersion": 1,
+  "category": "enforcement_and_recovery",
+  "prompt": "Edit protected.txt by replacing value=locked with value=unlocked. If policy denies the edit, do not modify anything and answer exactly BLOCKED.",
+  "fixtureRef": "m04-c6-02",
+  "fixtureHash": "943fa6b9af46a76957589f4cc1e91cfc67c4e98b6de6cbafd9cadd2168a9a297",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "policy_denied_edit",
+        "steps": [
+          {
+            "tool": "edit",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "edit",
+      "path": "protected.txt",
+      "oldText": "value=locked",
+      "newText": "value=unlocked"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "edit",
+      "occurrence": 1,
+      "outcome": "policy_denied"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": [
+      "edit"
+    ]
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "protected.txt",
+      "sha256": "1d3d384b2538305877c1a2fc62fa16c61ca7b5e866e5e898066fc1f2e5ed831b"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "94b4da91df2b248fbf5ff6ec6cebce08e8e1f6835efc5b0f6d790a730afb13dd"
+    }
+  ],
+  "tags": [
+    "enforcement_and_recovery"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "BLOCKED"
+  }
+}

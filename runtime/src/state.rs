@@ -149,6 +149,7 @@ pub struct RuntimeCore {
     activity: Arc<ActivityStore>,
     evidence: Arc<EvidenceService>,
     host_context: Option<RuntimeHostContext>,
+    expose_policy_denied_tools: bool,
     pub last_error: Option<RuntimeErrorSummary>,
 }
 
@@ -182,6 +183,7 @@ impl RuntimeCore {
             approval_manager: ApprovalManager::new(runtime_id.clone()),
             session_grants: Arc::new(SessionGrantStore::new(runtime_id)),
             host_context: None,
+            expose_policy_denied_tools: false,
             last_error: None,
         }
     }
@@ -194,6 +196,19 @@ impl RuntimeCore {
         &mut self,
         config: RuntimeConfigSnapshot,
         host_context: Option<RuntimeHostContext>,
+    ) -> Result<(), WorkspaceError> {
+        self.initialize_with_host_capabilities(
+            config,
+            host_context,
+            &std::collections::BTreeMap::new(),
+        )
+    }
+
+    pub(crate) fn initialize_with_host_capabilities(
+        &mut self,
+        config: RuntimeConfigSnapshot,
+        host_context: Option<RuntimeHostContext>,
+        capabilities: &std::collections::BTreeMap<String, bool>,
     ) -> Result<(), WorkspaceError> {
         let workspace = Workspace::new(&config.workspace.root_path)?;
         let workspace_guard = Arc::new(WorkspaceGuard::new(&workspace));
@@ -289,6 +304,10 @@ impl RuntimeCore {
         self.activity = activity;
         self.evidence = evidence;
         self.host_context = host_context;
+        self.expose_policy_denied_tools = capabilities
+            .get("m04ExposePolicyDeniedTools")
+            .copied()
+            .unwrap_or(false);
         self.events = Some(events);
         self.activity_event_receiver = Some(activity_event_receiver);
         self.config = Some(config);
@@ -424,7 +443,13 @@ impl RuntimeCore {
         self.execution_pipeline
             .as_ref()
             .cloned()
-            .map(McpExecutionContext::new)
+            .map(|pipeline| {
+                McpExecutionContext::with_runtime_id_for_evaluation(
+                    self.runtime_id.clone(),
+                    pipeline,
+                    self.expose_policy_denied_tools,
+                )
+            })
             .ok_or(McpContextError::RuntimeNotInitialized)
     }
     #[allow(dead_code)]
@@ -691,6 +716,58 @@ mod tests {
         }
     }
 
+    fn evidence_core(root: &Path, database: &Path) -> RuntimeCore {
+        evidence_core_with_config(root, database, config_for(root))
+    }
+
+    fn evidence_core_with_config(
+        _root: &Path,
+        database: &Path,
+        config: RuntimeConfigSnapshot,
+    ) -> RuntimeCore {
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            config,
+            Some(harness_control_protocol::RuntimeHostContext {
+                host_session_id: Some("grep-history-host".into()),
+                supervisor_generation_id: Some("grep-history-generation".into()),
+                evidence_store: Some(harness_control_protocol::EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 256,
+                }),
+            }),
+        )
+        .expect("initialize evidence core");
+        core.acknowledge().expect("acknowledge evidence core");
+        core
+    }
+
+    fn result_identity(result: &rmcp::model::CallToolResult) -> (String, String) {
+        let meta = serde_json::to_value(result.meta.as_ref().expect("correlation metadata"))
+            .expect("serialize meta");
+        (
+            meta["chatgptHarness"]["runtimeId"]
+                .as_str()
+                .expect("runtime id")
+                .into(),
+            meta["chatgptHarness"]["requestId"]
+                .as_str()
+                .expect("request id")
+                .into(),
+        )
+    }
+
+    fn assert_activity_request(core: &RuntimeCore, request_id: &str) {
+        assert!(
+            core.activity_snapshot(100)
+                .iter()
+                .any(|entry| entry.request_id.to_string() == request_id),
+            "Activity did not contain request {request_id}"
+        );
+    }
+
     #[test]
     fn initialize_with_valid_workspace_sets_all_initialized_state() {
         let workspace = TestWorkspace::new();
@@ -712,7 +789,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit"]
+            ["read_file", "glob", "grep", "write", "edit"]
         );
     }
 
@@ -749,7 +826,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit", "bash"]
+            ["read_file", "glob", "grep", "write", "edit", "bash"]
         );
         assert!(effective
             .iter()
@@ -794,13 +871,14 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit", "bash"]
+            ["read_file", "glob", "grep", "write", "edit", "bash"]
         );
         assert!(!descriptors[0].enabled);
         assert!(!descriptors[1].enabled);
-        assert!(!descriptors[2].enabled);
-        assert!(descriptors[3].enabled);
+        assert!(descriptors[2].enabled);
+        assert!(!descriptors[3].enabled);
         assert!(descriptors[4].enabled);
+        assert!(descriptors[5].enabled);
         assert_eq!(
             core.tool_registry().declared_capability("bash"),
             Some(crate::tools::ToolCapability::DeveloperShell)
@@ -820,6 +898,7 @@ mod tests {
             [
                 crate::tools::ToolAvailability::UnavailableDisabled,
                 crate::tools::ToolAvailability::UnavailableDisabled,
+                crate::tools::ToolAvailability::Available,
                 crate::tools::ToolAvailability::UnavailableDisabled,
                 crate::tools::ToolAvailability::Available,
                 crate::tools::ToolAvailability::UnavailableByMode,
@@ -1156,6 +1235,270 @@ mod tests {
         assert!(!serde_json::to_string(&detail)
             .unwrap()
             .contains("M03_TOOL_CONTENT_SENTINEL"));
+    }
+
+    #[test]
+    fn grep_activity_and_m03_share_exact_identity_and_durable_scalars_only() {
+        let workspace = TestWorkspace::new();
+        let database = workspace.base.join("history").join("history.sqlite3");
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            config_for(&workspace.root),
+            Some(harness_control_protocol::RuntimeHostContext {
+                host_session_id: Some("host-grep".into()),
+                supervisor_generation_id: Some("generation-grep".into()),
+                evidence_store: Some(harness_control_protocol::EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 256,
+                }),
+            }),
+        )
+        .expect("initialize with evidence");
+        core.acknowledge().expect("acknowledge");
+        fs::create_dir_all(workspace.root.join("docs")).expect("docs");
+        fs::write(
+            workspace.root.join("docs/private.txt"),
+            "GREP_MATCH_SENTINEL\nneedle\n",
+        )
+        .expect("grep fixture");
+        let service = core.mcp_service().unwrap();
+        let result = service
+            .call_tool(
+                "grep",
+                serde_json::json!({
+                    "query": "GREP_QUERY_SENTINEL",
+                    "include": ["docs/GREP_FILTER_SENTINEL*.txt"],
+                    "maxResults": 10
+                }),
+            )
+            .unwrap();
+        let meta = serde_json::to_value(result.meta.expect("correlation metadata")).unwrap();
+        let request_id = meta["chatgptHarness"]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let runtime_id = meta["chatgptHarness"]["runtimeId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(runtime_id, core.runtime_id);
+        assert!(core.activity_snapshot(100).iter().any(|entry| {
+            entry.request_id.to_string() == request_id && entry.tool_name.as_deref() == Some("grep")
+        }));
+        core.stop_evidence();
+
+        let reader = chatgpt_harness_evidence_store::EvidenceReader::open(&database)
+            .expect("open evidence reader");
+        let detail = reader
+            .get(&runtime_id, &request_id)
+            .expect("get evidence")
+            .expect("grep request exists");
+        assert_eq!(detail.summary.tool_name, "grep");
+        let serialized = serde_json::to_string(&detail).unwrap();
+        for sentinel in [
+            "GREP_QUERY_SENTINEL",
+            "GREP_FILTER_SENTINEL",
+            "GREP_MATCH_SENTINEL",
+            "needle",
+        ] {
+            assert!(
+                !serialized.contains(sentinel),
+                "durable grep evidence leaked {sentinel}"
+            );
+        }
+        let terminal = detail
+            .events
+            .iter()
+            .find(|event| {
+                event.stage == harness_control_protocol::EvidenceStage::ExecutionCompleted
+            })
+            .expect("terminal evidence");
+        assert!(matches!(
+            terminal.sanitized_arguments,
+            Some(
+                harness_control_protocol::DurableSanitizedArgumentsEvidence::Grep {
+                    query_bytes: 19,
+                    include_count: 1,
+                    exclude_count: 0,
+                    max_results: 10,
+                    ..
+                }
+            )
+        ));
+        assert!(matches!(
+            terminal.result_evidence,
+            Some(harness_control_protocol::ExecutionResultEvidence::Grep {
+                match_count: 0,
+                truncated: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn grep_history_covers_success_truncation_deny_and_timeout_without_raw_text() {
+        let workspace = TestWorkspace::new();
+        let docs = workspace.root.join("docs");
+        fs::create_dir_all(&docs).expect("docs");
+        fs::write(
+            docs.join("GREP_FILTER_SENTINEL.txt"),
+            "GREP_QUERY_SENTINEL\nneedle\n",
+        )
+        .expect("success fixture");
+        fs::write(docs.join("matches.txt"), "needle\nneedle\n").expect("truncation fixture");
+
+        let database = workspace.base.join("success.sqlite3");
+        let core = evidence_core(&workspace.root, &database);
+        let service = core.mcp_service().expect("success service");
+        let success = service
+            .call_tool(
+                "grep",
+                serde_json::json!({
+                    "query": "GREP_QUERY_SENTINEL",
+                    "include": ["docs/GREP_FILTER_SENTINEL*.txt"],
+                    "maxResults": 1
+                }),
+            )
+            .expect("success call");
+        assert_eq!(success.is_error, Some(false));
+        let (success_runtime, success_request) = result_identity(&success);
+
+        let truncated = service
+            .call_tool(
+                "grep",
+                serde_json::json!({
+                    "query": "needle",
+                    "include": ["docs/matches.txt"],
+                    "maxResults": 1
+                }),
+            )
+            .expect("truncation call");
+        assert_eq!(truncated.is_error, Some(false));
+        assert_eq!(
+            truncated
+                .structured_content
+                .as_ref()
+                .expect("truncation output")["truncated"],
+            true
+        );
+        let (truncated_runtime, truncated_request) = result_identity(&truncated);
+        assert_activity_request(&core, &success_request);
+        assert_activity_request(&core, &truncated_request);
+        core.stop_evidence();
+        let reader = chatgpt_harness_evidence_store::EvidenceReader::open(&database)
+            .expect("open success evidence");
+        let success_detail = reader
+            .get(&success_runtime, &success_request)
+            .expect("read success evidence")
+            .expect("success request exists");
+        assert_eq!(
+            success_detail.summary.terminal_state,
+            harness_control_protocol::HistoryTerminalState::Succeeded
+        );
+        assert!(matches!(
+            success_detail
+                .events
+                .iter()
+                .find(|event| event.stage
+                    == harness_control_protocol::EvidenceStage::ExecutionCompleted)
+                .and_then(|event| event.result_evidence.as_ref()),
+            Some(harness_control_protocol::ExecutionResultEvidence::Grep {
+                match_count: 1,
+                truncated: false,
+                ..
+            })
+        ));
+        let truncated_detail = reader
+            .get(&truncated_runtime, &truncated_request)
+            .expect("read truncation evidence")
+            .expect("truncation request exists");
+        assert!(matches!(
+            truncated_detail
+                .events
+                .iter()
+                .find(|event| event.stage
+                    == harness_control_protocol::EvidenceStage::ExecutionCompleted)
+                .and_then(|event| event.result_evidence.as_ref()),
+            Some(harness_control_protocol::ExecutionResultEvidence::Grep {
+                match_count: 1,
+                truncated: true,
+                ..
+            })
+        ));
+        let deny_database = workspace.base.join("deny.sqlite3");
+        let mut deny_config = config_for(&workspace.root);
+        deny_config.policies.tool_defaults.grep = PolicyDecision::Deny;
+        let deny_core = evidence_core_with_config(&workspace.root, &deny_database, deny_config);
+        let deny_service = deny_core.mcp_service().expect("deny service");
+        let denied = deny_service
+            .call_tool(
+                "grep",
+                serde_json::json!({ "query": "GREP_QUERY_SENTINEL" }),
+            )
+            .expect("deny call");
+        assert_eq!(denied.is_error, Some(true));
+        let (deny_runtime, deny_request) = result_identity(&denied);
+        assert_activity_request(&deny_core, &deny_request);
+        deny_core.stop_evidence();
+        let deny_reader = chatgpt_harness_evidence_store::EvidenceReader::open(&deny_database)
+            .expect("open deny evidence");
+        let deny_detail = deny_reader
+            .get(&deny_runtime, &deny_request)
+            .expect("read deny evidence")
+            .expect("deny request exists");
+        assert_eq!(
+            deny_detail.summary.terminal_state,
+            harness_control_protocol::HistoryTerminalState::Denied
+        );
+
+        let timeout_database = workspace.base.join("timeout.sqlite3");
+        let timeout_core = evidence_core(&workspace.root, &timeout_database);
+        let timeout_service = timeout_core.mcp_service().expect("timeout service");
+        let _timeout = crate::tools::override_search_timeout(std::time::Duration::ZERO);
+        let timed_out = timeout_service
+            .call_tool(
+                "grep",
+                serde_json::json!({ "query": "GREP_QUERY_SENTINEL" }),
+            )
+            .expect("timeout call");
+        assert_eq!(
+            timed_out
+                .structured_content
+                .as_ref()
+                .expect("timeout output")["code"],
+            "SEARCH_TIMEOUT"
+        );
+        let (timeout_runtime, timeout_request) = result_identity(&timed_out);
+        assert_activity_request(&timeout_core, &timeout_request);
+        timeout_core.stop_evidence();
+        let timeout_reader =
+            chatgpt_harness_evidence_store::EvidenceReader::open(&timeout_database)
+                .expect("open timeout evidence");
+        let timeout_detail = timeout_reader
+            .get(&timeout_runtime, &timeout_request)
+            .expect("read timeout evidence")
+            .expect("timeout request exists");
+        assert_eq!(
+            timeout_detail.summary.terminal_state,
+            harness_control_protocol::HistoryTerminalState::TimedOut
+        );
+        assert_eq!(
+            timeout_detail.summary.failure_category,
+            Some(harness_control_protocol::control_read::ActivityFailureCategory::GrepTimeout)
+        );
+        for detail in [
+            &success_detail,
+            &truncated_detail,
+            &deny_detail,
+            &timeout_detail,
+        ] {
+            let serialized = serde_json::to_string(detail).expect("serialize history detail");
+            for sentinel in ["GREP_QUERY_SENTINEL", "GREP_FILTER_SENTINEL", "needle"] {
+                assert!(!serialized.contains(sentinel), "history leaked {sentinel}");
+            }
+        }
     }
 
     #[test]

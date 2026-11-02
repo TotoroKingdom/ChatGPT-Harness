@@ -27,7 +27,7 @@ export type RuleEditorValue = {
 export type RuleEditorError = string | { key: string; values?: Record<string, string | number> };
 
 const decisions: PolicyDecision[] = ["allow", "ask", "deny"];
-const tools = ["read_file", "glob", "write", "edit", "bash"] as const;
+const tools = ["read_file", "glob", "grep", "write", "edit", "bash"] as const;
 
 function cloneMatcher(matcher: PolicyMatcherConfig | undefined): PolicyMatcherConfig | undefined {
   if (!matcher) return undefined;

@@ -27,6 +27,7 @@ impl ApprovedWriteTarget {
     }
 }
 
+#[derive(Clone)]
 pub struct WorkspaceGuard {
     workspace: Workspace,
     resolver: PathResolver,
@@ -67,6 +68,24 @@ impl WorkspaceGuard {
             });
         }
         Ok(root)
+    }
+
+    /// Canonical root used by the native grep traversal after the pipeline has
+    /// validated the requested scope. Callers must not expose this path.
+    pub(crate) fn canonical_workspace_root(&self) -> &Path {
+        self.workspace.canonical_root()
+    }
+
+    /// Containment check for the final path resolved from an opened handle.
+    pub(crate) fn contains_canonical_path(&self, path: &Path) -> bool {
+        is_within_workspace(self.workspace.canonical_root(), path)
+    }
+
+    /// Converts a canonical path to a logical Workspace-relative path.
+    pub(crate) fn logical_path_from_canonical(&self, path: &Path) -> Option<PathBuf> {
+        path.strip_prefix(self.workspace.canonical_root())
+            .ok()
+            .map(normalize_relative)
     }
 
     pub fn approve(
@@ -228,7 +247,33 @@ fn normalize_relative(path: &Path) -> PathBuf {
 }
 
 fn is_within_workspace(workspace_root: &Path, resolved_path: &Path) -> bool {
-    resolved_path == workspace_root || resolved_path.strip_prefix(workspace_root).is_ok()
+    #[cfg(windows)]
+    {
+        let root = normalized_windows_path_key(workspace_root);
+        let candidate = normalized_windows_path_key(resolved_path);
+        return candidate == root
+            || candidate
+                .strip_prefix(&root)
+                .is_some_and(|suffix| suffix.starts_with('\\'));
+    }
+    #[cfg(not(windows))]
+    {
+        resolved_path == workspace_root || resolved_path.strip_prefix(workspace_root).is_ok()
+    }
+}
+
+#[cfg(windows)]
+fn normalized_windows_path_key(path: &Path) -> String {
+    let mut value = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    if let Some(stripped) = value.strip_prefix(r"\\?\UNC\") {
+        value = format!(r"\\{stripped}");
+    } else if let Some(stripped) = value.strip_prefix(r"\\?\") {
+        value = stripped.to_owned();
+    }
+    while value.ends_with('\\') && value.len() > 3 {
+        value.pop();
+    }
+    value
 }
 
 fn is_reparse_point(metadata: &fs::Metadata) -> bool {

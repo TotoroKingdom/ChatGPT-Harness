@@ -21,7 +21,9 @@
         "bash_concurrency_limit",
         "bash_spawn_failed",
         "bash_cancelled",
-        "bash_process_failed"
+        "bash_process_failed",
+        "grep_timeout",
+        "grep_cancelled"
       ],
       "type": "string"
     },

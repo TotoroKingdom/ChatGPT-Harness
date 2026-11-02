@@ -1,0 +1,77 @@
+{
+  "caseId": "m04-c2-02",
+  "caseVersion": 1,
+  "category": "path_discovery",
+  "prompt": "Locate the file named report_final.csv somewhere in the workspace, then read it and report its value exactly as ROWS=42. Use a narrow glob rather than listing unrelated files.",
+  "fixtureRef": "m04-c2-02",
+  "fixtureHash": "f429ed0c5f80d4b3d85d1e3676d5047da14c8d404e22d61fd91b43eb21654e0b",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "path_discovery_then_read",
+        "steps": [
+          {
+            "tool": "glob",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "glob",
+      "patternMustMatchAny": [
+        "data/exports/report_final.csv"
+      ]
+    },
+    {
+      "tool": "read_file",
+      "path": "data/exports/report_final.csv"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "occurrence": 1,
+      "outcome": "success"
+    },
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "55bf30e6ff6fcc08739e1c730d1becd678f6eb8f30b3a99fa0d1ba7dfb53e07d"
+    }
+  ],
+  "tags": [
+    "path_discovery"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "ROWS=42"
+  }
+}

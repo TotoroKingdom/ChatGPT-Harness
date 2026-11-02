@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 vi.mock("@/app/providers/HarnessDataProvider", () => ({ useHarnessData: () => context }));
 let context = makeContext();
 function makeContext() {
-  const config: AppConfig = { schemaVersion: 3, configRevision: "saved-1", workspace: { rootPath: "D:\\example" }, tunnel: { tunnelId: "example", autoDetect: true }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "ask", glob: "ask", write: "ask", edit: "ask", bash: "ask" }, userRules: [] }, desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false }, history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 } };
+  const config: AppConfig = { schemaVersion: 3, configRevision: "saved-1", workspace: { rootPath: "D:\\example" }, tunnel: { tunnelId: "example", autoDetect: true }, security: { mode: "normal", developerTestMode: false }, ui: {}, tools: { readFile: { enabled: true }, glob: { enabled: true }, grep: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } }, bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "ask", glob: "ask", grep: "ask", write: "ask", edit: "ask", bash: "ask" }, userRules: [] }, desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false }, history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 } };
   return { client: new TauriHarnessControlClient(), components: { runtime: "ready", tunnel: "stopped", mcp: "ready" },
     runtime: { status: "success", data: { runtimeId: "runtime-1", activeWorkspace: "D:\private\SECRET_PATH" } },
     config, tools: { status: "empty", data: { items: [] } }, mutateConfig: vi.fn(),
@@ -109,13 +109,13 @@ describe("M8-D Control Plane response rendering", () => {
   });
 
   it("renders every availability verbatim, keeps ASK, and never invents reason", async () => {
-    const names = ["read_file", "glob", "write", "edit"];
-    const tools = ["available", "unavailable_by_policy", "unavailable_by_runtime", "disabled"].map((availability, index) => ({ ...tool, name: names[index], availability }));
+    const names = ["read_file", "glob", "grep", "write", "edit"];
+    const tools = ["available", "unavailable_by_policy", "available_with_approval", "unavailable_by_runtime", "disabled"].map((availability, index) => ({ ...tool, name: names[index], availability }));
     tauri.invoke.mockResolvedValue(tools);
     const { container } = render(<ToolsPage />);
     await waitFor(() => expect(screen.getByText("Available")).toBeInTheDocument());
     tools.forEach((item) => expect(screen.getByText(i18n.t(toolAvailabilityKey(item.availability as ToolAvailability)))).toBeInTheDocument());
-    expect(screen.getAllByRole("radiogroup")).toHaveLength(5);
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(6);
     expect(screen.getByText("Runtime has not reported this tool.")).toBeInTheDocument();
     expect(tauri.invoke.mock.calls).toEqual([["runtime_get_effective_tools", undefined]]);
     noSensitiveDOM(container);
@@ -174,7 +174,7 @@ describe("M8-D Control Plane response rendering", () => {
   it.each([[ActivityPage, "No retained activity"], [ToolsPage, "No tools reported"]] as const)("distinguishes empty arrays from unavailable", async (Page, message) => {
     tauri.invoke.mockResolvedValue([]);
     render(<Page />);
-    if (Page === ToolsPage) expect(await screen.findAllByText("Runtime has not reported this tool.")).toHaveLength(5);
+    if (Page === ToolsPage) expect(await screen.findAllByText("Runtime has not reported this tool.")).toHaveLength(6);
     else expect(await screen.findByText("No retained activity in this snapshot")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText("ready")).not.toBeInTheDocument();
@@ -202,7 +202,7 @@ describe("M8-D Control Plane response rendering", () => {
     expect(screen.queryByText("Unavailable by Runtime policy")).not.toBeInTheDocument();
     await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "Refresh tools" }));
-    expect(await screen.findAllByText("Runtime has not reported this tool.")).toHaveLength(5);
+    expect(await screen.findAllByText("Runtime has not reported this tool.")).toHaveLength(6);
   });
 
   it("ignores late responses from the previous Runtime identity", async () => {

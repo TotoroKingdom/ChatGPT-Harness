@@ -5,9 +5,10 @@ use crate::bash::{
 };
 use crate::policy::PolicyContext;
 use crate::tools::{
-    execute_edit, execute_glob, execute_read_file, execute_write, validate_glob_pattern, EditError,
-    EditOutput, EditRequest, GlobOutput, GlobRequest, ReadFileOutput, ReadFileRequest, WriteError,
-    WriteOutput, WriteRequest,
+    execute_edit, execute_glob, execute_grep, execute_grep_cancellable, execute_read_file,
+    execute_write, validate_glob_pattern, validate_grep_request, validate_grep_scope, EditError,
+    EditOutput, EditRequest, GlobOutput, GlobRequest, GrepError, GrepOutput, GrepRequest,
+    ReadFileOutput, ReadFileRequest, WriteError, WriteOutput, WriteRequest,
 };
 use crate::workspace::{WorkspaceError, WorkspaceGuard};
 use harness_control_protocol::{
@@ -254,6 +255,117 @@ impl ToolExecutor for GlobRequest {
         _max_read_bytes: u32,
     ) -> Result<Self::Output, ExecutionError> {
         execute_glob(permit, guard, self).map_err(ExecutionError::Glob)
+    }
+}
+
+impl ToolExecutor for GrepRequest {
+    type Output = GrepOutput;
+    const TOOL_NAME: &'static str = "grep";
+
+    fn validate(&self) -> Result<(), ExecutionError> {
+        validate_grep_request(self).map_err(ExecutionError::Grep)
+    }
+
+    fn workspace_target(&self) -> WorkspaceTarget<'_> {
+        WorkspaceTarget::ExistingPath(&self.scope)
+    }
+
+    fn approval_facts(&self, guard: &WorkspaceGuard) -> Result<ToolApprovalFacts, ExecutionError> {
+        let scope = validate_grep_scope(guard, &self.scope).map_err(ExecutionError::Grep)?;
+        let mut sanitized_arguments = BTreeMap::new();
+        sanitized_arguments.insert("mode".into(), grep_mode_name(self.mode).into());
+        sanitized_arguments.insert("scope".into(), scope.clone());
+        sanitized_arguments.insert("queryBytes".into(), self.query.len().to_string());
+        sanitized_arguments.insert("includeCount".into(), self.include.len().to_string());
+        sanitized_arguments.insert("excludeCount".into(), self.exclude.len().to_string());
+        sanitized_arguments.insert("maxResults".into(), self.max_results.to_string());
+        sanitized_arguments.insert("maxOutputBytes".into(), self.max_output_bytes.to_string());
+        Ok(ToolApprovalFacts {
+            sanitized_arguments,
+            scope_summary: scope.clone(),
+            fingerprint: serde_json::json!({
+                "tool": Self::TOOL_NAME,
+                "query": self.query,
+                "mode": grep_mode_name(self.mode),
+                "scope": scope,
+                "include": self.include,
+                "exclude": self.exclude,
+                "maxResults": self.max_results,
+                "maxOutputBytes": self.max_output_bytes,
+            })
+            .to_string(),
+            grant_scope: Some(scope),
+            bash_details: None,
+            allow_for_session_eligible: None,
+        })
+    }
+
+    fn arguments_evidence(
+        &self,
+        guard: &WorkspaceGuard,
+    ) -> Option<harness_control_protocol::SanitizedArgumentsEvidence> {
+        let logical_scope = validate_grep_scope(guard, &self.scope).ok()?;
+        Some(harness_control_protocol::SanitizedArgumentsEvidence::Grep {
+            mode: self.mode,
+            logical_scope,
+            query_bytes: self.query.len() as u64,
+            include_count: self.include.len() as u32,
+            exclude_count: self.exclude.len() as u32,
+            max_results: self.max_results,
+            max_output_bytes: self.max_output_bytes,
+        })
+        .and_then(harness_control_protocol::SanitizedArgumentsEvidence::sanitized)
+    }
+
+    fn record_output(&self, context: &mut super::RequestContext, output: &Self::Output) {
+        context.result_evidence = Some(harness_control_protocol::ExecutionResultEvidence::Grep {
+            match_count: output.matches.len() as u64,
+            scanned_files: output.scanned_files,
+            scanned_bytes: output.scanned_bytes,
+            skipped_files: output.skipped_files,
+            truncated: output.truncated,
+        });
+    }
+
+    fn workspace_error(error: WorkspaceError) -> ExecutionError {
+        ExecutionError::Grep(GrepError::Workspace(error))
+    }
+
+    fn execute(
+        &self,
+        permit: &ExecutionPermit,
+        guard: &WorkspaceGuard,
+        _max_read_bytes: u32,
+    ) -> Result<Self::Output, ExecutionError> {
+        execute_grep(permit, guard, self).map_err(ExecutionError::Grep)
+    }
+
+    fn execute_async<'a>(
+        &'a self,
+        _permit: &'a ExecutionPermit,
+        guard: &'a WorkspaceGuard,
+        _max_read_bytes: u32,
+        _bash_runtime: Option<Arc<BashRuntime>>,
+        cancel: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Output, ExecutionError>> + Send + 'a>>
+    where
+        Self: Sync,
+        Self::Output: Send + 'a,
+    {
+        let request = self.clone();
+        let guard = guard.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                execute_grep_cancellable(&guard, &request, cancel).map_err(ExecutionError::Grep)
+            })
+            .await
+            .map_err(|_| {
+                ExecutionError::Grep(GrepError::IoFailure {
+                    path: ".".into(),
+                    kind: std::io::ErrorKind::Other,
+                })
+            })?
+        })
     }
 }
 
@@ -579,6 +691,13 @@ fn logical_path(path: std::path::PathBuf) -> String {
         ".".into()
     } else {
         value
+    }
+}
+
+fn grep_mode_name(mode: harness_control_protocol::GrepMode) -> &'static str {
+    match mode {
+        harness_control_protocol::GrepMode::Literal => "literal",
+        harness_control_protocol::GrepMode::Regex => "regex",
     }
 }
 

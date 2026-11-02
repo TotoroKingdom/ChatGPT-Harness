@@ -1,0 +1,84 @@
+{
+  "caseId": "m04-c5-03",
+  "caseVersion": 1,
+  "category": "edit_state",
+  "prompt": "Edit the workspace file data/flag.txt: replace the unique exact text flag=off with flag=on. Do not change anything else. Then answer exactly DONE.",
+  "fixtureRef": "m04-c5-03",
+  "fixtureHash": "cb94b16c4e51d81fd98f3042f3b0e69f45abee09f116f887b1aaebfd6a1c1810",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "edit_state",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          },
+          {
+            "tool": "edit",
+            "repeat": "one"
+          },
+          {
+            "tool": "read_file",
+            "repeat": "one",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "data/flag.txt",
+      "optional": true
+    },
+    {
+      "tool": "edit",
+      "path": "data/flag.txt",
+      "oldText": "flag=off",
+      "newText": "flag=on"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "edit",
+      "occurrence": 1,
+      "outcome": "success"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "allow_once",
+  "finalStateAssertions": [
+    {
+      "kind": "file_exact",
+      "path": "data/flag.txt",
+      "content": "flag=on\nchecksum=abc\n"
+    },
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "0ddab9e2e68fbd6bd5c247b0aa9e2b090ea4a2af7bb60f2a794a643ff34214c9"
+    }
+  ],
+  "tags": [
+    "edit_state"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "DONE"
+  }
+}

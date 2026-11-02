@@ -1,0 +1,62 @@
+{
+  "caseId": "m04-c6-04",
+  "caseVersion": 1,
+  "category": "enforcement_and_recovery",
+  "prompt": "Read missing/archive.txt and report its content. If it does not exist, make no changes and answer exactly NOT_FOUND.",
+  "fixtureRef": "m04-c6-04",
+  "fixtureHash": "c1518e2262ab63e3ce3a8e2a8db5a3bc846f573f2038f8bb058193faa043e1a8",
+  "preconditions": [
+    "the immutable fixture tree is materialized into a fresh isolated workspace"
+  ],
+  "selectionOracle": {
+    "strategies": [
+      {
+        "id": "missing_target",
+        "steps": [
+          {
+            "tool": "read_file",
+            "repeat": "one"
+          }
+        ]
+      }
+    ]
+  },
+  "argumentConstraints": [
+    {
+      "tool": "read_file",
+      "path": "missing/archive.txt"
+    }
+  ],
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "read_file",
+      "occurrence": 1,
+      "outcome": "target_not_found"
+    }
+  ],
+  "policyExpectation": {
+    "defaults": {
+      "readFile": "allow",
+      "glob": "allow",
+      "write": "ask",
+      "edit": "ask",
+      "bash": "disabled"
+    },
+    "denyTools": []
+  },
+  "approvalPlan": "none",
+  "finalStateAssertions": [
+    {
+      "kind": "unchanged",
+      "path": "sentinel.txt",
+      "sha256": "78bcad8c99abfe1ad09562530a2fca2d0c2f5cd6e303986623ae69ac1294a01e"
+    }
+  ],
+  "tags": [
+    "enforcement_and_recovery"
+  ],
+  "finalResponseAssertion": {
+    "kind": "equals",
+    "text": "NOT_FOUND"
+  }
+}
