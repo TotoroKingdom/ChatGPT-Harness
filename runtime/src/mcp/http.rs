@@ -467,7 +467,7 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().expect("tool name"))
             .collect::<Vec<_>>();
-        assert_eq!(names, ["read_file", "glob", "write", "edit"]);
+        assert_eq!(names, ["read_file", "glob", "grep", "write", "edit"]);
 
         let read = mcp_post(
             address,

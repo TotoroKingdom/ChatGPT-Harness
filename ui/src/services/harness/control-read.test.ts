@@ -137,6 +137,52 @@ describe("M7 typed evidence boundary", () => {
     expect(() => parseActivity([{ ...entry, durationMs: -1 }])).toThrow();
     expect(() => parseActivity([{ ...entry, resultEvidence: { tool: "read_file", bytesRead: -1 } }])).toThrow();
   });
+  it("keeps grep typed scalars and drops any raw query or preview sentinel", () => {
+    const parsed = parseActivity([{
+      ...entry,
+      toolName: "grep",
+      capability: "workspace_read",
+      sanitizedArguments: {
+        tool: "grep",
+        mode: "regex",
+        logicalScope: "docs",
+        queryBytes: 17,
+        includeCount: 2,
+        excludeCount: 1,
+        maxResults: 25,
+        maxOutputBytes: 65536,
+        query: "RAW_QUERY_SENTINEL",
+      },
+      resultEvidence: {
+        tool: "grep",
+        matchCount: 3,
+        scannedFiles: 4,
+        scannedBytes: 128,
+        skippedFiles: 1,
+        truncated: true,
+        preview: "PREVIEW_SENTINEL",
+      },
+    }])[0];
+    expect(parsed.sanitizedArguments).toEqual({
+      tool: "grep",
+      mode: "regex",
+      logicalScope: "docs",
+      queryBytes: 17,
+      includeCount: 2,
+      excludeCount: 1,
+      maxResults: 25,
+      maxOutputBytes: 65536,
+    });
+    expect(parsed.resultEvidence).toEqual({
+      tool: "grep",
+      matchCount: 3,
+      scannedFiles: 4,
+      scannedBytes: 128,
+      skippedFiles: 1,
+      truncated: true,
+    });
+    expect(JSON.stringify(parsed)).not.toContain("SENTINEL");
+  });
 });
 
 describe("M7 typed reason and counter observations", () => {

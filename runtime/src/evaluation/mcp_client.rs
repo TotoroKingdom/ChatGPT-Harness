@@ -1,6 +1,7 @@
 use super::case::{EvalCaseV1, PolicyExpectationValue};
 use super::fixture::{fixture_tree_hash, materialize_fixture};
 use super::manifest::{canonical_hash, sha256_file};
+use super::profile::EvalProfile;
 use super::{EvalError, EvalResult};
 use harness_control_protocol::{
     BashConfig, DecimalU64, PolicyConfig, PolicyDecision, PolicyMatcherConfig,
@@ -40,6 +41,15 @@ impl EvalRuntimeHarness {
         binary: &Path,
         case: &EvalCaseV1,
         fixture_source: &Path,
+    ) -> EvalResult<Self> {
+        Self::start_with_profile(binary, case, fixture_source, EvalProfile::M04Baseline).await
+    }
+
+    pub(crate) async fn start_with_profile(
+        binary: &Path,
+        case: &EvalCaseV1,
+        fixture_source: &Path,
+        profile: EvalProfile,
     ) -> EvalResult<Self> {
         let expected_fixture_hash = fixture_tree_hash(fixture_source)?;
         if expected_fixture_hash != case.fixture_hash {
@@ -84,7 +94,7 @@ impl EvalRuntimeHarness {
             )
         })?;
         let evidence_database = evidence_dir.join("evidence.db");
-        let config = eval_config(case, &workspace_root)?;
+        let config = eval_config_with_profile(case, &workspace_root, profile)?;
         let config_value = serde_json::to_value(&config)
             .map_err(|error| EvalError::new("HARNESS_CONTRACT_ERROR", error.to_string()))?;
 
@@ -363,6 +373,14 @@ pub(crate) fn eval_config(
     case: &EvalCaseV1,
     workspace_root: &Path,
 ) -> EvalResult<RuntimeConfigSnapshot> {
+    eval_config_with_profile(case, workspace_root, EvalProfile::M04Baseline)
+}
+
+pub(crate) fn eval_config_with_profile(
+    case: &EvalCaseV1,
+    workspace_root: &Path,
+    profile: EvalProfile,
+) -> EvalResult<RuntimeConfigSnapshot> {
     let defaults = &case.policy_expectation.defaults;
     let mut user_rules = Vec::new();
     for tool in &case.policy_expectation.deny_tools {
@@ -396,6 +414,9 @@ pub(crate) fn eval_config(
             glob: ToolEnabledConfig {
                 enabled: defaults.glob != PolicyExpectationValue::Disabled,
             },
+            grep: ToolEnabledConfig {
+                enabled: profile.grep_enabled(),
+            },
             write: ToolEnabledConfig {
                 enabled: defaults.write != PolicyExpectationValue::Disabled,
             },
@@ -411,6 +432,7 @@ pub(crate) fn eval_config(
             tool_defaults: ToolPolicyDefaults {
                 read_file: policy_decision(defaults.read_file),
                 glob: policy_decision(defaults.glob),
+                grep: PolicyDecision::Allow,
                 write: policy_decision(defaults.write),
                 edit: policy_decision(defaults.edit),
                 bash: policy_decision(defaults.bash),
@@ -455,6 +477,7 @@ pub(crate) fn base_policy_config_hash() -> EvalResult<String> {
         tools: ToolConfig {
             read_file: ToolEnabledConfig { enabled: true },
             glob: ToolEnabledConfig { enabled: true },
+            grep: ToolEnabledConfig { enabled: false },
             write: ToolEnabledConfig { enabled: true },
             edit: ToolEnabledConfig { enabled: true },
             bash: ToolEnabledConfig { enabled: false },
@@ -464,6 +487,7 @@ pub(crate) fn base_policy_config_hash() -> EvalResult<String> {
             tool_defaults: ToolPolicyDefaults {
                 read_file: PolicyDecision::Allow,
                 glob: PolicyDecision::Allow,
+                grep: PolicyDecision::Allow,
                 write: PolicyDecision::Ask,
                 edit: PolicyDecision::Ask,
                 bash: PolicyDecision::Deny,

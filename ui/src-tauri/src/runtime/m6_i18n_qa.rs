@@ -167,7 +167,9 @@ fn int_01(fixture: &Fixture) -> QaResult<()> {
     check!(loaded.ui.language.is_none());
     check!(loaded.tools.write.enabled == config.tools.write.enabled);
     check!(loaded.workspace == config.workspace);
-    check!(loaded == config);
+    let mut expected = config.clone();
+    expected.tools.grep.enabled = false;
+    check!(loaded == expected);
     Ok(())
 }
 

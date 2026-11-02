@@ -41,7 +41,7 @@ const initialFilters: Filters = {
   approvalState: "",
 };
 
-const tools = ["read_file", "glob", "write", "edit", "bash"];
+const tools = ["read_file", "glob", "grep", "write", "edit", "bash"];
 const outcomes: HistoryOutcome[] = [
   "in_progress",
   "success",

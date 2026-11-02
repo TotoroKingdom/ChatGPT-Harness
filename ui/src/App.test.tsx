@@ -49,7 +49,7 @@ describe("M1 application shell", () => {
     window.history.replaceState({}, "", "/?mock=empty");
     render(<App />);
     fireEvent.click(nav("Tools"));
-    expect((await screen.findAllByText("Runtime has not reported this tool.")).length).toBe(5);
+    expect((await screen.findAllByText("Runtime has not reported this tool.")).length).toBe(6);
     cleanup();
     window.history.replaceState({}, "", "/?mock=error");
     render(<App />);

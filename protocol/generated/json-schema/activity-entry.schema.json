@@ -31,7 +31,9 @@
         "bash_concurrency_limit",
         "bash_spawn_failed",
         "bash_cancelled",
-        "bash_process_failed"
+        "bash_process_failed",
+        "grep_timeout",
+        "grep_cancelled"
       ],
       "type": "string"
     },
@@ -227,6 +229,47 @@
         {
           "additionalProperties": false,
           "properties": {
+            "matchCount": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scannedBytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "scannedFiles": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "skippedFiles": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tool": {
+              "const": "grep",
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "tool",
+            "matchCount",
+            "scannedFiles",
+            "scannedBytes",
+            "skippedFiles",
+            "truncated"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "bytesWritten": {
               "format": "uint64",
               "minimum": 0,
@@ -292,6 +335,14 @@
         }
       ]
     },
+    "GrepMode": {
+      "description": "Content-search mode shared by MCP arguments and typed evidence.",
+      "enum": [
+        "literal",
+        "regex"
+      ],
+      "type": "string"
+    },
     "PolicyDecision": {
       "enum": [
         "deny",
@@ -347,6 +398,57 @@
           "required": [
             "tool",
             "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "excludeCount": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "includeCount": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "logicalScope": {
+              "type": "string"
+            },
+            "maxOutputBytes": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxResults": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "mode": {
+              "$ref": "#/$defs/GrepMode"
+            },
+            "queryBytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tool": {
+              "const": "grep",
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool",
+            "mode",
+            "logicalScope",
+            "queryBytes",
+            "includeCount",
+            "excludeCount",
+            "maxResults",
+            "maxOutputBytes"
           ],
           "type": "object"
         },

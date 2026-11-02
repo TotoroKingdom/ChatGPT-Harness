@@ -45,6 +45,7 @@ const policyChoices: { value: PolicyDecision; labelKey: TranslationKey }[] = [
 const builtInToolDescriptionKeys: Record<string, TranslationKey> = {
   read_file: "tools.builtInDescriptions.readFile",
   glob: "tools.builtInDescriptions.glob",
+  grep: "tools.builtInDescriptions.grep",
   write: "tools.builtInDescriptions.write",
   edit: "tools.builtInDescriptions.edit",
   bash: "tools.builtInDescriptions.bash",

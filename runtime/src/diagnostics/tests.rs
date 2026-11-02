@@ -73,7 +73,7 @@ fn snapshot_exists_before_runtime_state_and_does_not_claim_ready() {
         snapshot.security.execution_pipeline,
         PipelineState::NotInitialized
     );
-    assert_eq!(snapshot.tools.declared_count, 5);
+    assert_eq!(snapshot.tools.declared_count, 6);
     assert_eq!(snapshot.tools.effective_count, 0);
     assert!(snapshot
         .tools
@@ -118,7 +118,7 @@ fn initialization_ack_stop_and_rollback_follow_owned_lifecycle() {
     let ready = core.diagnostics();
     assert_eq!(ready.runtime.readiness, RuntimeReadiness::Ready);
     assert_eq!(ready.security.execution_pipeline, PipelineState::Ready);
-    assert_eq!(ready.tools.effective_count, 4);
+    assert_eq!(ready.tools.effective_count, 5);
     core.stop().expect("stop");
     let stopped = core.diagnostics();
     assert_eq!(stopped.runtime.lifecycle, RuntimeLifecycle::Stopping);
@@ -365,11 +365,12 @@ fn v1_file_shape_is_preserved_with_additive_bash_observations_and_no_tunnel_clai
                 "executionPipeline": "ready"
             },
             "tools": {
-                "declaredCount": 5,
-                "effectiveCount": 4,
+                "declaredCount": 6,
+                "effectiveCount": 5,
                 "items": [
                     {"name":"read_file", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow", "statusReason":"available"},
                     {"name":"glob", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow", "statusReason":"available"},
+                    {"name":"grep", "declaredCapability":"workspace_read", "availability":"available", "decision":"allow", "statusReason":"available"},
                     {"name":"write", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow", "statusReason":"available"},
                     {"name":"edit", "declaredCapability":"workspace_write", "availability":"available", "decision":"allow", "statusReason":"available"},
                     {"name":"bash", "declaredCapability":"developer_shell", "availability":"unavailable_by_mode", "decision":"deny", "statusReason":"developer_mode_required",

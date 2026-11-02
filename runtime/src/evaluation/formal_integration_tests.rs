@@ -109,6 +109,7 @@ fn case_execution<'a>(
         logical_run_index: 1,
         repetition: 1,
         cleanup_failure_injection,
+        profile: super::profile::EvalProfile::M04Baseline,
     }
 }
 

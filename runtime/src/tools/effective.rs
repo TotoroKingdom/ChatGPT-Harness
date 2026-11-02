@@ -277,9 +277,9 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit"]
+            ["read_file", "glob", "grep", "write", "edit"]
         );
-        assert!(tools[2..].iter().all(|tool| {
+        assert!(tools[3..].iter().all(|tool| {
             tool.availability == ToolAvailability::Available
                 && tool.declared_capability == Some(ToolCapability::WorkspaceWrite)
         }));

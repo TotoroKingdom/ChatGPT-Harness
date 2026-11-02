@@ -36,12 +36,14 @@ impl ActivityEventInput {
             InternalAuditEventType::ExecutionStarted => ActivityEventType::ExecutionStarted,
             InternalAuditEventType::ExecutionCompleted => ActivityEventType::ExecutionCompleted,
             InternalAuditEventType::ExecutionFailed => match event.failure_category {
-                Some(crate::audit::AuditFailureCategory::BashTimeout) => {
-                    ActivityEventType::ExecutionTimedOut
-                }
-                Some(crate::audit::AuditFailureCategory::BashCancelled) => {
-                    ActivityEventType::ExecutionCancelled
-                }
+                Some(
+                    crate::audit::AuditFailureCategory::BashTimeout
+                    | crate::audit::AuditFailureCategory::GrepTimeout,
+                ) => ActivityEventType::ExecutionTimedOut,
+                Some(
+                    crate::audit::AuditFailureCategory::BashCancelled
+                    | crate::audit::AuditFailureCategory::GrepCancelled,
+                ) => ActivityEventType::ExecutionCancelled,
                 _ => ActivityEventType::ExecutionFailed,
             },
             InternalAuditEventType::RequestDenied => ActivityEventType::ExecutionFailed,
@@ -184,8 +186,8 @@ fn activity_summary(event_type: ActivityEventType) -> &'static str {
         ActivityEventType::ApprovalDenied => "Tool approval denied.",
         ActivityEventType::ApprovalExpired => "Tool approval expired.",
         ActivityEventType::ApprovalCancelled => "Tool approval cancelled.",
-        ActivityEventType::ExecutionTimedOut => "Bash execution timed out.",
-        ActivityEventType::ExecutionCancelled => "Bash execution cancelled.",
+        ActivityEventType::ExecutionTimedOut => "Tool execution timed out.",
+        ActivityEventType::ExecutionCancelled => "Tool execution cancelled.",
         ActivityEventType::RuntimeStarted
         | ActivityEventType::RuntimeStopped
         | ActivityEventType::ValidationFailed => "Runtime activity observed.",
@@ -214,6 +216,8 @@ fn failure_category_name(category: crate::audit::AuditFailureCategory) -> &'stat
         crate::audit::AuditFailureCategory::BashSpawnFailed => "bash_spawn_failed",
         crate::audit::AuditFailureCategory::BashCancelled => "bash_cancelled",
         crate::audit::AuditFailureCategory::BashProcessFailed => "bash_process_failed",
+        crate::audit::AuditFailureCategory::GrepTimeout => "grep_timeout",
+        crate::audit::AuditFailureCategory::GrepCancelled => "grep_cancelled",
     }
 }
 

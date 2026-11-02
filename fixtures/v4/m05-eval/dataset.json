@@ -1,0 +1,12 @@
+{
+  "setId": "m05-grep-admission-v1",
+  "setVersion": 1,
+  "repetitions": 3,
+  "systemPromptRef": "system_prompt.txt",
+  "caseFiles": [
+    "cases/m05-a1-literal.json",
+    "cases/m05-a2-regex.json",
+    "cases/m05-a3-filter.json",
+    "cases/m05-a4-truncation.json"
+  ]
+}

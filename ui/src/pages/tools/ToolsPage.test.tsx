@@ -20,6 +20,7 @@ vi.mock("@/app/providers/HarnessDataProvider", () => ({
 const descriptors: ToolDescriptor[] = [
   { name: "read_file", description: "Read a workspace file.", implemented: true, enabled: true, exposed: true, effectivePolicy: "allow", scope: "workspace", readiness: "ready", riskLevel: "low" },
   { name: "glob", description: "Find workspace paths.", implemented: true, enabled: true, exposed: true, effectivePolicy: "allow", scope: "workspace", readiness: "ready", riskLevel: "low" },
+  { name: "grep", description: "Search text content inside the active Workspace.", implemented: true, enabled: true, exposed: true, effectivePolicy: "allow", scope: "workspace", readiness: "ready", riskLevel: "low" },
   { name: "write", description: "Write a workspace file.", implemented: true, enabled: true, exposed: true, effectivePolicy: "allow", scope: "workspace", readiness: "ready", riskLevel: "medium" },
   { name: "edit", description: "Edit a workspace text file.", implemented: true, enabled: true, exposed: true, effectivePolicy: "allow", scope: "workspace", readiness: "ready", riskLevel: "medium" },
 ];
@@ -46,12 +47,13 @@ function config(): AppConfig {
     tools: {
       readFile: { enabled: true },
       glob: { enabled: true },
+      grep: { enabled: true },
       write: { enabled: true },
       edit: { enabled: true },
       bash: { enabled: false },
     },
     bash: { autoDetect: true },
-    policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
+    policies: { toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
     desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
     history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
   };
@@ -109,6 +111,33 @@ afterEach(() => {
 });
 
 describe("ToolsPage M8 compact rows and Inspector", () => {
+  it("shows grep with localized description and editable ALLOW policy", async () => {
+    render(<ToolsPage />);
+    expect(screen.getByText("grep")).toBeInTheDocument();
+    expect(screen.getByText("Search text content inside the active Workspace.")).toBeInTheDocument();
+    const policy = screen.getAllByRole("radiogroup", { name: "Saved default policy for grep" })[0];
+    expect(within(policy).getByRole("radio", { name: "ALLOW" })).toHaveAttribute("aria-checked", "true");
+    await i18n.changeLanguage("zh-CN");
+    expect(screen.getByText("在当前工作区内搜索文本内容。")).toBeInTheDocument();
+  });
+
+  it("shows upgraded grep as saved OFF with ALLOW and saves explicit enable as an intent", async () => {
+    const upgraded = config();
+    upgraded.tools.grep = { enabled: false };
+    state.context = makeContext({
+      config: upgraded,
+      tools: { status: "success", data: { items: descriptors } },
+    });
+    render(<ToolsPage />);
+    expect(screen.getByRole("switch", { name: "Saved Enabled state for grep" })).toHaveAttribute("aria-checked", "false");
+    const policy = screen.getAllByRole("radiogroup", { name: "Saved default policy for grep" })[0];
+    expect(within(policy).getByRole("radio", { name: "ALLOW" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("switch", { name: "Saved Enabled state for grep" }));
+    await waitFor(() => expect(state.mutate).toHaveBeenCalledOnce());
+    const intent = state.mutate.mock.calls[0][0] as (value: AppConfig) => AppConfig;
+    expect(intent(upgraded).tools.grep.enabled).toBe(true);
+  });
+
   it("keeps saved rows editable while Runtime is stopped without reading effective tools", async () => {
     state.context = makeContext({
       components: { runtime: "stopped", tunnel: "stopped", mcp: "stopped" },

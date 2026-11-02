@@ -896,7 +896,7 @@ fn mcp_tools_list_exposes_only_available_effective_tools() {
             .iter()
             .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>(),
-        ["read_file", "glob", "write", "edit"]
+        ["read_file", "glob", "grep", "write", "edit"]
     );
 
     fixture.ready.store(false, Ordering::Release);
@@ -915,7 +915,7 @@ fn mcp_tools_list_exposes_only_available_effective_tools() {
             .iter()
             .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>(),
-        ["glob", "write", "edit"]
+        ["glob", "grep", "write", "edit"]
     );
 
     let disabled_read_file = McpService::new(McpExecutionContext::new(Arc::new(
@@ -930,7 +930,7 @@ fn mcp_tools_list_exposes_only_available_effective_tools() {
             .iter()
             .map(|tool| tool.name.as_ref())
             .collect::<Vec<_>>(),
-        ["glob", "write", "edit"]
+        ["glob", "grep", "write", "edit"]
     );
 }
 

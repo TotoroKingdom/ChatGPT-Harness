@@ -118,7 +118,7 @@ fn all_reads_use_existing_safe_snapshots_and_roundtrip_launcher_contracts() {
         serde_json::to_value(core.diagnostics().tools.items).unwrap()
     );
     roundtrip::<Vec<wire::ToolDiagnostic>>(tools.clone());
-    assert_eq!(tools.as_array().unwrap().len(), 5);
+    assert_eq!(tools.as_array().unwrap().len(), 6);
     assert_eq!(tools[0]["availability"], "available");
     assert_eq!(tools[0]["decision"], "allow");
     let diagnostics = result(call(&mut core, wire::DIAGNOSTICS_GET, json!({})));

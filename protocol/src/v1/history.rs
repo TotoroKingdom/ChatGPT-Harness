@@ -117,6 +117,28 @@ pub enum DurableSanitizedArgumentsEvidence {
     Glob {
         pattern: String,
     },
+    Grep {
+        mode: crate::GrepMode,
+        #[serde(rename = "logicalScope")]
+        #[ts(rename = "logicalScope")]
+        logical_scope: String,
+        #[serde(rename = "queryBytes")]
+        #[ts(rename = "queryBytes")]
+        #[ts(type = "number")]
+        query_bytes: u64,
+        #[serde(rename = "includeCount")]
+        #[ts(rename = "includeCount")]
+        include_count: u32,
+        #[serde(rename = "excludeCount")]
+        #[ts(rename = "excludeCount")]
+        exclude_count: u32,
+        #[serde(rename = "maxResults")]
+        #[ts(rename = "maxResults")]
+        max_results: u32,
+        #[serde(rename = "maxOutputBytes")]
+        #[ts(rename = "maxOutputBytes")]
+        max_output_bytes: u32,
+    },
     Write {
         #[serde(rename = "logicalPath")]
         #[ts(rename = "logicalPath")]

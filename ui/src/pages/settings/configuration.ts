@@ -4,8 +4,8 @@ import type { AppConfig } from "@protocol/v1";
 export const initialConfig: AppConfig = {
   schemaVersion: 3, configRevision: "0", workspace: { rootPath: "" },
   tunnel: { tunnelId: "", autoDetect: true }, security: { mode: "normal", developerTestMode: false }, ui: {},
-  tools: { readFile: { enabled: true }, glob: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
-  bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
+  tools: { readFile: { enabled: true }, glob: { enabled: true }, grep: { enabled: true }, write: { enabled: true }, edit: { enabled: true }, bash: { enabled: false } },
+  bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
   desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
   history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
 };

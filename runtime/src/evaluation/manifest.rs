@@ -1,3 +1,4 @@
+use super::profile::EvalProfile;
 use super::{EvalError, EvalResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -96,6 +97,7 @@ pub(crate) fn eval_profile_hash(
     adapter_id: &str,
     adapter_version: &str,
     requested_model: &str,
+    profile: EvalProfile,
 ) -> EvalResult<String> {
     canonical_hash(&json!({
         "systemPromptHash": system_prompt_hash,
@@ -112,7 +114,8 @@ pub(crate) fn eval_profile_hash(
         "suiteSpendCapUsd": super::SUITE_SPEND_CAP_USD,
         "repetitions": super::REPETITIONS,
         "orderSeed": super::ORDER_SEED,
-        "tools": super::BASELINE_TOOLS,
+        "profileId": profile.id(),
+        "tools": profile.tool_names(),
         "bashEnabled": false,
         "builtInProviderTools": [],
         "temperature": null,

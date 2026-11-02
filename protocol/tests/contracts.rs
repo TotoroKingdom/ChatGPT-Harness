@@ -407,3 +407,56 @@ fn history_v1_contract_is_additive_closed_and_has_no_live_authority_shape() {
     assert!(!json.contains("databasePath"));
     let _: EvidenceEventV1 = serde_json::from_str(&json).unwrap();
 }
+
+#[test]
+fn grep_evidence_is_closed_typed_and_excludes_raw_search_text() {
+    let evidence = EvidenceEventV1 {
+        schema_version: EVIDENCE_SCHEMA_VERSION,
+        event_id: "event-grep".into(),
+        runtime_id: "runtime-grep".into(),
+        request_id: "request-grep".into(),
+        host_session_id: None,
+        supervisor_generation_id: None,
+        approval_id: None,
+        tool_name: "grep".into(),
+        occurred_at_utc: "2026-11-02T00:00:00Z".into(),
+        recorded_at_utc: "2026-11-02T00:00:01Z".into(),
+        stage: EvidenceStage::ExecutionCompleted,
+        lifecycle_state: EvidenceLifecycleState::Completed,
+        workspace_validation: EvidenceWorkspaceValidation::Passed,
+        policy_decision: Some(PolicyDecision::Allow),
+        policy_reason: Some(PolicyReason::ToolDefault),
+        matched_rule_ids: vec![],
+        approval_decision: None,
+        outcome: HistoryOutcome::Success,
+        failure_category: None,
+        duration_ms: Some(12),
+        sanitized_arguments: Some(DurableSanitizedArgumentsEvidence::Grep {
+            mode: GrepMode::Literal,
+            logical_scope: "docs".into(),
+            query_bytes: 12,
+            include_count: 1,
+            exclude_count: 1,
+            max_results: 100,
+            max_output_bytes: 65_536,
+        }),
+        result_evidence: Some(ExecutionResultEvidence::Grep {
+            match_count: 2,
+            scanned_files: 3,
+            scanned_bytes: 128,
+            skipped_files: 1,
+            truncated: false,
+        }),
+        coverage: EvidenceCoverage::Complete,
+    };
+    let json = serde_json::to_string(&evidence).unwrap();
+    assert!(!json.contains("raw query"));
+    assert!(!json.contains("preview"));
+    let _: EvidenceEventV1 = serde_json::from_str(&json).unwrap();
+    assert!(
+        serde_json::from_str::<DurableSanitizedArgumentsEvidence>(
+            r#"{"tool":"grep","mode":"literal","logicalScope":"docs","queryBytes":1,"includeCount":0,"excludeCount":0,"maxResults":10,"maxOutputBytes":1024,"query":"SECRET"}"#
+        )
+        .is_err()
+    );
+}

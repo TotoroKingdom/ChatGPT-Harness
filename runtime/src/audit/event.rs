@@ -80,6 +80,8 @@ pub(crate) enum AuditFailureCategory {
     BashSpawnFailed,
     BashCancelled,
     BashProcessFailed,
+    GrepTimeout,
+    GrepCancelled,
 }
 
 /// Structured, serde-serializable audit evidence for one pipeline observation.
@@ -300,6 +302,8 @@ impl AuditEvent {
                 | PipelineEvent::ExecutionFailed => context.failure_category,
                 PipelineEvent::ExecutionCancelled => Some(if context.tool_name == "bash" {
                     AuditFailureCategory::BashCancelled
+                } else if context.tool_name == "grep" {
+                    AuditFailureCategory::GrepCancelled
                 } else {
                     AuditFailureCategory::ExecutionFailed
                 }),

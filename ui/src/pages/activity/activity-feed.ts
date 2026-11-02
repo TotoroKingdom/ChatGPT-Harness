@@ -48,7 +48,12 @@ const unavailableReasons = new Set(["tool_disabled", "unsupported_capability"]);
  */
 export function activityOutcomeKind(entry: ActivityEntry): ActivityOutcomeKind {
   if (entry.eventType === "approval_expired" || entry.failureCategory === "approval_expired") return "expired";
-  if (entry.eventType === "approval_cancelled" || entry.failureCategory === "approval_cancelled" || entry.failureCategory === "bash_cancelled") {
+  if (
+    entry.eventType === "approval_cancelled"
+    || entry.failureCategory === "approval_cancelled"
+    || entry.failureCategory === "bash_cancelled"
+    || entry.failureCategory === "grep_cancelled"
+  ) {
     return "cancelled";
   }
   if (entry.failureCategory === "approval_denied" || entry.approvalDecision === "deny") {
@@ -128,6 +133,7 @@ export function activityTarget(entry: ActivityEntry): { kind: "target" | "comman
   if (argumentsEvidence) {
     if (argumentsEvidence.tool === "bash") return { kind: "command", value: argumentsEvidence.commandPreview };
     if (argumentsEvidence.tool === "glob") return { kind: "target", value: argumentsEvidence.pattern };
+    if (argumentsEvidence.tool === "grep") return { kind: "target", value: argumentsEvidence.logicalScope };
     return { kind: "target", value: argumentsEvidence.logicalPath };
   }
   if (entry.bash?.commandPreview) return { kind: "command", value: entry.bash.commandPreview };

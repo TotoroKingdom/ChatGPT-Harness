@@ -9,10 +9,11 @@ use super::correlation::{self, CorrelationKey};
 use super::dataset::EvalDataset;
 use super::manifest::{eval_profile_hash, sha256_text, RunManifest};
 use super::mcp_client::{
-    base_policy_config_hash, exposed_tool_names, runtime_binary_hash, tool_catalog_hash,
-    tool_schema_map, EvalRuntimeHarness, McpClient,
+    base_policy_config_hash, runtime_binary_hash, tool_catalog_hash, tool_schema_map,
+    EvalRuntimeHarness, McpClient,
 };
 use super::privacy::sanitize_bounded_text;
+use super::profile::EvalProfile;
 use super::scoring::{
     bounded_argument_evidence, normalize_runtime_outcome, score_arguments, score_final_state,
     score_runtime_outcomes, score_selection, validate_schema, ToolCallRecord,
@@ -34,6 +35,7 @@ pub(crate) struct CaseExecution<'a> {
     pub(crate) logical_run_index: usize,
     pub(crate) repetition: u32,
     pub(crate) cleanup_failure_injection: bool,
+    pub(crate) profile: EvalProfile,
 }
 
 #[derive(Default)]
@@ -68,15 +70,19 @@ pub(crate) async fn execute_case(
             return infra_result(execution, run_id, started, binary_hash, error);
         }
     };
-    let mut harness =
-        match EvalRuntimeHarness::start(execution.runtime_binary, execution.case, &fixture_source)
-            .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                return infra_result(execution, run_id, started, binary_hash, error);
-            }
-        };
+    let mut harness = match EvalRuntimeHarness::start_with_profile(
+        execution.runtime_binary,
+        execution.case,
+        &fixture_source,
+        execution.profile,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            return infra_result(execution, run_id, started, binary_hash, error);
+        }
+    };
     let workspace_root = harness.workspace_root.clone();
     let evidence_database = harness.evidence_database.clone();
     let runtime_id = harness.runtime_id.clone();
@@ -98,7 +104,7 @@ pub(crate) async fn execute_case(
             return infra_result(execution, run_id, started, binary_hash, error);
         }
     };
-    if let Err(error) = validate_catalog(execution.case, &tools_result) {
+    if let Err(error) = execution.profile.validate_catalog(&tools_result) {
         let _ = harness.shutdown().await;
         return contract_result(execution, run_id, started, binary_hash, runtime_id, error);
     }
@@ -225,6 +231,7 @@ pub(crate) async fn execute_case(
         adapter.adapter_id(),
         adapter.adapter_version(),
         adapter.requested_model(),
+        execution.profile,
     )
     .unwrap_or_else(|_| "unknown".into());
     let policy_hash = policy_config_hash;
@@ -629,27 +636,6 @@ fn model_tools(tools_result: &Value) -> EvalResult<Vec<ModelToolSpec>> {
         .collect()
 }
 
-fn validate_catalog(_case: &EvalCaseV1, tools_result: &Value) -> EvalResult<()> {
-    let names = exposed_tool_names(tools_result)?;
-    let expected = super::BASELINE_TOOLS
-        .iter()
-        .map(|tool| (*tool).to_owned())
-        .collect::<Vec<_>>();
-    if names != expected {
-        return Err(EvalError::new(
-            "HARNESS_CONTRACT_ERROR",
-            format!("tools/list catalog drifted: expected {expected:?}, observed {names:?}"),
-        ));
-    }
-    if names.iter().any(|name| name == "bash" || name == "grep") {
-        return Err(EvalError::new(
-            "HARNESS_CONTRACT_ERROR",
-            "forbidden tool is exposed in the M04 profile",
-        ));
-    }
-    Ok(())
-}
-
 fn merge_usage(total: &mut ProviderUsage, value: &ProviderUsage) {
     total.input_tokens = add(total.input_tokens, value.input_tokens);
     total.output_tokens = add(total.output_tokens, value.output_tokens);
@@ -895,7 +881,8 @@ mod tests {
                 {"name": "edit"}
             ]
         });
-        assert!(validate_catalog(&case(), &exact).is_ok());
+        let _ = case();
+        assert!(EvalProfile::M04Baseline.validate_catalog(&exact).is_ok());
 
         let missing = json!({
             "tools": [
@@ -904,7 +891,9 @@ mod tests {
                 {"name": "write"}
             ]
         });
-        let error = validate_catalog(&case(), &missing).unwrap_err();
+        let error = EvalProfile::M04Baseline
+            .validate_catalog(&missing)
+            .unwrap_err();
         assert_eq!(error.code, "HARNESS_CONTRACT_ERROR");
 
         let extra = json!({
@@ -916,7 +905,9 @@ mod tests {
                 {"name": "grep"}
             ]
         });
-        let error = validate_catalog(&case(), &extra).unwrap_err();
+        let error = EvalProfile::M04Baseline
+            .validate_catalog(&extra)
+            .unwrap_err();
         assert_eq!(error.code, "HARNESS_CONTRACT_ERROR");
     }
 }

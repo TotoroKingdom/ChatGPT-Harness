@@ -6,7 +6,7 @@ use evaluation::agent_loop::{
     execute_case, prepare_tool_schemas_for_run, scripted_adapter_for_case, CaseExecution,
 };
 use evaluation::aggregate::{
-    aggregate, validate_baseline, AggregateReport, BaselineVerdict, RunIdentity,
+    aggregate, validate_baseline, AggregateMetrics, AggregateReport, BaselineVerdict, RunIdentity,
 };
 use evaluation::case::EvalCategory;
 use evaluation::dataset::{deterministic_case_order, EvalDataset};
@@ -19,6 +19,7 @@ use evaluation::mcp_client::{
 };
 use evaluation::openai_responses::OpenAiResponsesAdapter;
 use evaluation::output::{print_human_summary, report_json};
+use evaluation::profile::EvalProfile;
 use evaluation::{EvalError, EvalResult};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -44,6 +45,7 @@ async fn run() -> EvalResult<()> {
         "validate" => validate(&options),
         "preflight" => preflight(&options).await,
         "run" => run_suite(&options).await,
+        "compare" => compare_eval(&options),
         _ => {
             print_usage();
             Err(EvalError::new(
@@ -56,7 +58,7 @@ async fn run() -> EvalResult<()> {
 
 fn print_usage() {
     eprintln!(
-        "usage:\n  m04_eval validate [--dataset PATH]\n  m04_eval preflight [--dataset PATH] [--runtime-bin PATH] [--json]\n  m04_eval run --adapter scripted|openai [--dataset PATH] [--runtime-bin PATH] [--case ID] [--repetitions N] [--json]"
+        "usage:\n  m04_eval validate [--dataset PATH]\n  m04_eval preflight [--dataset PATH] [--runtime-bin PATH] [--profile PROFILE] [--json]\n  m04_eval run --adapter scripted|openai [--dataset PATH] [--runtime-bin PATH] [--profile PROFILE] [--case ID] [--repetitions N] [--json]\n  m04_eval compare --baseline PATH --candidate PATH [--json]"
     );
 }
 
@@ -67,6 +69,9 @@ struct Options {
     adapter: Option<String>,
     case_id: Option<String>,
     repetitions: Option<u32>,
+    profile: Option<EvalProfile>,
+    baseline: Option<PathBuf>,
+    candidate: Option<PathBuf>,
     json: bool,
 }
 
@@ -106,6 +111,19 @@ impl Options {
                             })?,
                     );
                 }
+                "--profile" => {
+                    index += 1;
+                    options.profile =
+                        Some(EvalProfile::parse(required(args, index, "--profile")?)?);
+                }
+                "--baseline" => {
+                    index += 1;
+                    options.baseline = Some(PathBuf::from(required(args, index, "--baseline")?));
+                }
+                "--candidate" => {
+                    index += 1;
+                    options.candidate = Some(PathBuf::from(required(args, index, "--candidate")?));
+                }
                 "--json" => options.json = true,
                 "--help" | "-h" => {
                     print_usage();
@@ -125,6 +143,10 @@ impl Options {
 
     fn dataset_path(&self) -> PathBuf {
         self.dataset.clone().unwrap_or_else(default_dataset_path)
+    }
+
+    fn profile(&self) -> EvalProfile {
+        self.profile.unwrap_or(EvalProfile::M04Baseline)
     }
 
     fn runtime_binary(&self) -> EvalResult<PathBuf> {
@@ -210,8 +232,73 @@ fn validate(options: &Options) -> EvalResult<()> {
     Ok(())
 }
 
+fn compare_eval(options: &Options) -> EvalResult<()> {
+    let baseline_path = options
+        .baseline
+        .as_deref()
+        .ok_or_else(|| EvalError::new("INVALID_ARGUMENT", "compare requires --baseline PATH"))?;
+    let candidate_path = options
+        .candidate
+        .as_deref()
+        .ok_or_else(|| EvalError::new("INVALID_ARGUMENT", "compare requires --candidate PATH"))?;
+    let baseline = evaluation::m05::AcceptedM04BaselineV1::load(baseline_path)?;
+    let raw = std::fs::read_to_string(candidate_path).map_err(|error| {
+        EvalError::new(
+            "INVALID_ARGUMENT",
+            format!("could not read candidate result: {error}"),
+        )
+    })?;
+    let value: Value = serde_json::from_str(&raw).map_err(|error| {
+        EvalError::new(
+            "HARNESS_CONTRACT_ERROR",
+            format!("candidate result is invalid JSON: {error}"),
+        )
+    })?;
+    let metrics_value = value
+        .get("report")
+        .and_then(|value| value.get("metrics"))
+        .or_else(|| value.get("metrics"))
+        .unwrap_or(&value)
+        .clone();
+    let candidate: AggregateMetrics = serde_json::from_value(metrics_value).map_err(|error| {
+        EvalError::new(
+            "HARNESS_CONTRACT_ERROR",
+            format!("candidate aggregate metrics are invalid: {error}"),
+        )
+    })?;
+    let comparison = baseline.compare_candidate(&candidate);
+    if options.json {
+        println!(
+            "{}",
+            json!({
+                "profileId": evaluation::profile::M05_CANDIDATE_PROFILE_ID,
+                "baselineId": baseline.baseline_id,
+                "comparison": comparison,
+            })
+        );
+    } else {
+        println!(
+            "M05_COMPARE={} baseline={}",
+            if comparison.pass { "PASS" } else { "FAIL" },
+            baseline.baseline_id
+        );
+        for failure in &comparison.failures {
+            println!("M05_COMPARE_FAILURE={failure}");
+        }
+    }
+    if comparison.pass {
+        Ok(())
+    } else {
+        Err(EvalError::new(
+            "REGRESSION_FAIL",
+            "candidate did not pass the frozen M04 compare_m05 gate",
+        ))
+    }
+}
+
 async fn preflight(options: &Options) -> EvalResult<()> {
     let dataset = EvalDataset::load(&options.dataset_path())?;
+    let profile = options.profile();
     let binary = options.runtime_binary()?;
     let binary_hash = runtime_binary_hash(&binary)?;
     let case = dataset
@@ -220,16 +307,15 @@ async fn preflight(options: &Options) -> EvalResult<()> {
         .find(|case| case.category == EvalCategory::ExactRead)
         .ok_or_else(|| EvalError::new("HARNESS_CONTRACT_ERROR", "no exact_read probe case"))?;
     let fixture = dataset.fixture_path(case)?;
-    let harness = EvalRuntimeHarness::start(&binary, case, &fixture).await?;
+    let harness = EvalRuntimeHarness::start_with_profile(&binary, case, &fixture, profile).await?;
     let mut mcp = McpClient::connect(&harness.endpoint_url).await?;
     let tools = mcp.list_tools().await?;
     let names = exposed_tool_names(&tools)?;
-    let expected = vec![
-        "read_file".to_owned(),
-        "glob".to_owned(),
-        "write".to_owned(),
-        "edit".to_owned(),
-    ];
+    let expected = profile
+        .tool_names()
+        .iter()
+        .map(|tool| (*tool).to_owned())
+        .collect::<Vec<_>>();
     if names != expected {
         let _ = harness.shutdown().await;
         return Err(EvalError::new(
@@ -239,6 +325,10 @@ async fn preflight(options: &Options) -> EvalResult<()> {
     }
     let schema_map = tool_schema_map(&tools)?;
     let schema_hash = tool_catalog_hash(&tools)?;
+    let schema_hashes = schema_map
+        .iter()
+        .map(|(name, schema)| Ok((name.clone(), evaluation::manifest::canonical_hash(schema)?)))
+        .collect::<EvalResult<BTreeMap<_, _>>>()?;
     let probe_path = case
         .argument_constraints
         .iter()
@@ -273,6 +363,7 @@ async fn preflight(options: &Options) -> EvalResult<()> {
         ADAPTER_ID,
         ADAPTER_VERSION,
         REQUESTED_MODEL,
+        profile,
     )?;
     let shutdown = harness.shutdown().await?;
     let report = json!({
@@ -282,11 +373,13 @@ async fn preflight(options: &Options) -> EvalResult<()> {
         "adapterId": ADAPTER_ID,
         "adapterVersion": ADAPTER_VERSION,
         "runnerVersion": RUNNER_VERSION,
+        "profileId": profile.id(),
         "datasetHash": dataset.dataset_hash,
         "scorerHash": dataset.scorer_hash,
         "systemPromptHash": dataset.system_prompt_hash,
         "evalProfileHash": eval_profile,
         "toolSchemaHash": schema_hash,
+        "toolSchemaHashes": schema_hashes,
         "toolNames": names,
         "policyConfigHash": policy_hash,
         "runtimeBinaryHash": binary_hash,
@@ -326,11 +419,11 @@ async fn preflight(options: &Options) -> EvalResult<()> {
             key.runtime_id, key.request_id, report["evidenceTerminalState"]
         );
     }
-    let _ = schema_map;
     Ok(())
 }
 
 async fn run_suite(options: &Options) -> EvalResult<()> {
+    let profile = options.profile();
     let adapter = options.adapter.as_deref().ok_or_else(|| {
         EvalError::new("INVALID_ARGUMENT", "run requires --adapter scripted|openai")
     })?;
@@ -362,7 +455,7 @@ async fn run_suite(options: &Options) -> EvalResult<()> {
             format!("unknown adapter '{adapter}'"),
         ));
     }
-    let preflight = preflight_identity(&dataset, &binary).await?;
+    let preflight = preflight_identity(&dataset, &binary, profile).await?;
     let cases = if let Some(case_id) = &options.case_id {
         vec![dataset.case(case_id).ok_or_else(|| {
             EvalError::new("INVALID_ARGUMENT", format!("unknown case '{case_id}'"))
@@ -414,6 +507,7 @@ async fn run_suite(options: &Options) -> EvalResult<()> {
                     logical_run_index: logical_index,
                     repetition,
                     cleanup_failure_injection: false,
+                    profile,
                 },
                 adapter,
             )
@@ -459,6 +553,7 @@ async fn run_suite(options: &Options) -> EvalResult<()> {
                 &run.adapter_id,
                 &run.adapter_version,
                 &run.requested_model,
+                profile,
             )
             .unwrap_or_else(|_| "unknown".into()),
             tool_schema_hash: run.tool_schema_hash.clone(),
@@ -485,6 +580,7 @@ async fn run_suite(options: &Options) -> EvalResult<()> {
         println!(
             "{}",
             json!({
+                "profileId": profile.id(),
                 "report": serde_json::from_str::<Value>(&report_json(&report).unwrap()).unwrap(),
                 "runs": runs,
             })
@@ -521,15 +617,19 @@ struct PreflightIdentity {
 async fn preflight_identity(
     dataset: &EvalDataset,
     binary: &std::path::Path,
+    profile: EvalProfile,
 ) -> EvalResult<PreflightIdentity> {
     let case = dataset
         .cases
         .iter()
         .find(|case| case.category == EvalCategory::ExactRead)
         .ok_or_else(|| EvalError::new("HARNESS_CONTRACT_ERROR", "no preflight case"))?;
-    let harness = EvalRuntimeHarness::start(binary, case, &dataset.fixture_path(case)?).await?;
+    let harness =
+        EvalRuntimeHarness::start_with_profile(binary, case, &dataset.fixture_path(case)?, profile)
+            .await?;
     let mut mcp = McpClient::connect(&harness.endpoint_url).await?;
     let tools = mcp.list_tools().await?;
+    profile.validate_catalog(&tools)?;
     let schema_map = prepare_tool_schemas_for_run(&tools)?;
     let hash = tool_catalog_hash(&tools)?;
     harness.shutdown().await?;

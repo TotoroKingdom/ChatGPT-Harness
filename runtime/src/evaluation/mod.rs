@@ -11,11 +11,13 @@ pub(crate) mod case;
 pub(crate) mod correlation;
 pub(crate) mod dataset;
 pub(crate) mod fixture;
+pub(crate) mod m05;
 pub(crate) mod manifest;
 pub(crate) mod mcp_client;
 pub(crate) mod openai_responses;
 pub(crate) mod output;
 pub(crate) mod privacy;
+pub(crate) mod profile;
 pub(crate) mod scoring;
 
 #[cfg(test)]

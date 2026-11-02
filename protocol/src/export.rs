@@ -61,6 +61,7 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         RuntimeStopResult,
         McpEndpointResult,
         ToolReadiness,
+        GrepMode,
         ToolStatusReason,
         RiskLevel,
         ToolDescriptor,

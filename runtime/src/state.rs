@@ -737,7 +737,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit"]
+            ["read_file", "glob", "grep", "write", "edit"]
         );
     }
 
@@ -774,7 +774,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit", "bash"]
+            ["read_file", "glob", "grep", "write", "edit", "bash"]
         );
         assert!(effective
             .iter()
@@ -819,13 +819,14 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit", "bash"]
+            ["read_file", "glob", "grep", "write", "edit", "bash"]
         );
         assert!(!descriptors[0].enabled);
         assert!(!descriptors[1].enabled);
-        assert!(!descriptors[2].enabled);
-        assert!(descriptors[3].enabled);
+        assert!(descriptors[2].enabled);
+        assert!(!descriptors[3].enabled);
         assert!(descriptors[4].enabled);
+        assert!(descriptors[5].enabled);
         assert_eq!(
             core.tool_registry().declared_capability("bash"),
             Some(crate::tools::ToolCapability::DeveloperShell)
@@ -845,6 +846,7 @@ mod tests {
             [
                 crate::tools::ToolAvailability::UnavailableDisabled,
                 crate::tools::ToolAvailability::UnavailableDisabled,
+                crate::tools::ToolAvailability::Available,
                 crate::tools::ToolAvailability::UnavailableDisabled,
                 crate::tools::ToolAvailability::Available,
                 crate::tools::ToolAvailability::UnavailableByMode,
@@ -1181,6 +1183,106 @@ mod tests {
         assert!(!serde_json::to_string(&detail)
             .unwrap()
             .contains("M03_TOOL_CONTENT_SENTINEL"));
+    }
+
+    #[test]
+    fn grep_activity_and_m03_share_exact_identity_and_durable_scalars_only() {
+        let workspace = TestWorkspace::new();
+        let database = workspace.base.join("history").join("history.sqlite3");
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            config_for(&workspace.root),
+            Some(harness_control_protocol::RuntimeHostContext {
+                host_session_id: Some("host-grep".into()),
+                supervisor_generation_id: Some("generation-grep".into()),
+                evidence_store: Some(harness_control_protocol::EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 256,
+                }),
+            }),
+        )
+        .expect("initialize with evidence");
+        core.acknowledge().expect("acknowledge");
+        fs::create_dir_all(workspace.root.join("docs")).expect("docs");
+        fs::write(
+            workspace.root.join("docs/private.txt"),
+            "GREP_MATCH_SENTINEL\nneedle\n",
+        )
+        .expect("grep fixture");
+        let service = core.mcp_service().unwrap();
+        let result = service
+            .call_tool(
+                "grep",
+                serde_json::json!({
+                    "query": "GREP_QUERY_SENTINEL",
+                    "include": ["docs/GREP_FILTER_SENTINEL*.txt"],
+                    "maxResults": 10
+                }),
+            )
+            .unwrap();
+        let meta = serde_json::to_value(result.meta.expect("correlation metadata")).unwrap();
+        let request_id = meta["chatgptHarness"]["requestId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let runtime_id = meta["chatgptHarness"]["runtimeId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(runtime_id, core.runtime_id);
+        assert!(core.activity_snapshot(100).iter().any(|entry| {
+            entry.request_id.to_string() == request_id && entry.tool_name.as_deref() == Some("grep")
+        }));
+        core.stop_evidence();
+
+        let reader = chatgpt_harness_evidence_store::EvidenceReader::open(&database)
+            .expect("open evidence reader");
+        let detail = reader
+            .get(&runtime_id, &request_id)
+            .expect("get evidence")
+            .expect("grep request exists");
+        assert_eq!(detail.summary.tool_name, "grep");
+        let serialized = serde_json::to_string(&detail).unwrap();
+        for sentinel in [
+            "GREP_QUERY_SENTINEL",
+            "GREP_FILTER_SENTINEL",
+            "GREP_MATCH_SENTINEL",
+            "needle",
+        ] {
+            assert!(
+                !serialized.contains(sentinel),
+                "durable grep evidence leaked {sentinel}"
+            );
+        }
+        let terminal = detail
+            .events
+            .iter()
+            .find(|event| {
+                event.stage == harness_control_protocol::EvidenceStage::ExecutionCompleted
+            })
+            .expect("terminal evidence");
+        assert!(matches!(
+            terminal.sanitized_arguments,
+            Some(
+                harness_control_protocol::DurableSanitizedArgumentsEvidence::Grep {
+                    query_bytes: 19,
+                    include_count: 1,
+                    exclude_count: 0,
+                    max_results: 10,
+                    ..
+                }
+            )
+        ));
+        assert!(matches!(
+            terminal.result_evidence,
+            Some(harness_control_protocol::ExecutionResultEvidence::Grep {
+                match_count: 0,
+                truncated: false,
+                ..
+            })
+        ));
     }
 
     #[test]

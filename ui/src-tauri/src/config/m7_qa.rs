@@ -24,6 +24,12 @@ const COMMAND: &str =
 
 type QaResult<T = ()> = Result<T, String>;
 
+fn legacy_tool_defaults() -> ToolConfig {
+    let mut tools = ToolConfig::default();
+    tools.grep.enabled = false;
+    tools
+}
+
 struct Fixture {
     root: tempfile::TempDir,
 }
@@ -284,7 +290,7 @@ fn int_02(fixture: &Fixture) -> QaResult<String> {
         || loaded.tunnel != expected.tunnel
         || loaded.security.mode != expected.security.mode
         || loaded.ui.theme != expected.ui.theme
-        || loaded.tools != ToolConfig::default()
+        || loaded.tools != legacy_tool_defaults()
         || loaded.policies != PolicyConfig::default()
         || loaded.bash != BashConfig::default()
         || loaded.ui.language.is_some()
@@ -433,7 +439,7 @@ fn int_07(fixture: &Fixture) -> QaResult<String> {
         .map_err(|error| format!("default migration failed: {}", error.code()))?
         .ok_or_else(|| "config missing".to_owned())?;
     let defaults = ConfigStore::safe_defaults();
-    if loaded.tools != defaults.tools
+    if loaded.tools != legacy_tool_defaults()
         || loaded.policies != defaults.policies
         || loaded.bash != defaults.bash
         || loaded.ui.language != None
@@ -441,6 +447,7 @@ fn int_07(fixture: &Fixture) -> QaResult<String> {
         || !loaded.tools.glob.enabled
         || !loaded.tools.write.enabled
         || !loaded.tools.edit.enabled
+        || loaded.tools.grep.enabled
         || loaded.tools.bash.enabled
         || loaded.policies.tool_defaults.read_file != PolicyDecision::Allow
         || loaded.policies.tool_defaults.glob != PolicyDecision::Allow
@@ -799,6 +806,7 @@ fn int_36(fixture: &Fixture) -> QaResult<String> {
         .ok_or_else(|| "migrated config missing".to_owned())?;
     expected.schema_version = 3;
     expected.security.developer_test_mode = true;
+    expected.tools.grep.enabled = false;
     if migrated.config_revision != revision_before
         || runtime_projection(&migrated) != runtime_projection(&expected)
     {

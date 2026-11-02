@@ -1,6 +1,6 @@
 use crate::bash::BashRuntimeError;
 use crate::execution::ExecutionError;
-use crate::tools::{EditError, GlobError, ReadFileError, WriteError};
+use crate::tools::{EditError, GlobError, GrepError, ReadFileError, WriteError};
 use crate::workspace::WorkspaceError;
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::json;
@@ -15,6 +15,9 @@ pub(crate) enum McpErrorCategory {
     UnsupportedContent,
     ReadLimitExceeded,
     InvalidPattern,
+    InvalidRegex,
+    InvalidFilterPattern,
+    InvalidScope,
     InvalidBasePath,
     EditMatchNotFound,
     EditMatchNotUnique,
@@ -38,6 +41,8 @@ pub(crate) enum McpErrorCategory {
     BashSpawnFailed,
     BashCancelled,
     BashProcessFailed,
+    SearchTimeout,
+    SearchCancelled,
 }
 
 impl McpErrorCategory {
@@ -51,6 +56,9 @@ impl McpErrorCategory {
             Self::UnsupportedContent => "UNSUPPORTED_CONTENT",
             Self::ReadLimitExceeded => "READ_LIMIT_EXCEEDED",
             Self::InvalidPattern => "INVALID_PATTERN",
+            Self::InvalidRegex => "INVALID_REGEX",
+            Self::InvalidFilterPattern => "INVALID_FILTER_PATTERN",
+            Self::InvalidScope => "INVALID_SCOPE",
             Self::InvalidBasePath => "INVALID_BASE_PATH",
             Self::EditMatchNotFound => "EDIT_MATCH_NOT_FOUND",
             Self::EditMatchNotUnique => "EDIT_MATCH_NOT_UNIQUE",
@@ -74,6 +82,8 @@ impl McpErrorCategory {
             Self::BashSpawnFailed => "BASH_SPAWN_FAILED",
             Self::BashCancelled => "BASH_CANCELLED",
             Self::BashProcessFailed => "BASH_PROCESS_FAILED",
+            Self::SearchTimeout => "SEARCH_TIMEOUT",
+            Self::SearchCancelled => "CANCELLED",
         }
     }
 
@@ -87,6 +97,9 @@ impl McpErrorCategory {
             Self::UnsupportedContent => "Requested file is not supported text content.",
             Self::ReadLimitExceeded => "Requested file line exceeds the configured read limit.",
             Self::InvalidPattern => "Glob pattern is invalid.",
+            Self::InvalidRegex => "Search regular expression is invalid.",
+            Self::InvalidFilterPattern => "Search include or exclude pattern is invalid.",
+            Self::InvalidScope => "Search scope is invalid.",
             Self::InvalidBasePath => "Glob base path is invalid.",
             Self::EditMatchNotFound => "The requested edit text was not found.",
             Self::EditMatchNotUnique => "The requested edit text was not unique.",
@@ -114,6 +127,8 @@ impl McpErrorCategory {
             Self::BashProcessFailed => {
                 "Bash process failed before a structured result was available."
             }
+            Self::SearchTimeout => "Search exceeded the Runtime wall-clock limit.",
+            Self::SearchCancelled => "Search was cancelled.",
         }
     }
 }
@@ -122,6 +137,7 @@ pub(crate) fn execution_error(error: &ExecutionError) -> CallToolResult {
     match error {
         ExecutionError::ReadFile(error) => read_file_error(error),
         ExecutionError::Glob(error) => glob_error(error),
+        ExecutionError::Grep(error) => grep_error(error),
         ExecutionError::Write(error) => write_error(error),
         ExecutionError::Edit(error) => edit_error(error),
         ExecutionError::RuntimeNotInitialized => {
@@ -139,6 +155,20 @@ pub(crate) fn execution_error(error: &ExecutionError) -> CallToolResult {
         ExecutionError::BashRuntime(error) => bash_runtime_error(error),
         ExecutionError::InvalidTransition(_) => error_result(McpErrorCategory::ExecutionFailed),
     }
+}
+
+pub(crate) fn grep_error(error: &GrepError) -> CallToolResult {
+    let category = match error {
+        GrepError::InvalidArguments { .. } => McpErrorCategory::InvalidArguments,
+        GrepError::InvalidRegex { .. } => McpErrorCategory::InvalidRegex,
+        GrepError::InvalidFilterPattern { .. } => McpErrorCategory::InvalidFilterPattern,
+        GrepError::InvalidScope { .. } => McpErrorCategory::InvalidScope,
+        GrepError::Workspace(error) => workspace_error_category(error),
+        GrepError::IoFailure { .. } => McpErrorCategory::IoFailure,
+        GrepError::SearchTimeout => McpErrorCategory::SearchTimeout,
+        GrepError::Cancelled => McpErrorCategory::SearchCancelled,
+    };
+    error_result(category)
 }
 
 fn bash_runtime_error(error: &BashRuntimeError) -> CallToolResult {

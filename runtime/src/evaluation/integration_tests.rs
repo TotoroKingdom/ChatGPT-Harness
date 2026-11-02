@@ -108,6 +108,7 @@ async fn every_enforcement_case_uses_real_runtime_paths() {
                 logical_run_index: 1,
                 repetition: 1,
                 cleanup_failure_injection: false,
+                profile: super::profile::EvalProfile::M04Baseline,
             },
             Box::new(scripted_adapter_for_case(case)) as Box<dyn ModelAdapter>,
         )
@@ -191,6 +192,7 @@ async fn schema_invalid_call_is_preserved_and_never_forwarded() {
             logical_run_index: 1,
             repetition: 1,
             cleanup_failure_injection: false,
+            profile: super::profile::EvalProfile::M04Baseline,
         },
         Box::new(adapter) as Box<dyn ModelAdapter>,
     )
@@ -243,6 +245,7 @@ async fn max_model_turns_is_reported_as_limit_exceeded_task_failure() {
             logical_run_index: 1,
             repetition: 1,
             cleanup_failure_injection: false,
+            profile: super::profile::EvalProfile::M04Baseline,
         },
         Box::new(ScriptedAdapter::new(turns)) as Box<dyn ModelAdapter>,
     )
@@ -297,6 +300,7 @@ async fn unexpected_approval_is_denied_and_not_auto_approved() {
             logical_run_index: 1,
             repetition: 1,
             cleanup_failure_injection: false,
+            profile: super::profile::EvalProfile::M04Baseline,
         },
         Box::new(adapter) as Box<dyn ModelAdapter>,
     )
@@ -342,6 +346,7 @@ async fn result_json_excludes_physical_workspace_and_credentials() {
             logical_run_index: 1,
             repetition: 1,
             cleanup_failure_injection: false,
+            profile: super::profile::EvalProfile::M04Baseline,
         },
         Box::new(scripted_adapter_for_case(case)) as Box<dyn ModelAdapter>,
     )

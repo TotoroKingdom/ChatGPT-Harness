@@ -1,0 +1,9 @@
+{
+  "caseId": "m05-a3-filter",
+  "caseVersion": 1,
+  "category": "scope_filter",
+  "prompt": "Within the src directory, find NEEDLE=scope only in .rs files and ignore anything ending with .tmp. Report every matching file and line, then answer with FILTER_OK.",
+  "fixtureRef": "filter",
+  "fixtureHash": "5793c1519cd0fed31a6f371e547249080b475d3a7a75e51ec4eca9b273620cc4",
+  "expectedFinalResponseContains": "FILTER_OK"
+}

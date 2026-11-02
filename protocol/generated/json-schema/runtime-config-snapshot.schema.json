@@ -30,6 +30,7 @@
             "bash": "ask",
             "edit": "allow",
             "glob": "allow",
+            "grep": "allow",
             "readFile": "allow",
             "write": "allow"
           }
@@ -157,6 +158,12 @@
         "glob": {
           "$ref": "#/$defs/ToolEnabledConfig"
         },
+        "grep": {
+          "$ref": "#/$defs/ToolEnabledConfig",
+          "default": {
+            "enabled": false
+          }
+        },
         "readFile": {
           "$ref": "#/$defs/ToolEnabledConfig"
         },
@@ -196,6 +203,10 @@
         },
         "glob": {
           "$ref": "#/$defs/PolicyDecision"
+        },
+        "grep": {
+          "$ref": "#/$defs/PolicyDecision",
+          "default": "allow"
         },
         "readFile": {
           "$ref": "#/$defs/PolicyDecision"
@@ -277,6 +288,7 @@
           "bash": "ask",
           "edit": "allow",
           "glob": "allow",
+          "grep": "allow",
           "readFile": "allow",
           "write": "allow"
         },

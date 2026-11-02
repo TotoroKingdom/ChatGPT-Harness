@@ -85,3 +85,19 @@ fn matcher_discriminator_and_variant_fields_are_closed() {
         assert!(serde_json::from_value::<PolicyMatcherConfig>(matcher).is_err());
     }
 }
+
+#[test]
+fn user_policy_matcher_accepts_grep_but_still_rejects_unknown_tools() {
+    let mut policy = PolicyConfig::default();
+    policy.user_rules.push(UserPolicyRuleConfig::new(
+        "allow-grep",
+        "Allow grep",
+        PolicyDecision::Allow,
+        "grep",
+        "Reviewed content search.",
+    ));
+    assert!(policy.validate_for_save().is_ok());
+
+    policy.user_rules[0].matcher = PolicyMatcherConfig::tool("unknown-tool");
+    assert!(policy.validate_for_save().is_err());
+}

@@ -132,7 +132,7 @@ pub(super) fn migrate_v1_to_v3(raw: Value) -> Result<AppConfig, ConfigError> {
     if legacy.schema_version != 1 {
         return Err(ConfigError::UnsupportedSchema);
     }
-    Ok(AppConfig {
+    let mut config = AppConfig {
         schema_version: CURRENT_SCHEMA_VERSION,
         config_revision: legacy.config_revision,
         workspace: legacy.workspace,
@@ -144,7 +144,11 @@ pub(super) fn migrate_v1_to_v3(raw: Value) -> Result<AppConfig, ConfigError> {
         bash: legacy.bash,
         desktop: legacy.desktop.unwrap_or_default(),
         history: legacy.history.unwrap_or_default(),
-    })
+    };
+    // A pre-M05 Tool surface did not contain grep. Preserve that exposure
+    // even when the legacy file omitted the entire tools object.
+    config.tools.grep.enabled = false;
+    Ok(config)
 }
 
 pub(super) fn migrate_v2_to_v3(mut raw: Value) -> Result<AppConfig, ConfigError> {
@@ -169,5 +173,8 @@ pub(super) fn migrate_v2_to_v3(mut raw: Value) -> Result<AppConfig, ConfigError>
             .map_err(|_| ConfigError::Migration("history defaults"))?,
     );
     validate_v3_shape(&raw)?;
-    serde_json::from_value(raw).map_err(|_| ConfigError::Migration("deserialization"))
+    let mut config: AppConfig =
+        serde_json::from_value(raw).map_err(|_| ConfigError::Migration("deserialization"))?;
+    config.tools.grep.enabled = false;
+    Ok(config)
 }

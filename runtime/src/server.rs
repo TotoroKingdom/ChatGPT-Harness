@@ -970,7 +970,7 @@ mod tests {
                 .iter()
                 .map(|tool| tool.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit", "bash"]
+            ["read_file", "glob", "grep", "write", "edit", "bash"]
         );
         let bash = result
             .items

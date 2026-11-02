@@ -94,6 +94,28 @@ pub enum SanitizedArgumentsEvidence {
     Glob {
         pattern: String,
     },
+    Grep {
+        mode: crate::GrepMode,
+        #[serde(rename = "logicalScope")]
+        #[ts(rename = "logicalScope")]
+        logical_scope: String,
+        #[serde(rename = "queryBytes")]
+        #[ts(rename = "queryBytes")]
+        #[ts(type = "number")]
+        query_bytes: u64,
+        #[serde(rename = "includeCount")]
+        #[ts(rename = "includeCount")]
+        include_count: u32,
+        #[serde(rename = "excludeCount")]
+        #[ts(rename = "excludeCount")]
+        exclude_count: u32,
+        #[serde(rename = "maxResults")]
+        #[ts(rename = "maxResults")]
+        max_results: u32,
+        #[serde(rename = "maxOutputBytes")]
+        #[ts(rename = "maxOutputBytes")]
+        max_output_bytes: u32,
+    },
     Write {
         #[serde(rename = "logicalPath")]
         #[ts(rename = "logicalPath")]
@@ -117,6 +139,7 @@ impl SanitizedArgumentsEvidence {
             | Self::Write { logical_path }
             | Self::Edit { logical_path } => (logical_path, true),
             Self::Glob { pattern } => (pattern, false),
+            Self::Grep { logical_scope, .. } => (logical_scope, true),
             Self::Bash { command_preview } => (command_preview, false),
         };
         if text.is_empty() || text.chars().any(char::is_control) {
@@ -136,6 +159,7 @@ impl SanitizedArgumentsEvidence {
             | Self::Write { logical_path }
             | Self::Edit { logical_path } => logical_path,
             Self::Glob { pattern } => pattern,
+            Self::Grep { logical_scope, .. } => logical_scope,
             Self::Bash { command_preview } => command_preview,
         };
         let limit = if path { 1024 } else { 1027 };
@@ -167,6 +191,25 @@ pub enum ExecutionResultEvidence {
         #[ts(rename = "matchCount")]
         #[ts(type = "number")]
         match_count: u64,
+    },
+    Grep {
+        #[serde(rename = "matchCount")]
+        #[ts(rename = "matchCount")]
+        #[ts(type = "number")]
+        match_count: u64,
+        #[serde(rename = "scannedFiles")]
+        #[ts(rename = "scannedFiles")]
+        #[ts(type = "number")]
+        scanned_files: u64,
+        #[serde(rename = "scannedBytes")]
+        #[ts(rename = "scannedBytes")]
+        #[ts(type = "number")]
+        scanned_bytes: u64,
+        #[serde(rename = "skippedFiles")]
+        #[ts(rename = "skippedFiles")]
+        #[ts(type = "number")]
+        skipped_files: u64,
+        truncated: bool,
     },
     Write {
         #[serde(rename = "bytesWritten")]

@@ -249,8 +249,20 @@ export function parseTools(value: unknown): ToolDiagnostic[] {
 
 function parseArguments(value: unknown): SanitizedArgumentsEvidence {
   const args = record(value);
-  const tool = enumeration(args.tool, ["read_file", "glob", "write", "edit", "bash"] as const);
+  const tool = enumeration(args.tool, ["read_file", "glob", "grep", "write", "edit", "bash"] as const);
   if (tool === "glob") return { tool, pattern: boundedText(args.pattern, 1027) };
+  if (tool === "grep") {
+    return {
+      tool,
+      mode: enumeration(args.mode, ["literal", "regex"] as const),
+      logicalScope: boundedText(args.logicalScope),
+      queryBytes: count(args.queryBytes),
+      includeCount: count(args.includeCount),
+      excludeCount: count(args.excludeCount),
+      maxResults: count(args.maxResults),
+      maxOutputBytes: count(args.maxOutputBytes),
+    };
+  }
   if (tool === "bash") return { tool, commandPreview: boundedText(args.commandPreview, 1027) };
   const logicalPath = boundedText(args.logicalPath);
   if (!logicalPath || logicalPath.startsWith("/") || logicalPath.includes("\\") || logicalPath.includes(":") || logicalPath.split("/").includes("..")) return invalid();
@@ -258,10 +270,18 @@ function parseArguments(value: unknown): SanitizedArgumentsEvidence {
 }
 function parseResult(value: unknown): ExecutionResultEvidence {
   const result = record(value);
-  const tool = enumeration(result.tool, ["read_file", "glob", "write", "edit", "bash"] as const);
+  const tool = enumeration(result.tool, ["read_file", "glob", "grep", "write", "edit", "bash"] as const);
   switch (tool) {
     case "read_file": return { tool, bytesRead: count(result.bytesRead) };
     case "glob": return { tool, matchCount: count(result.matchCount) };
+    case "grep": return {
+      tool,
+      matchCount: count(result.matchCount),
+      scannedFiles: count(result.scannedFiles),
+      scannedBytes: count(result.scannedBytes),
+      skippedFiles: count(result.skippedFiles),
+      truncated: Boolean(result.truncated),
+    };
     case "write": return { tool, bytesWritten: count(result.bytesWritten), disposition: enumeration(result.disposition, ["created", "overwritten"] as const) };
     case "edit": return { tool, replacements: count(result.replacements), bytesWritten: count(result.bytesWritten) };
     case "bash": return { tool, exitCode: integer(result.exitCode) };

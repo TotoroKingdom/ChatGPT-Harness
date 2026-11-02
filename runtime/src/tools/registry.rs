@@ -109,6 +109,21 @@ impl ToolRegistry {
                 },
             },
             RegisteredTool {
+                capability: ToolCapability::WorkspaceRead,
+                readiness_reason: None,
+                descriptor: ToolDescriptor {
+                    name: "grep".into(),
+                    description: "Search text content inside the active Workspace.".into(),
+                    implemented: true,
+                    enabled: config.grep.enabled,
+                    exposed: true,
+                    effective_policy: PolicyDecision::Allow,
+                    scope: WORKSPACE_SCOPE.into(),
+                    readiness: ToolReadiness::Ready,
+                    risk_level: RiskLevel::Low,
+                },
+            },
+            RegisteredTool {
                 capability: ToolCapability::WorkspaceWrite,
                 readiness_reason: None,
                 descriptor: ToolDescriptor {
@@ -233,7 +248,7 @@ mod tests {
                 .iter()
                 .map(|descriptor| descriptor.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit", "bash"]
+            ["read_file", "glob", "grep", "write", "edit", "bash"]
         );
         let forbidden = ["tree", "list_files", "git", "database"];
         assert!(!registry
@@ -255,8 +270,9 @@ mod tests {
         let descriptors = ToolRegistry::normal_mode().list();
         let read_file = &descriptors[0];
         let glob = &descriptors[1];
-        let write = &descriptors[2];
-        let edit = &descriptors[3];
+        let grep = &descriptors[2];
+        let write = &descriptors[3];
+        let edit = &descriptors[4];
 
         assert!(read_file.implemented);
         assert!(read_file.enabled);
@@ -273,6 +289,14 @@ mod tests {
         assert_eq!(glob.scope, WORKSPACE_SCOPE);
         assert_eq!(glob.readiness, ToolReadiness::Ready);
         assert_eq!(glob.risk_level, RiskLevel::Low);
+
+        assert!(grep.implemented);
+        assert!(grep.enabled);
+        assert!(grep.exposed);
+        assert_eq!(grep.effective_policy, PolicyDecision::Allow);
+        assert_eq!(grep.scope, WORKSPACE_SCOPE);
+        assert_eq!(grep.readiness, ToolReadiness::Ready);
+        assert_eq!(grep.risk_level, RiskLevel::Low);
 
         for descriptor in [write, edit] {
             assert!(descriptor.implemented);
@@ -293,6 +317,10 @@ mod tests {
         );
         assert_eq!(
             registry.capability("glob"),
+            Some(ToolCapability::WorkspaceRead)
+        );
+        assert_eq!(
+            registry.capability("grep"),
             Some(ToolCapability::WorkspaceRead)
         );
         assert_eq!(
@@ -345,25 +373,29 @@ mod tests {
                 .iter()
                 .map(|descriptor| descriptor.name.as_str())
                 .collect::<Vec<_>>(),
-            ["read_file", "glob", "write", "edit", "bash"]
+            ["read_file", "glob", "grep", "write", "edit", "bash"]
         );
         assert_eq!(
             registry.declared_capability("write"),
             Some(ToolCapability::WorkspaceWrite)
         );
         assert_eq!(registry.capability("write"), None);
-        assert!(!registry.list()[2].enabled);
+        assert!(!registry.list()[3].enabled);
     }
 
     #[test]
     fn each_implemented_tool_can_be_disabled_independently() {
-        for (index, name) in ["read_file", "glob", "write", "edit"].iter().enumerate() {
+        for (index, name) in ["read_file", "glob", "grep", "write", "edit"]
+            .iter()
+            .enumerate()
+        {
             let mut config = ToolConfig::default();
             match index {
                 0 => config.read_file.enabled = false,
                 1 => config.glob.enabled = false,
-                2 => config.write.enabled = false,
-                3 => config.edit.enabled = false,
+                2 => config.grep.enabled = false,
+                3 => config.write.enabled = false,
+                4 => config.edit.enabled = false,
                 _ => unreachable!(),
             }
             let registry = ToolRegistry::from_config(&config);
