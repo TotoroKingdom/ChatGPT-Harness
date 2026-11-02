@@ -343,6 +343,8 @@ fn scan_file(
     if !filters.allows(&entry.logical) {
         return Ok(FileOutcome::Continue);
     }
+    run_scan_hook(&entry.path);
+    check_control(cancel, started)?;
     let metadata = match fs::symlink_metadata(&entry.path) {
         Ok(metadata) => metadata,
         Err(error) => {
@@ -970,7 +972,7 @@ fn active_search_timeout() -> Duration {
 }
 
 #[cfg(test)]
-struct TimeoutOverride;
+pub(crate) struct TimeoutOverride;
 
 #[cfg(test)]
 impl Drop for TimeoutOverride {
@@ -980,7 +982,7 @@ impl Drop for TimeoutOverride {
 }
 
 #[cfg(test)]
-fn override_search_timeout(timeout: Duration) -> TimeoutOverride {
+pub(crate) fn override_search_timeout(timeout: Duration) -> TimeoutOverride {
     SEARCH_TIMEOUT_OVERRIDE.with(|value| value.set(Some(timeout)));
     TimeoutOverride
 }
@@ -1052,10 +1054,40 @@ thread_local! {
 }
 
 #[cfg(test)]
+static SCAN_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+static SCAN_HOOK: std::sync::Mutex<Option<Box<dyn Fn(&Path) + Send + Sync>>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(test)]
 pub(crate) fn install_toctou_hook(hook: impl FnOnce(&Path) + 'static) {
     TOCTOU_HOOK.with(|slot| {
         *slot.borrow_mut() = Some(Box::new(hook));
     });
+}
+
+#[cfg(test)]
+pub(crate) struct ScanHookGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for ScanHookGuard {
+    fn drop(&mut self) {
+        let mut hook = SCAN_HOOK.lock().unwrap_or_else(|error| error.into_inner());
+        *hook = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn install_scan_hook(hook: impl Fn(&Path) + Send + Sync + 'static) -> ScanHookGuard {
+    let lock = SCAN_HOOK_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut slot = SCAN_HOOK.lock().unwrap_or_else(|error| error.into_inner());
+    *slot = Some(Box::new(hook));
+    ScanHookGuard { _lock: lock }
 }
 
 #[cfg(test)]
@@ -1067,8 +1099,19 @@ fn run_toctou_hook(path: &Path) {
     });
 }
 
+#[cfg(test)]
+fn run_scan_hook(path: &Path) {
+    let hook = SCAN_HOOK.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(hook) = hook.as_ref() {
+        hook(path);
+    }
+}
+
 #[cfg(not(test))]
 fn run_toctou_hook(_path: &Path) {}
+
+#[cfg(not(test))]
+fn run_scan_hook(_path: &Path) {}
 
 #[cfg(test)]
 mod tests {
@@ -1374,6 +1417,169 @@ mod tests {
     }
 
     #[test]
+    fn discovered_and_scanned_limits_have_exact_and_one_over_controls() {
+        let _extended_timeout = override_search_timeout(Duration::from_secs(60));
+        let workspace = TestWorkspace::new();
+        for index in 0..=MAX_DISCOVERED_ENTRIES {
+            File::create(workspace.root.join(format!("{index:05}.txt"))).unwrap();
+        }
+        let one_over = grep(&workspace, &GrepRequest::new("needle")).unwrap();
+        assert!(one_over.truncated);
+        assert_eq!(
+            one_over.truncation_reasons,
+            [GrepTruncationReason::MaxDiscoveredEntries]
+        );
+        assert_eq!(one_over.scanned_files, 0);
+
+        fs::remove_file(
+            workspace
+                .root
+                .join(format!("{MAX_DISCOVERED_ENTRIES:05}.txt")),
+        )
+        .unwrap();
+        let exact = grep(&workspace, &GrepRequest::new("needle")).unwrap();
+        assert!(!exact
+            .truncation_reasons
+            .contains(&GrepTruncationReason::MaxDiscoveredEntries));
+        assert_eq!(exact.scanned_files, MAX_SCANNED_FILES as u64);
+        assert_eq!(
+            exact.truncation_reasons,
+            [GrepTruncationReason::MaxScannedFiles]
+        );
+
+        let exact_files = TestWorkspace::new();
+        let files = exact_files.root.join("files");
+        fs::create_dir_all(&files).unwrap();
+        for index in 0..MAX_SCANNED_FILES {
+            fs::write(files.join(format!("{index:05}.txt")), b"needle\n").unwrap();
+        }
+        let exact_file_result = grep(&exact_files, &GrepRequest::new("absent")).unwrap();
+        assert_eq!(exact_file_result.scanned_files, MAX_SCANNED_FILES as u64);
+        assert!(!exact_file_result
+            .truncation_reasons
+            .contains(&GrepTruncationReason::MaxScannedFiles));
+
+        fs::write(files.join("one-more.txt"), b"needle\n").unwrap();
+        let file_over = grep(&exact_files, &GrepRequest::new("absent")).unwrap();
+        assert_eq!(file_over.scanned_files, MAX_SCANNED_FILES as u64);
+        assert!(file_over
+            .truncation_reasons
+            .contains(&GrepTruncationReason::MaxScannedFiles));
+
+        let bytes_workspace = TestWorkspace::new();
+        let large = bytes_workspace.root.join("large");
+        fs::create_dir_all(&large).unwrap();
+        for index in 0..8 {
+            let file = File::create(large.join(format!("{index}.bin"))).unwrap();
+            file.set_len(MAX_SINGLE_FILE_BYTES).unwrap();
+        }
+        let exact_bytes = grep(&bytes_workspace, &GrepRequest::new("needle")).unwrap();
+        assert_eq!(exact_bytes.scanned_bytes, MAX_SCANNED_BYTES);
+        assert!(!exact_bytes
+            .truncation_reasons
+            .contains(&GrepTruncationReason::MaxScannedBytes));
+
+        let extra = File::create(large.join("extra.bin")).unwrap();
+        extra.set_len(MAX_SINGLE_FILE_BYTES).unwrap();
+        let byte_over = grep(&bytes_workspace, &GrepRequest::new("needle")).unwrap();
+        assert!(byte_over.scanned_bytes <= MAX_SCANNED_BYTES);
+        assert!(byte_over
+            .truncation_reasons
+            .contains(&GrepTruncationReason::MaxScannedBytes));
+    }
+
+    #[test]
+    fn exact_preview_and_output_budgets_do_not_truncate_before_the_boundary() {
+        let workspace = TestWorkspace::new();
+        let line = format!("needle{}", "x".repeat(MAX_PREVIEW_BYTES - "needle".len()));
+        workspace.write("exact.txt", format!("{line}\n"));
+        let preview = grep(&workspace, &GrepRequest::new("needle").with_limits(1, 8192)).unwrap();
+        assert_eq!(preview.matches.len(), 1);
+        assert_eq!(preview.matches[0].preview.len(), MAX_PREVIEW_BYTES);
+        assert!(!preview.matches[0].preview_truncated);
+        assert!(!preview.truncated);
+
+        let output_workspace = TestWorkspace::new();
+        let path = "a.txt";
+        let preview_len = 1024 - path.len();
+        let line = format!("needle{}", "x".repeat(preview_len - "needle".len()));
+        output_workspace.write(path, format!("{line}\n"));
+        let exact_output = grep(
+            &output_workspace,
+            &GrepRequest::new("needle").with_limits(100, 1024),
+        )
+        .unwrap();
+        assert_eq!(exact_output.matches.len(), 1);
+        assert!(!exact_output.truncated);
+        output_workspace.write(path, format!("{line}\n{line}\n"));
+        let over_output = grep(
+            &output_workspace,
+            &GrepRequest::new("needle").with_limits(100, 1025),
+        )
+        .unwrap();
+        assert_eq!(over_output.matches.len(), 1);
+        assert!(over_output.truncated);
+        assert_eq!(
+            over_output.truncation_reasons,
+            [GrepTruncationReason::MaxOutputBytes]
+        );
+    }
+
+    #[test]
+    fn exact_single_file_and_diagnostic_caps_are_not_treated_as_overflow() {
+        let workspace = TestWorkspace::new();
+        let exact = File::create(workspace.root.join("exact.bin")).unwrap();
+        exact.set_len(MAX_SINGLE_FILE_BYTES).unwrap();
+        let output = grep(&workspace, &GrepRequest::new("needle")).unwrap();
+        assert_eq!(output.skipped_files, 1);
+        assert_eq!(
+            output.diagnostics[0].code,
+            GrepDiagnosticCode::BinarySkipped
+        );
+        assert!(!output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == GrepDiagnosticCode::FileTooLarge));
+
+        let diagnostics = TestWorkspace::new();
+        for index in 0..MAX_DIAGNOSTICS {
+            fs::write(
+                diagnostics.root.join(format!("{index:03}.bin")),
+                [0_u8, 0xff],
+            )
+            .unwrap();
+        }
+        let exact_cap = grep(&diagnostics, &GrepRequest::new("needle")).unwrap();
+        assert_eq!(exact_cap.diagnostics.len(), MAX_DIAGNOSTICS);
+        assert!(!exact_cap.diagnostics_truncated);
+    }
+
+    #[test]
+    fn active_cancellation_and_timeout_stop_without_partial_success() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "needle\nneedle\n");
+        let cancel = CancellationToken::new();
+        let cancel_from_hook = cancel.clone();
+        let _hook = install_scan_hook(move |_| cancel_from_hook.cancel());
+        assert_eq!(
+            execute_grep_cancellable(&workspace.guard(), &GrepRequest::new("needle"), cancel,),
+            Err(GrepError::Cancelled)
+        );
+        drop(_hook);
+
+        let _timeout = override_search_timeout(Duration::from_millis(1));
+        let _hook = install_scan_hook(|_| std::thread::sleep(Duration::from_millis(10)));
+        assert_eq!(
+            execute_grep_cancellable(
+                &workspace.guard(),
+                &GrepRequest::new("needle"),
+                CancellationToken::new(),
+            ),
+            Err(GrepError::SearchTimeout)
+        );
+    }
+
+    #[test]
     fn scanned_file_and_byte_limits_are_deterministic_and_do_not_read_past_the_boundary() {
         let workspace = TestWorkspace::new();
         let many = workspace.root.join("many");
@@ -1454,17 +1660,29 @@ mod tests {
         let workspace = TestWorkspace::new();
         workspace.write("inside.txt", "needle-inside\n");
         fs::write(workspace.outside.join("secret.txt"), "needle-outside\n").unwrap();
+        let nested = workspace.root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
         let junction = workspace.root.join("outside-junction");
+        let candidate_junction = workspace.root.join("candidate.txt");
         if !create_junction(&junction, &workspace.outside) {
             eprintln!("SKIP junction grep test: mklink /J is unavailable");
             return;
         }
+        assert!(create_junction(
+            &nested.join("outside-junction"),
+            &workspace.outside
+        ));
+        assert!(create_junction(&candidate_junction, &workspace.outside));
         let output = grep(&workspace, &GrepRequest::new("needle")).unwrap();
         assert_eq!(output.matches.len(), 1);
-        assert!(output
-            .diagnostics
-            .iter()
-            .any(|item| item.code == GrepDiagnosticCode::ReparseSkipped));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .filter(|item| item.code == GrepDiagnosticCode::ReparseSkipped)
+                .count()
+                >= 3
+        );
         assert!(!serde_json::to_string(&output)
             .unwrap()
             .contains("needle-outside"));
@@ -1475,6 +1693,35 @@ mod tests {
             ),
             Err(GrepError::InvalidScope { .. })
         ));
+        let absolute_scope = workspace.outside.to_string_lossy().into_owned();
+        assert!(matches!(
+            grep(
+                &workspace,
+                &GrepRequest::new("needle").with_scope(absolute_scope)
+            ),
+            Err(GrepError::InvalidScope { .. })
+        ));
+        let sibling_scope = workspace.root.parent().unwrap().join("workspace-sibling");
+        assert!(matches!(
+            grep(
+                &workspace,
+                &GrepRequest::new("needle").with_scope(sibling_scope)
+            ),
+            Err(GrepError::InvalidScope { .. })
+        ));
+        let file_link = workspace.root.join("outside-file.txt");
+        if create_file_symlink(&workspace.outside.join("secret.txt"), &file_link) {
+            let file_link_output = grep(&workspace, &GrepRequest::new("needle")).unwrap();
+            assert!(!serde_json::to_string(&file_link_output)
+                .unwrap()
+                .contains("needle-outside"));
+            assert!(file_link_output
+                .diagnostics
+                .iter()
+                .any(|item| item.code == GrepDiagnosticCode::ReparseSkipped));
+        } else {
+            eprintln!("SKIP file-symlink fixture: symlink creation is unavailable");
+        }
     }
 
     #[cfg(windows)]
@@ -1503,6 +1750,25 @@ mod tests {
             .contains("needle-outside"));
     }
 
+    #[test]
+    fn opened_handle_safe_in_workspace_replacement_is_never_an_outside_read() {
+        let workspace = TestWorkspace::new();
+        workspace.write("swap/candidate.txt", "needle-inside\n");
+        let candidate = workspace.root.join("swap/candidate.txt");
+        install_toctou_hook(move |_| {
+            fs::remove_file(&candidate).unwrap();
+            fs::write(&candidate, "needle-replacement\n").unwrap();
+        });
+        let output = grep(&workspace, &GrepRequest::new("needle")).unwrap();
+        assert!(output
+            .matches
+            .iter()
+            .all(|item| item.preview.contains("needle-replacement")));
+        assert!(!serde_json::to_string(&output)
+            .unwrap()
+            .contains("needle-outside"));
+    }
+
     #[cfg(windows)]
     fn create_junction(link: &Path, target: &Path) -> bool {
         std::process::Command::new("cmd")
@@ -1512,5 +1778,31 @@ mod tests {
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
+    }
+
+    #[cfg(windows)]
+    fn create_file_symlink(link: &Path, target: &Path) -> bool {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateSymbolicLinkW, SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE,
+        };
+
+        let link = link
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let target = target
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        unsafe {
+            CreateSymbolicLinkW(
+                link.as_ptr(),
+                target.as_ptr(),
+                SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE,
+            )
+        }
     }
 }

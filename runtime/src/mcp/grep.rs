@@ -6,13 +6,14 @@ use harness_control_protocol::GrepMode;
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::schemars;
 use rmcp::schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum GrepModeArgument {
+    #[default]
     Literal,
     Regex,
 }
@@ -21,38 +22,60 @@ pub(crate) enum GrepModeArgument {
 #[serde(deny_unknown_fields)]
 pub(crate) struct GrepArguments {
     /// Non-empty text or Rust-regex pattern searched line by line.
+    #[schemars(length(min = 1, max = 4096))]
     pub query: String,
     /// Matching mode. Defaults to literal.
-    pub mode: Option<GrepModeArgument>,
+    #[serde(default)]
+    pub mode: GrepModeArgument,
     /// Workspace-relative directory scope. Defaults to the Workspace root.
-    pub scope: Option<String>,
+    #[serde(default = "default_scope")]
+    #[schemars(length(min = 1, max = 1024))]
+    pub scope: String,
     /// Workspace-relative include globs evaluated against normalized paths.
-    pub include: Option<Vec<String>>,
+    #[serde(default)]
+    #[schemars(length(max = 32), inner(length(min = 1, max = 512)))]
+    pub include: Vec<String>,
     /// Workspace-relative exclude globs; exclude wins over include.
-    pub exclude: Option<Vec<String>>,
+    #[serde(default)]
+    #[schemars(length(max = 32), inner(length(min = 1, max = 512)))]
+    pub exclude: Vec<String>,
     /// Maximum matching logical lines. Defaults to 100 and is capped at 1000.
-    #[serde(rename = "maxResults")]
-    pub max_results: Option<u32>,
+    #[serde(rename = "maxResults", default = "default_max_results")]
+    #[schemars(range(min = 1, max = 1000))]
+    pub max_results: u32,
     /// Maximum path+preview payload bytes. Defaults to 65536 and is capped at 262144.
-    #[serde(rename = "maxOutputBytes")]
-    pub max_output_bytes: Option<u32>,
+    #[serde(rename = "maxOutputBytes", default = "default_max_output_bytes")]
+    #[schemars(range(min = 1024, max = 262144))]
+    pub max_output_bytes: u32,
 }
 
 impl GrepArguments {
     fn request(self) -> GrepRequest {
         GrepRequest {
             query: self.query,
-            mode: match self.mode.unwrap_or(GrepModeArgument::Literal) {
+            mode: match self.mode {
                 GrepModeArgument::Literal => GrepMode::Literal,
                 GrepModeArgument::Regex => GrepMode::Regex,
             },
-            scope: PathBuf::from(self.scope.unwrap_or_else(|| ".".into())),
-            include: self.include.unwrap_or_default(),
-            exclude: self.exclude.unwrap_or_default(),
-            max_results: self.max_results.unwrap_or(DEFAULT_MAX_RESULTS),
-            max_output_bytes: self.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES),
+            scope: PathBuf::from(self.scope),
+            include: self.include,
+            exclude: self.exclude,
+            max_results: self.max_results,
+            max_output_bytes: self.max_output_bytes,
         }
     }
+}
+
+fn default_scope() -> String {
+    ".".into()
+}
+
+fn default_max_results() -> u32 {
+    DEFAULT_MAX_RESULTS
+}
+
+fn default_max_output_bytes() -> u32 {
+    DEFAULT_MAX_OUTPUT_BYTES
 }
 
 pub(crate) fn execute(context: &McpExecutionContext, arguments: Value) -> CallToolResult {

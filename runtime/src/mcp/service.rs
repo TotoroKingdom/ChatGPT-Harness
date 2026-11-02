@@ -1443,6 +1443,40 @@ mod tests {
             assert!(properties.contains_key(field), "grep missing {field}");
         }
         assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["properties"]["query"]["minLength"], 1);
+        assert_eq!(schema["properties"]["query"]["maxLength"], 4096);
+        assert_eq!(schema["properties"]["mode"]["default"], "literal");
+        assert_eq!(schema["properties"]["scope"]["default"], ".");
+        assert_eq!(schema["properties"]["scope"]["minLength"], 1);
+        assert_eq!(schema["properties"]["scope"]["maxLength"], 1024);
+        assert_eq!(schema["properties"]["include"]["maxItems"], 32);
+        assert_eq!(schema["properties"]["include"]["items"]["minLength"], 1);
+        assert_eq!(schema["properties"]["include"]["items"]["maxLength"], 512);
+        assert_eq!(schema["properties"]["exclude"]["maxItems"], 32);
+        assert_eq!(schema["properties"]["exclude"]["items"]["maxLength"], 512);
+        assert_eq!(schema["properties"]["maxResults"]["minimum"], 1);
+        assert_eq!(schema["properties"]["maxResults"]["maximum"], 1000);
+        assert_eq!(schema["properties"]["maxResults"]["default"], 100);
+        assert_eq!(schema["properties"]["maxOutputBytes"]["minimum"], 1024);
+        assert_eq!(schema["properties"]["maxOutputBytes"]["maximum"], 262_144);
+        assert_eq!(schema["properties"]["maxOutputBytes"]["default"], 65_536);
+        let validator = jsonschema::validator_for(&schema).expect("grep schema is valid");
+        for invalid in [
+            json!({ "query": "" }),
+            json!({ "query": "x", "maxResults": 0 }),
+            json!({ "query": "x", "maxResults": 1001 }),
+            json!({ "query": "x", "maxOutputBytes": 1023 }),
+            json!({ "query": "x", "maxOutputBytes": 262_145 }),
+            json!({ "query": "x", "scope": "a".repeat(1025) }),
+            json!({ "query": "x", "include": vec!["*"; 33] }),
+            json!({ "query": "x", "include": ["a".repeat(513)] }),
+            json!({ "query": "x", "exclude": vec!["*"; 33] }),
+        ] {
+            assert!(
+                validator.validate(&invalid).is_err(),
+                "grep schema accepted invalid arguments: {invalid}"
+            );
+        }
         let annotations = tool.annotations.expect("grep annotations");
         assert_eq!(annotations.read_only_hint, Some(true));
         assert_eq!(annotations.destructive_hint, Some(false));
@@ -1623,6 +1657,43 @@ mod tests {
                 .unwrap();
             assert_eq!(error_code(&deny.await.unwrap()), "APPROVAL_DENIED");
         });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn grep_mcp_cancellation_stops_active_scan_before_partial_success() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "needle\nneedle\n");
+        let service = workspace.service();
+        let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let hook_entered = entered.clone();
+        let hook_release = release.clone();
+        let _hook = crate::tools::install_scan_hook(move |scanned| {
+            if scanned.file_name().is_some_and(|name| name == "file.txt") {
+                hook_entered.wait();
+                hook_release.wait();
+            }
+        });
+        let cancel = CancellationToken::new();
+        let task = tokio::spawn({
+            let service = service.clone();
+            let cancel = cancel.clone();
+            async move {
+                service
+                    .call_tool_async_with_cancel(GREP, json!({ "query": "needle" }), cancel)
+                    .await
+                    .expect("known MCP tool")
+            }
+        });
+        tokio::task::spawn_blocking(move || entered.wait())
+            .await
+            .expect("scan start waiter");
+        cancel.cancel();
+        tokio::task::spawn_blocking(move || release.wait())
+            .await
+            .expect("scan release waiter");
+        let result = task.await.expect("MCP task");
+        assert_eq!(error_code(&result), "CANCELLED");
     }
 
     #[test]

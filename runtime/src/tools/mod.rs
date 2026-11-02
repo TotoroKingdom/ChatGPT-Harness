@@ -11,6 +11,8 @@ mod write;
 
 #[cfg(test)]
 pub(crate) use atomic_file::AtomicPhase;
+#[cfg(test)]
+pub(crate) use grep::{install_scan_hook, override_search_timeout};
 
 pub use edit::{EditError, EditOutput, EditRequest};
 #[allow(unused_imports)]

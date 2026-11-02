@@ -12,6 +12,22 @@ describe("machine-only control read error boundary", () => {
 });
 
 describe("control-read M5 projections", () => {
+  it("accepts the M05 grep failure categories without changing their identity", () => {
+    const entries = ["grep_timeout", "grep_cancelled"].map((failureCategory) => parseActivity([{
+      eventId: `event-${failureCategory}`,
+      requestId: `request-${failureCategory}`,
+      timestamp: "2026-11-02T09:00:00.000Z",
+      eventType: "execution_failed",
+      toolName: "grep",
+      decisionSummary: "allow",
+      matchedRuleIds: [],
+      policyReason: "tool_default",
+      outcomeSummary: "failed",
+      failureCategory,
+    }])[0].failureCategory);
+    expect(entries).toEqual(["grep_timeout", "grep_cancelled"]);
+  });
+
   it("preserves Runtime-owned Bash availability and readiness observations", () => {
     expect(parseTools([{
       name: "bash",

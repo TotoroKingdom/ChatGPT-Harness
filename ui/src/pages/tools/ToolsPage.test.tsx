@@ -138,6 +138,25 @@ describe("ToolsPage M8 compact rows and Inspector", () => {
     expect(intent(upgraded).tools.grep.enabled).toBe(true);
   });
 
+  it("shows grep restart debt while the old generation still exposes it and clears after restart", async () => {
+    const upgraded = config();
+    upgraded.tools.grep = { enabled: false };
+    state.context = makeContext({
+      config: upgraded,
+      restartRequired: true,
+      tools: { status: "success", data: { items: descriptors } },
+    });
+    render(<ToolsPage />);
+    expect(screen.getAllByText("Restart Required").length).toBeGreaterThan(0);
+    expect(await screen.findByText("Off is saved, but the current Runtime may remain available until restart.")).toBeInTheDocument();
+
+    cleanup();
+    state.context = makeContext({ restartRequired: false });
+    render(<ToolsPage />);
+    await waitFor(() => expect(screen.queryByText("Off is saved, but the current Runtime may remain available until restart.")).not.toBeInTheDocument());
+    expect(screen.getByRole("switch", { name: "Saved Enabled state for grep" })).toHaveAttribute("aria-checked", "true");
+  });
+
   it("keeps saved rows editable while Runtime is stopped without reading effective tools", async () => {
     state.context = makeContext({
       components: { runtime: "stopped", tunnel: "stopped", mcp: "stopped" },

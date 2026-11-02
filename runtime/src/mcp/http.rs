@@ -152,6 +152,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Barrier};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -545,6 +546,59 @@ mod tests {
             .contains(&workspace.outside.to_string_lossy().to_string()));
 
         endpoint.shutdown().await.expect("shutdown endpoint");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_cancels_active_grep_without_success_response() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "needle\nneedle\n");
+        let mut endpoint = start_mcp_http_endpoint(workspace.context())
+            .await
+            .expect("start endpoint");
+        let address = endpoint.local_addr();
+        let session_id = initialize(address, None).await;
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let hook_entered = entered.clone();
+        let hook_release = release.clone();
+        let _hook = crate::tools::install_scan_hook(move |scanned| {
+            if scanned.file_name().is_some_and(|name| name == "file.txt") {
+                hook_entered.wait();
+                hook_release.wait();
+            }
+        });
+        let request_task = tokio::spawn(async move {
+            mcp_post(
+                address,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 22,
+                    "method": "tools/call",
+                    "params": { "name": "grep", "arguments": { "query": "needle" } }
+                }),
+                Some(&session_id),
+                None,
+            )
+            .await
+        });
+        tokio::task::spawn_blocking(move || entered.wait())
+            .await
+            .expect("scan start waiter");
+        let shutdown = tokio::spawn(async move { endpoint.shutdown().await });
+        tokio::task::spawn_blocking(move || release.wait())
+            .await
+            .expect("scan release waiter");
+        assert!(shutdown.await.expect("shutdown task").is_ok());
+        let response = request_task.await;
+        if let Ok(response) = response {
+            if response.status == 200 {
+                let body = String::from_utf8_lossy(&response.body);
+                assert!(
+                    !body.contains("\"matches\"") && !body.contains("\"isError\":false"),
+                    "shutdown returned a successful grep response: {body}"
+                );
+            }
+        }
     }
 
     #[tokio::test]
