@@ -131,7 +131,7 @@ $ForbiddenShippingNames = @(
     ".env"
 )
 $ForbiddenShippingSuffixes = @(".db", ".sqlite", ".sqlite3", ".pem", ".key", ".p12", ".pfx")
-$ForbiddenShippingDirectories = @("m04-eval", "m05-eval", "workspaces", "stale-previous")
+$ForbiddenShippingDirectories = @("`$PLUGINSDIR", "m04-eval", "m05-eval", "workspaces", "stale-previous")
 $ShippingSentinels = @(
     "M06_TEST_SECRET",
     "M06_SECRET_SENTINEL",
@@ -1012,7 +1012,7 @@ function Test-PackageContract {
         )
         foreach ($file in (Get-ChildItem -LiteralPath $Portable -Recurse -File)) {
             $relative = $file.FullName.Substring($Portable.Length + 1)
-            if ($file.Extension -ieq ".exe" -and $allowedExes -notcontains $relative) {
+            if ($file.Extension -in @(".exe", ".dll") -and $allowedExes -notcontains $relative) {
                 $reasons += "Portable contains an unexpected executable: $relative."
             }
             if ($ForbiddenShippingNames -contains $file.Name -or

@@ -114,8 +114,11 @@ if ($ReuseInstallerPayload) {
         if (Test-Path -LiteralPath $destination) {
             Remove-Item -LiteralPath $destination -Recurse -Force
         }
-        New-Item -ItemType Directory -Force -Path $destination | Out-Null
-        Copy-Item -Path (Join-Path $payloadRoot "*") -Destination $destination -Recurse -Force
+        New-Item -ItemType Directory -Force -Path $destination, (Join-Path $destination "runtime"), (Join-Path $destination "tunnel") | Out-Null
+        Copy-Item -LiteralPath (Join-Path $payloadRoot "chatgpt-harness-ui.exe") -Destination $destination
+        Copy-Item -LiteralPath (Join-Path $payloadRoot "distribution.json") -Destination $destination
+        Copy-Item -Path (Join-Path $payloadRoot "runtime\*") -Destination (Join-Path $destination "runtime") -Recurse -Force
+        Copy-Item -Path (Join-Path $payloadRoot "tunnel\*") -Destination (Join-Path $destination "tunnel") -Recurse -Force
         $manifestPath = Join-Path $destination "distribution.json"
         $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
         $manifest.ui_sha256 = Get-Sha256 (Join-Path $destination "chatgpt-harness-ui.exe")
