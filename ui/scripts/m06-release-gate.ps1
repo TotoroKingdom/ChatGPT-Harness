@@ -9,6 +9,7 @@ param(
         "equivalence-f05",
         "equivalence-f12",
         "audit-package",
+        "impact",
         "release-notes",
         "gate",
         "self-test"
@@ -26,6 +27,7 @@ param(
     [string]$PortableDirectory = "",
     [string]$InstallerPath = "",
     [string]$M04EvalBinary = "",
+    [string]$ImpactClass = "",
     [string]$OutputPath = "",
     [string]$Case = "",
     [switch]$RequireInstaller,
@@ -104,6 +106,20 @@ $RequiredReleaseRows = @(
 $AllowedFinalStatuses = @("PASS", "FAIL", "BLOCKED", "INCONCLUSIVE", "NOT_VERIFIED")
 $AllowedValidationStatuses = @("PASS", "FAIL", "BLOCKED", "INCONCLUSIVE", "NOT_VERIFIED", "NOT_REQUIRED")
 $AllowedClassifications = @("CORE_MANDATORY", "OUT_OF_CORE_P1", "DEFERRED_P2", "SEPARATELY_ACCEPTED_OPTIONAL")
+$ImpactClasses = [ordered]@{
+    "RELEASE_ONLY" = @()
+    "HOST_UI" = @("M06-E2E-02", "M06-MAN-02")
+    "HOST_LIFECYCLE" = @("M06-INT-05", "M06-INT-06", "M06-INT-13", "M06-E2E-02", "M06-MAN-02")
+    "RUNTIME" = @(
+        "M06-INT-09", "M06-INT-10", "M06-INT-11", "M06-INT-12", "M06-INT-13",
+        "M06-INT-14", "M06-E2E-03", "M06-E2E-04", "M06-MAN-03", "M06-MAN-04"
+    )
+    "TUNNEL" = @("M06-INT-13", "M06-INT-15", "M06-E2E-02", "M06-E2E-03", "M06-MAN-02", "M06-MAN-05")
+    "PROTOCOL_CONFIG" = @("M06-INT-01", "M06-INT-04", "M06-INT-08", "M06-E2E-01", "M06-MAN-01")
+    "EVIDENCE_HISTORY" = @("M06-INT-09", "M06-INT-10", "M06-INT-11", "M06-E2E-03", "M06-MAN-03", "M06-MAN-04")
+    "TOOL_CATALOG" = @("M06-INT-11", "M06-INT-12", "M06-INT-14", "M06-E2E-03", "M06-E2E-04", "M06-MAN-04")
+    "EVAL" = @("M06-INT-14", "M06-E2E-04", "M06-MAN-04")
+}
 $RequiredCandidateHashes = @(
     "portable_package_sha256",
     "portable_ui_sha256",
@@ -620,6 +636,19 @@ function Test-UpstreamEligibility {
         }
     }
     return [pscustomobject]@{ Pass = ($reasons.Count -eq 0); Reasons = $reasons; Statuses = $statuses }
+}
+
+function Get-ImpactInvalidation {
+    param([string]$Class)
+    if ([string]::IsNullOrWhiteSpace($Class) -or -not $ImpactClasses.Contains($Class)) {
+        throw "Unknown M06 impact class: $Class"
+    }
+    return [pscustomobject]@{
+        impact_class = $Class
+        release_only = ($Class -eq "RELEASE_ONLY")
+        invalidated_gates = @($ImpactClasses[$Class])
+        requires_product_evidence_rerun = ($Class -ne "RELEASE_ONLY")
+    }
 }
 
 function Test-CoreMatrix {
@@ -1425,6 +1454,23 @@ function Invoke-SelfTest {
     Assert-Case "release-notes-reject-v4-full" {
         @(Test-ReleaseNotesText "# V4 Full $EmDash ACCEPTED`nProduct scope: V4 Core`nOUT_OF_CORE / NOT_CORE_ACCEPTED").Count -gt 0
     }
+    Assert-Case "impact-release-only-preserves-product-evidence" {
+        $impact = Get-ImpactInvalidation "RELEASE_ONLY"
+        $impact.release_only -eq $true -and @($impact.invalidated_gates).Count -eq 0
+    }
+    Assert-Case "impact-runtime-invalidates-authority-and-eval-evidence" {
+        $impact = Get-ImpactInvalidation "RUNTIME"
+        @($impact.invalidated_gates) -contains "M06-INT-11" -and
+            @($impact.invalidated_gates) -contains "M06-E2E-04"
+    }
+    Assert-Case "impact-unknown-class-is-rejected" {
+        try {
+            $null = Get-ImpactInvalidation "SOMETHING_ELSE"
+            $false
+        } catch {
+            $true
+        }
+    }
 
     if ($script:SelfTestFailures.Count -gt 0) {
         Write-Output ("M06 gate self-test: FAIL ({0} cases, {1} failures)" -f $script:SelfTestCount, $script:SelfTestFailures.Count)
@@ -1484,6 +1530,14 @@ switch ($Command) {
         $result = Test-PackageContract $PortableDirectory $InstallerPath $candidate -RequireInstallerPayload:$RequireInstaller
         if ($Json) { Write-JsonResult $result $OutputPath } else { Write-Output ("Package audit: " + $(if ($result.Pass) { "PASS" } else { "FAIL" })); $result.Reasons | ForEach-Object { Write-Output " - $_" } }
         if (-not $result.Pass) { exit 1 }
+    }
+    "impact" {
+        $result = Get-ImpactInvalidation $ImpactClass
+        if ($Json) { Write-JsonResult $result $OutputPath } else {
+            Write-Output ("Impact class: " + $result.impact_class)
+            Write-Output ("Release-only: " + $result.release_only)
+            Write-Output ("Invalidated gates: " + (@($result.invalidated_gates) -join ", "))
+        }
     }
     "release-notes" {
         $candidate = Read-JsonFile $CandidatePath
