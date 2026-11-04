@@ -39,6 +39,7 @@ $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repositoryRoot = (Resolve-Path (Join-Path $scriptDirectory "..\..")).Path
 $fixtureRoot = Join-Path $repositoryRoot "fixtures\v4\m06"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+$EmDash = [string][char]0x2014
 
 $CoreScopeOwners = [ordered]@{
     "SEC-AC01" = "M03"
@@ -1083,7 +1084,7 @@ function New-ReleaseNotes {
     $p1 = @($rows.Values | Where-Object { [string](Get-Field $_ "classification") -eq "OUT_OF_CORE_P1" })
     $p2 = @($rows.Values | Where-Object { [string](Get-Field $_ "classification") -eq "DEFERRED_P2" })
     $verdict = [string](Get-Field $GateResult "final_verdict")
-    $productVerdict = if ($verdict -eq "PASS") { "V4 Core — ACCEPTED" } else { "V4 Core — $verdict" }
+    $productVerdict = if ($verdict -eq "PASS") { "V4 Core $EmDash ACCEPTED" } else { "V4 Core $EmDash $verdict" }
     $lines = @(
         "# V4 Core Release Notes (candidate)",
         "",
@@ -1133,7 +1134,7 @@ function Test-ReleaseNotesText {
     param([string]$Text)
     $reasons = @()
     if ($Text -notmatch "Product scope: V4 Core") { $reasons += "Release notes do not declare V4 Core scope." }
-    foreach ($forbidden in @("V4 — ACCEPTED / FROZEN", "V4 Full — ACCEPTED", "V4 — ACCEPTED")) {
+    foreach ($forbidden in @("V4 $EmDash ACCEPTED / FROZEN", "V4 Full $EmDash ACCEPTED", "V4 $EmDash ACCEPTED")) {
         if ($Text.Contains($forbidden)) { $reasons += "Release notes contain forbidden product wording: $forbidden." }
     }
     if ($Text -notmatch "OUT_OF_CORE / NOT_CORE_ACCEPTED") {
@@ -1180,7 +1181,7 @@ function New-GateResult {
         candidate_id = [string](Get-Field $Candidate "candidate_id")
         generated_at_utc = [DateTime]::UtcNow.ToString("O")
         final_verdict = $status
-        product_verdict = if ($status -eq "PASS") { "V4 Core — ACCEPTED" } else { "V4 Core — NOT ACCEPTED" }
+        product_verdict = if ($status -eq "PASS") { "V4 Core $EmDash ACCEPTED" } else { "V4 Core $EmDash NOT ACCEPTED" }
         upstream_status = if ($upstreamEligibility.Pass) { "PASS" } else { "BLOCKED" }
         candidate_status = if ($candidateValidation.Pass) { "PASS" } else { "FAIL" }
         matrix_status = if ($matrixValidation.Pass) { "PASS" } else { "FAIL" }
@@ -1344,7 +1345,7 @@ function Invoke-SelfTest {
         $m02 = Get-M02EquivalenceDecision $acceptedM02Path $validCandidate
         $f12 = Get-F12EquivalenceDecision $m04Path $m05Path $validCandidate
         $gate = New-GateResult $validCandidate $validUpstream $validMatrix $m02 $f12 $null
-        $gate.final_verdict -eq "PASS" -and $gate.product_verdict -eq "V4 Core — ACCEPTED"
+        $gate.final_verdict -eq "PASS" -and $gate.product_verdict -eq "V4 Core $EmDash ACCEPTED"
     }
     Assert-Case "gate-current-dependencies-are-blocked" {
         $currentUpstream = [pscustomobject]@{
@@ -1422,7 +1423,7 @@ function Invoke-SelfTest {
         }
     }
     Assert-Case "release-notes-reject-v4-full" {
-        @(Test-ReleaseNotesText "# V4 Full — ACCEPTED`nProduct scope: V4 Core`nOUT_OF_CORE / NOT_CORE_ACCEPTED").Count -gt 0
+        @(Test-ReleaseNotesText "# V4 Full $EmDash ACCEPTED`nProduct scope: V4 Core`nOUT_OF_CORE / NOT_CORE_ACCEPTED").Count -gt 0
     }
 
     if ($script:SelfTestFailures.Count -gt 0) {
@@ -1497,9 +1498,9 @@ switch ($Command) {
         if ($issues.Count -gt 0) { $issues | ForEach-Object { Write-Output " - $_" }; exit 1 }
     }
     "gate" {
-        $candidate = Read-JsonFile $CandidatePath
-        $upstream = Read-JsonFile $UpstreamPath
-        $matrix = Read-JsonFile $MatrixPath
+        $candidate = if (-not [string]::IsNullOrWhiteSpace($CandidatePath) -and (Test-Path -LiteralPath $CandidatePath -PathType Leaf)) { Read-JsonFile $CandidatePath } else { $null }
+        $upstream = if (-not [string]::IsNullOrWhiteSpace($UpstreamPath) -and (Test-Path -LiteralPath $UpstreamPath -PathType Leaf)) { Read-JsonFile $UpstreamPath } else { $null }
+        $matrix = if (-not [string]::IsNullOrWhiteSpace($MatrixPath) -and (Test-Path -LiteralPath $MatrixPath -PathType Leaf)) { Read-JsonFile $MatrixPath } else { $null }
         $m02 = Get-M02EquivalenceDecision $M02EvidencePath $candidate
         $f12 = Get-F12EquivalenceDecision $M04BaselinePath $M05RegressionPath $candidate
         $package = $null
