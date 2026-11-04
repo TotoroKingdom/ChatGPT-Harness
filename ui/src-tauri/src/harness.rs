@@ -12,9 +12,18 @@ use harness_control_protocol::{
     AppConfig, SecurityMode, StartEligibility, StartEligibilityStatus, StartupCohort, StartupPhase,
 };
 use serde::Serialize;
-use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::{
+    sync::{Arc, Mutex, MutexGuard, TryLockError},
+    time::Duration,
+};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
+
+// The managed tunnel proves control-plane command-channel readiness only when
+// its commands long-poll completes. The client's 30s default idle hold makes
+// that evidence arrive about 30s after an otherwise sub-second start, so bound
+// the hold while keeping the same poll/freshness predicate.
+const MANAGED_TUNNEL_CONTROL_PLANE_POLL_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -491,6 +500,7 @@ impl HarnessController {
         let mut launch = TunnelLaunch::new(resolved.client_path, endpoint)
             .with_tunnel_id(config.tunnel.tunnel_id.clone())
             .with_control_plane_http_proxy(config.tunnel.control_plane_http_proxy.clone())
+            .with_control_plane_poll_timeout(MANAGED_TUNNEL_CONTROL_PLANE_POLL_TIMEOUT)
             .with_cloudflared_path(resolved.cloudflared_path)
             .with_api_key(api_key);
         if let Ok(directory) = app.path().app_data_dir() {

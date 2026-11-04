@@ -259,6 +259,7 @@ pub struct TunnelLaunch {
     health_url_file: Option<PathBuf>,
     log_file: Option<PathBuf>,
     startup_timeout: Duration,
+    control_plane_poll_timeout: Option<Duration>,
 }
 
 impl TunnelLaunch {
@@ -273,6 +274,7 @@ impl TunnelLaunch {
             health_url_file: None,
             log_file: None,
             startup_timeout: STARTUP_TIMEOUT,
+            control_plane_poll_timeout: None,
         }
     }
 
@@ -293,6 +295,11 @@ impl TunnelLaunch {
 
     pub(crate) fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
         self.credential = Some(TunnelCredential::new(api_key));
+        self
+    }
+
+    pub(crate) fn with_control_plane_poll_timeout(mut self, timeout: Duration) -> Self {
+        self.control_plane_poll_timeout = Some(timeout);
         self
     }
 
@@ -1745,6 +1752,14 @@ fn configure_real_command(
         .args(["--control-plane.api-key", &api_key_reference]);
     if let Some(proxy) = launch.control_plane_http_proxy.as_deref() {
         command.args(["--control-plane.http-proxy", proxy]);
+    }
+    if let Some(timeout) = launch.control_plane_poll_timeout {
+        let timeout = if timeout.as_millis() % 1_000 == 0 {
+            format!("{}s", timeout.as_secs())
+        } else {
+            format!("{}ms", timeout.as_millis())
+        };
+        command.args(["--control-plane.poll-timeout", &timeout]);
     }
     command
         .args(["--mcp.server-url", &mcp_target])
@@ -3370,6 +3385,32 @@ mod tests {
         assert!(!command
             .get_envs()
             .any(|(key, value)| key == "CONTROL_PLANE_HTTP_PROXY" && value.is_none()));
+    }
+
+    #[test]
+    fn real_command_bounds_startup_control_plane_poll_timeout() {
+        let mut command = Command::new(cmd_path());
+        let health = std::env::temp_dir().join("harness-test-health-poll-timeout.url");
+        let launch = launch()
+            .with_api_key("raw-api-key")
+            .with_control_plane_poll_timeout(Duration::from_secs(5));
+        configure_real_command(
+            &mut command,
+            Path::new(r"C:\tunnel\cloudflared.exe"),
+            &launch,
+            &health,
+        )
+        .unwrap();
+        let args = command
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let timeout_index = args
+            .iter()
+            .position(|value| value == "--control-plane.poll-timeout")
+            .expect("startup poll timeout flag");
+        assert_eq!(args[timeout_index + 1], "5s");
+        assert!(!args.iter().any(|value| value.contains("raw-api-key")));
     }
 
     #[test]
