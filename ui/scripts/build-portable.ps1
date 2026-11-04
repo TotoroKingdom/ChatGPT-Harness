@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$ReuseInstallerPayload,
+    [string]$InstallerPath = ""
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -79,6 +82,61 @@ $portableName = "ChatGPT-Harness_${appVersion}_x64-portable"
 $destination = [IO.Path]::GetFullPath((Join-Path $portableRoot $portableName))
 if (-not $destination.StartsWith($portableRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Portable destination must remain under target/release/bundle/portable."
+}
+
+if ($ReuseInstallerPayload) {
+    if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
+        $InstallerPath = Join-Path $repositoryRoot ("target\release\bundle\nsis\ChatGPT-Harness_{0}_x64-setup.exe" -f $appVersion)
+    }
+    if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
+        throw "Installer payload source is missing: $InstallerPath"
+    }
+    $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+    if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+        throw "7-Zip is required to reuse the NSIS payload: $sevenZip"
+    }
+    $payloadRoot = Join-Path ([IO.Path]::GetTempPath()) ("chatgpt-harness-installer-payload-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $payloadRoot | Out-Null
+    try {
+        & $sevenZip x $InstallerPath ("-o" + $payloadRoot) -y | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "7-Zip could not extract the NSIS installer." }
+        foreach ($relative in @(
+            "chatgpt-harness-ui.exe",
+            "distribution.json",
+            "runtime\chatgpt-harness-runtime.exe",
+            "tunnel\tunnel-client.exe",
+            "tunnel\cloudflared.exe"
+        )) {
+            if (-not (Test-Path -LiteralPath (Join-Path $payloadRoot $relative) -PathType Leaf)) {
+                throw "Installer payload is missing $relative."
+            }
+        }
+        if (Test-Path -LiteralPath $destination) {
+            Remove-Item -LiteralPath $destination -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        Copy-Item -Path (Join-Path $payloadRoot "*") -Destination $destination -Recurse -Force
+        $manifestPath = Join-Path $destination "distribution.json"
+        $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+        $manifest.ui_sha256 = Get-Sha256 (Join-Path $destination "chatgpt-harness-ui.exe")
+        $finalProvenance = Get-GitProvenance $repositoryRoot
+        $manifest.build_sha = $finalProvenance.BuildSha
+        $manifest.source_dirty = $finalProvenance.SourceDirty
+        $manifest.source_state_sha256 = $finalProvenance.SourceStateSha
+        $manifestJson = $manifest | ConvertTo-Json -Depth 8
+        [IO.File]::WriteAllText($manifestPath, $manifestJson + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+        & (Join-Path $scriptDirectory "verify-portable.ps1") -PortableDirectory $destination
+        if ($LASTEXITCODE -ne 0) { throw "Portable verification failed." }
+        Write-Output "Built Portable distribution from verified NSIS payload: $destination"
+        return
+    } finally {
+        $resolved = [IO.Path]::GetFullPath($payloadRoot)
+        $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+        if ($resolved.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+            [IO.Path]::GetFileName($resolved) -like "chatgpt-harness-installer-payload-*") {
+            Remove-Item -LiteralPath $resolved -Recurse -Force
+        }
+    }
 }
 
 & (Join-Path $scriptDirectory "stage-distribution.ps1")
