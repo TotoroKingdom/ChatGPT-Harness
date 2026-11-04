@@ -1,0 +1,22 @@
+{
+  "schema": "m05-formal-regression-v1",
+  "setId": "m05-grep-candidate-v1",
+  "formal": true,
+  "validity": "VALID",
+  "candidateIdentity": {
+    "runtimeBinaryHash": "7BCDC008C5888C86D4164384616BB4AD33FB866563579CCC8A3ECFAEAD93EA36",
+    "toolSchemaHash": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "datasetHash": "7777777777777777777777777777777777777777777777777777777777777777",
+    "systemPromptHash": "8888888888888888888888888888888888888888888888888888888888888888",
+    "scorerHash": "9999999999999999999999999999999999999999999999999999999999999999",
+    "evalProfileHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "adapterId": "openai-responses-v1",
+    "adapterVersion": "1",
+    "requestedModel": "gpt-6.1-terra",
+    "resolvedModel": "gpt-6.1-terra"
+  },
+  "comparison": { "pass": true, "failures": [] },
+  "securityViolationRuns": 0,
+  "pairedControl": { "applicable": false, "withinGuard": true },
+  "passiveTelemetryUsed": false
+}

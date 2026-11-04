@@ -1,0 +1,38 @@
+{
+  "schema": "m02-accepted-performance-v1",
+  "accepted": true,
+  "verdict": "PASS",
+  "identity": {
+    "app_binary_sha256": "F1428BFBD83ED8134F5414772D8CAB361A673B6234EF16B695F5EC3878D34473",
+    "runtime_sha256": "7BCDC008C5888C86D4164384616BB4AD33FB866563579CCC8A3ECFAEAD93EA36",
+    "tunnel_sha256": "83F08FB39B1C154747DEBD31B81B65DD4EE834CACF5A073B6301B2688699BC76",
+    "config_profile_hash": "A1A2A3A4A5A6A7A8A9B0B1B2B3B4B5B6B7B8B9C0C1C2C3C4C5C6C7C8C9D0D1D2",
+    "benchmark_harness_version": "m02-startup-benchmark-v1",
+    "environment_class": "windows-10.0.19045-x64"
+  },
+  "contract": {
+    "statistics": "nearest_rank_raw_sample",
+    "cold_counted_samples": 30,
+    "warm_counted_samples": 30,
+    "cold_p50_max_ratio": 0.9,
+    "warm_p50_max_ratio": 0.85,
+    "p95_max_regression_ratio": 1.05,
+    "at_least_one_p95_max_ratio": 0.9,
+    "min_ready_cold": 29,
+    "min_ready_warm": 29,
+    "max_failures_cold": 0,
+    "max_failures_warm": 1,
+    "material_bottleneck_phase_p50_improvement": 0.25,
+    "material_bottleneck_total_p95_improvement": 0.1
+  },
+  "baseline": {
+    "cold": { "p50_ms": 31502, "p95_ms": 33508 },
+    "warm": { "p50_ms": 32079, "p95_ms": 66405 }
+  },
+  "result": {
+    "verdict": "FAIL",
+    "cold": { "ready": 30, "counted": 30, "failures": 0, "p50_ms": 32572, "p95_ms": 66392 },
+    "warm": { "ready": 30, "counted": 30, "failures": 0, "p50_ms": 32648, "p95_ms": 35210 },
+    "material_bottleneck": "FAIL"
+  }
+}

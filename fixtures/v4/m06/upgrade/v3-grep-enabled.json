@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 3,
+  "configRevision": "48",
+  "workspace": { "rootPath": "C:\\M06UpgradeWorkspace" },
+  "tunnel": {
+    "tunnelId": "m06-upgrade-tunnel",
+    "controlPlaneHttpProxy": null,
+    "tunnelClientPath": null,
+    "autoDetect": true,
+    "apiKeyRef": { "provider": "windows-credential-manager", "key": "m06/upgrade/opaque-tunnel-key" }
+  },
+  "security": { "mode": "normal", "developerTestMode": false },
+  "ui": { "theme": "system", "language": "en" },
+  "tools": {
+    "readFile": { "enabled": true },
+    "glob": { "enabled": true },
+    "write": { "enabled": true },
+    "edit": { "enabled": true },
+    "bash": { "enabled": false },
+    "grep": { "enabled": true }
+  },
+  "policies": {
+    "toolDefaults": { "readFile": "allow", "glob": "allow", "write": "ask", "edit": "ask", "bash": "ask", "grep": "allow" },
+    "userRules": []
+  },
+  "bash": { "autoDetect": true },
+  "desktop": {
+    "autoStartHarnessOnAppLaunch": false,
+    "approvalNotifications": true,
+    "connectionNotifications": false,
+    "backgroundNoticeAcknowledged": false
+  },
+  "history": { "enabled": true, "retentionDays": 90, "maxStorageMiB": 512 }
+}

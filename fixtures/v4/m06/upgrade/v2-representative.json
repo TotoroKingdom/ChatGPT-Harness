@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "configRevision": "41",
+  "workspace": { "rootPath": "C:\\M06UpgradeWorkspace" },
+  "tunnel": {
+    "tunnelId": "m06-upgrade-tunnel",
+    "controlPlaneHttpProxy": "http://127.0.0.1:7890",
+    "tunnelClientPath": "C:\\M06UpgradeTunnelClient",
+    "autoDetect": false,
+    "apiKeyRef": { "provider": "windows-credential-manager", "key": "m06/upgrade/opaque-tunnel-key" }
+  },
+  "security": { "mode": "normal", "developerTestMode": false },
+  "ui": { "theme": "dark", "language": "zh-CN" },
+  "tools": {
+    "readFile": { "enabled": true },
+    "glob": { "enabled": true },
+    "write": { "enabled": false },
+    "edit": { "enabled": true },
+    "bash": { "enabled": false }
+  },
+  "policies": {
+    "toolDefaults": { "readFile": "allow", "glob": "allow", "write": "deny", "edit": "ask", "bash": "ask" },
+    "userRules": [
+      {
+        "id": "m06-upgrade-write-deny",
+        "name": "M06 upgrade write deny",
+        "enabled": true,
+        "decision": "deny",
+        "matcher": { "type": "tool", "tool": "write" },
+        "reason": "Synthetic upgrade fixture"
+      }
+    ]
+  },
+  "bash": { "autoDetect": false, "executablePath": "C:\\M06UpgradeGit\\bin\\bash.exe" }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 3,
+  "configRevision": "41",
+  "workspace": { "rootPath": "C:\\M06FixtureWorkspace" },
+  "tunnel": {
+    "tunnelId": "m06-fixture-tunnel",
+    "controlPlaneHttpProxy": "http://127.0.0.1:7890",
+    "tunnelClientPath": "C:\\M06FixtureTunnelClient",
+    "autoDetect": false,
+    "apiKeyRef": { "provider": "windows-credential-manager", "key": "m06/opaque/tunnel-key" }
+  },
+  "security": { "mode": "normal", "developerTestMode": false },
+  "ui": { "theme": "dark", "language": "zh-CN" },
+  "tools": {
+    "readFile": { "enabled": true },
+    "glob": { "enabled": true },
+    "write": { "enabled": true },
+    "edit": { "enabled": true },
+    "bash": { "enabled": false },
+    "grep": { "enabled": true }
+  },
+  "policies": {
+    "toolDefaults": { "readFile": "allow", "glob": "allow", "write": "ask", "edit": "ask", "bash": "ask", "grep": "allow" },
+    "userRules": []
+  },
+  "bash": { "autoDetect": false, "executablePath": "C:\\M06FixtureGit\\bin\\bash.exe" },
+  "desktop": {
+    "autoStartHarnessOnAppLaunch": false,
+    "approvalNotifications": true,
+    "connectionNotifications": true,
+    "backgroundNoticeAcknowledged": false
+  },
+  "history": { "enabled": true, "retentionDays": 30, "maxStorageMiB": 256 }
+}

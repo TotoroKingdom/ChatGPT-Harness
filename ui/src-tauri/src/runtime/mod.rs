@@ -1431,6 +1431,9 @@ mod m01_integration;
 mod m3_config_integration;
 
 #[cfg(test)]
+mod m06_upgrade_integration;
+
+#[cfg(test)]
 mod m6_i18n_qa;
 
 #[cfg(test)]

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "eventId": "m06-upgrade-history-event-1",
+  "runtimeId": "m06-upgrade-runtime",
+  "requestId": "m06-upgrade-request-1",
+  "toolName": "write",
+  "occurredAtUtc": "2026-11-03T00:00:00.000Z",
+  "recordedAtUtc": "2026-11-03T00:00:00.000Z",
+  "stage": "approval_required",
+  "lifecycleState": "awaiting_approval",
+  "workspaceValidation": "passed",
+  "policyDecision": "ask",
+  "outcome": "approval_required",
+  "sanitizedArguments": { "tool": "write", "logicalPath": "notes/synthetic.txt" },
+  "coverage": "COMPLETE"
+}

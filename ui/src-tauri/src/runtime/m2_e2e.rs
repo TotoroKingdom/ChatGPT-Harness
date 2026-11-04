@@ -925,8 +925,8 @@ fn run_e2e_01(
 ) -> E2eResult<()> {
     let names = list_names(mcp.list_tools()?)?;
     check!(
-        names == ["read_file", "glob", "write", "edit"],
-        "default tools/list did not expose the stable four-tool catalog"
+        names == ["read_file", "glob", "grep", "write", "edit"],
+        "default tools/list did not expose the current five-tool catalog"
     );
     let status = runtime.control_request("runtime.status", json!({}))?;
     check!(
@@ -1040,7 +1040,7 @@ fn run_e2e_04(
         "disabled write remained in tools/list"
     );
     check!(
-        names == ["read_file", "glob", "edit"],
+        names == ["read_file", "glob", "grep", "edit"],
         "new disabled generation changed sibling tool exposure"
     );
     let status = runtime.control_request("runtime.status", json!({}))?;
@@ -1158,7 +1158,7 @@ fn run_e2e_08(
 ) -> E2eResult<()> {
     let names = list_names(mcp.list_tools()?)?;
     check!(
-        names == ["glob", "edit"],
+        names == ["glob", "grep", "edit"],
         "multiple disabled generation exposed the wrong tools"
     );
     let before_read = latest_activity(runtime)?;
@@ -1260,14 +1260,15 @@ fn run_e2e_10(
 
 fn run_e2e_11(binary: &Path, config: &AppConfig) -> E2eResult<()> {
     check!(
-        config.schema_version == 2,
-        "legacy config schemaVersion changed"
+        config.schema_version == 3,
+        "legacy config was not normalized to schemaVersion 3"
     );
     check!(config.tools.read_file.enabled);
     check!(config.tools.glob.enabled);
     check!(config.tools.write.enabled);
     check!(config.tools.edit.enabled);
     check!(!config.tools.bash.enabled);
+    check!(!config.tools.grep.enabled);
     let (mut runtime, mut mcp) = RuntimeProcess::start(binary, config, "F-legacy")?;
     let names = list_names(mcp.list_tools()?)?;
     check!(names == ["read_file", "glob", "write", "edit"]);
@@ -1642,7 +1643,7 @@ fn run_m3_e2e_01(
     fixture: &Fixture,
 ) -> E2eResult<()> {
     check!(
-        list_names(mcp.list_tools()?)? == ["read_file", "glob", "write", "edit"],
+        list_names(mcp.list_tools()?)? == ["read_file", "glob", "grep", "write", "edit"],
         "M3 baseline tools/list changed"
     );
     let before = latest_activity(runtime)?;

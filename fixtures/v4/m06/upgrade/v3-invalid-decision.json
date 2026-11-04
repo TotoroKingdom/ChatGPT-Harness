@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 3,
+  "configRevision": "49",
+  "workspace": { "rootPath": "C:\\M06UpgradeWorkspace" },
+  "tunnel": {
+    "tunnelId": "m06-upgrade-tunnel",
+    "controlPlaneHttpProxy": null,
+    "tunnelClientPath": null,
+    "autoDetect": true,
+    "apiKeyRef": null
+  },
+  "security": { "mode": "normal", "developerTestMode": false },
+  "ui": { "theme": "system", "language": "en" },
+  "tools": {
+    "readFile": { "enabled": true },
+    "glob": { "enabled": true },
+    "write": { "enabled": true },
+    "edit": { "enabled": true },
+    "bash": { "enabled": false },
+    "grep": { "enabled": true }
+  },
+  "policies": {
+    "toolDefaults": { "readFile": "allow", "glob": "allow", "write": "invalid", "edit": "ask", "bash": "ask", "grep": "allow" },
+    "userRules": []
+  },
+  "bash": { "autoDetect": true },
+  "desktop": {
+    "autoStartHarnessOnAppLaunch": false,
+    "approvalNotifications": true,
+    "connectionNotifications": true,
+    "backgroundNoticeAcknowledged": false
+  },
+  "history": { "enabled": true, "retentionDays": 30, "maxStorageMiB": 256 }
+}

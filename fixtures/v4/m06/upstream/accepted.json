@@ -1,0 +1,11 @@
+{
+  "schema": "m06-upstream-state-v1",
+  "milestones": [
+    { "id": "M00", "status": "ACCEPTED_FROZEN" },
+    { "id": "M01", "status": "ACCEPTED_FROZEN" },
+    { "id": "M02", "status": "ACCEPTED_FROZEN" },
+    { "id": "M03", "status": "ACCEPTED_FROZEN" },
+    { "id": "M04", "status": "ACCEPTED_FROZEN" },
+    { "id": "M05", "status": "ACCEPTED_FROZEN" }
+  ]
+}
