@@ -21,10 +21,16 @@ pub fn run() {
     let desktop = crate::desktop::DesktopLifecycleCoordinator::new(harness.clone());
     let desktop_for_window = desktop.clone();
     let desktop_for_setup = desktop.clone();
-    tauri::Builder::default()
+    let autostart = crate::desktop::autostart::AutoStartCoordinator::default();
+    let autostart_for_setup = autostart.clone();
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder.plugin(crate::desktop::single_instance::plugin());
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(desktop)
+        .manage(autostart)
         .on_window_event(move |window, event| {
             desktop_for_window.handle_window_event(window, event);
         })
@@ -146,6 +152,7 @@ pub fn run() {
                 crate::desktop::tray::refresh(&handle_for_status, &desktop_for_status);
             }));
             let _ = crate::startup_benchmark::maybe_spawn(&handle);
+            crate::desktop::autostart::schedule(&handle, &autostart_for_setup);
             Ok(())
         })
         .manage(std::sync::Mutex::new(crate::commands::BackendState {

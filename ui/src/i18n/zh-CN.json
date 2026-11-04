@@ -582,6 +582,11 @@
   },
   "settings": {
     "appearance": "外观",
+    "autoStart": {
+      "title": "打开应用时自动启动 Harness",
+      "help": "打开 ChatGPT-Harness 后自动启动 Harness。登录 Windows 时不会自动打开应用。更改将在下次启动应用时生效。",
+      "saved": "自动启动偏好已保存，将在下次打开应用时生效。"
+    },
     "notifications": {
       "title": "后台与通知",
       "approvalTitle": "审批托盘提醒",

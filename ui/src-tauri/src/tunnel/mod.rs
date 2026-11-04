@@ -1408,6 +1408,22 @@ impl TunnelProcessManager {
         Ok(status)
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_has_live_process(&self) -> bool {
+        self.inner
+            .lock()
+            .ok()
+            .and_then(|inner| inner.process.clone())
+            .is_some_and(|process| {
+                !process
+                    .exited
+                    .0
+                    .lock()
+                    .map(|exited| *exited)
+                    .unwrap_or(false)
+            })
+    }
+
     fn resolve_executable(&self, launch: &TunnelLaunch) -> Result<PathBuf, TunnelProcessError> {
         #[cfg(test)]
         let candidate = self
@@ -3016,7 +3032,7 @@ fn timestamp_after(delay: Duration) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::ffi::OsString;
     use std::net::TcpListener;
@@ -3029,7 +3045,7 @@ mod tests {
             .expect("Windows command processor must be available")
     }
 
-    fn sleeping_manager() -> TunnelProcessManager {
+    pub(crate) fn sleeping_manager() -> TunnelProcessManager {
         TunnelProcessManager::with_test_command(TestTunnelCommand {
             executable_path: cmd_path(),
             args: vec!["/C".into(), "ping 127.0.0.1 -n 30 > NUL".into()],

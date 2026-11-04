@@ -8,7 +8,18 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    sync::{Mutex, MutexGuard},
 };
+
+// ConfigStore is constructed at several Host entry points, including the Tray.
+// Serialize their read/modify/write transactions within the app process.
+static CONFIG_TRANSACTION: Mutex<()> = Mutex::new(());
+
+fn config_transaction() -> Result<MutexGuard<'static, ()>, ConfigError> {
+    CONFIG_TRANSACTION
+        .lock()
+        .map_err(|_| ConfigError::Io("configuration transaction unavailable".into()))
+}
 
 mod migration;
 pub use harness_control_protocol::CURRENT_SCHEMA_VERSION;
@@ -21,6 +32,9 @@ mod m00_contract;
 
 #[cfg(test)]
 mod m01_contract;
+
+#[cfg(test)]
+mod m07_contract;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +99,11 @@ impl ConfigStore {
         }
     }
     pub fn load(&self) -> Result<Option<AppConfig>, ConfigError> {
+        let _transaction = config_transaction()?;
+        self.load_locked()
+    }
+
+    fn load_locked(&self) -> Result<Option<AppConfig>, ConfigError> {
         if !self.file.exists() {
             return Ok(None);
         }
@@ -162,9 +181,10 @@ impl ConfigStore {
         Ok(Some(config))
     }
     pub fn load_or_create_defaults(&self) -> Result<AppConfig, ConfigError> {
-        match self.load()? {
+        let _transaction = config_transaction()?;
+        match self.load_locked()? {
             Some(config) => Ok(config),
-            None => self.save(Self::safe_defaults()),
+            None => self.save_locked(Self::safe_defaults()),
         }
     }
 
@@ -195,12 +215,17 @@ impl ConfigStore {
         }
     }
 
-    pub fn save(&self, mut config: AppConfig) -> Result<AppConfig, ConfigError> {
+    pub fn save(&self, config: AppConfig) -> Result<AppConfig, ConfigError> {
+        let _transaction = config_transaction()?;
+        self.save_locked(config)
+    }
+
+    fn save_locked(&self, mut config: AppConfig) -> Result<AppConfig, ConfigError> {
         if config.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(ConfigError::Invalid("unsupported schemaVersion".into()));
         }
         validate_current(&mut config)?;
-        let previous = self.load()?;
+        let previous = self.load_locked()?;
         config.config_revision = match previous {
             None => DecimalU64::new(1),
             Some(old) if same_restart_semantics(&old, &config) => old.config_revision,
@@ -222,12 +247,13 @@ impl ConfigStore {
     /// cannot commit an unrelated Settings draft. When no config exists, use
     /// the same safe defaults as the normal config bootstrap path.
     pub fn set_ui_language(&self, language: Option<UiLanguage>) -> Result<AppConfig, ConfigError> {
-        let mut config = match self.load()? {
+        let _transaction = config_transaction()?;
+        let mut config = match self.load_locked()? {
             Some(config) => config,
             None => Self::safe_defaults(),
         };
         config.ui.language = language;
-        self.save(config)
+        self.save_locked(config)
     }
 
     /// Persist only host-owned desktop preferences. The latest configuration
@@ -236,7 +262,8 @@ impl ConfigStore {
         &self,
         patch: DesktopPreferencesPatch,
     ) -> Result<AppConfig, ConfigError> {
-        let mut config = match self.load()? {
+        let _transaction = config_transaction()?;
+        let mut config = match self.load_locked()? {
             Some(config) => config,
             None => Self::safe_defaults(),
         };
@@ -252,10 +279,11 @@ impl ConfigStore {
         if let Some(value) = patch.auto_start_harness_on_app_launch {
             config.desktop.auto_start_harness_on_app_launch = value;
         }
-        self.save(config)
+        self.save_locked(config)
     }
 
     pub fn reset(&self) -> Result<(), ConfigError> {
+        let _transaction = config_transaction()?;
         if self.file.exists() {
             fs::remove_file(&self.file).map_err(|e| ConfigError::Io(e.to_string()))?;
         }

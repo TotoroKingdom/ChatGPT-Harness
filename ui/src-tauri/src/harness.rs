@@ -302,13 +302,48 @@ impl HarnessController {
         app: &AppHandle,
         secrets: &Mutex<crate::commands::BackendState>,
     ) -> Result<HarnessStatus, crate::commands::ControlError> {
+        self.start_with_origin(app, secrets, false)
+    }
+
+    pub(crate) fn start_with_origin(
+        &self,
+        app: &AppHandle,
+        secrets: &Mutex<crate::commands::BackendState>,
+        automatic: bool,
+    ) -> Result<HarnessStatus, crate::commands::ControlError> {
         let _operation = self.lock_operation()?;
         self.attach_app(app);
+        if automatic
+            && app
+                .try_state::<crate::desktop::DesktopLifecycleCoordinator>()
+                .map(|desktop| desktop.automatic_start_cancelled())
+                .unwrap_or(true)
+        {
+            return Err(crate::commands::ControlError {
+                code: "LIFECYCLE_CONFLICT".into(),
+                message: "Application shutdown was requested; automatic Start was skipped.".into(),
+            });
+        }
         self.start_locked(app, secrets)
     }
 
     pub fn stop(&self, app: &AppHandle) -> Result<HarnessStatus, crate::commands::ControlError> {
         let _operation = self.lock_operation()?;
+        self.attach_app(app);
+        self.stop_locked(app)
+    }
+
+    /// Quit is already marked before this waits for an in-flight Start. The
+    /// same operation mutex then serializes cleanup after that Start finishes.
+    pub(crate) fn stop_for_quit(
+        &self,
+        app: &AppHandle,
+    ) -> Result<HarnessStatus, crate::commands::ControlError> {
+        let _operation = self
+            .shared
+            .operation
+            .lock()
+            .map_err(|_| lifecycle_error("Harness lifecycle state is unavailable."))?;
         self.attach_app(app);
         self.stop_locked(app)
     }
@@ -375,7 +410,7 @@ impl HarnessController {
             Ok(value) => value,
             Err(error) => {
                 self.startup.fail_active(&session_id, &error.code);
-                return Err(error);
+                return Err(self.record_prestart_failure(error));
             }
         };
         if !eligibility.can_start {
@@ -386,7 +421,7 @@ impl HarnessController {
             );
             self.startup
                 .fail_active(&session_id, "ELIGIBILITY_REJECTED");
-            return Err(lifecycle_error(eligibility.message));
+            return Err(self.record_prestart_failure(lifecycle_error(eligibility.message)));
         }
         self.startup
             .complete_phase(&session_id, StartupPhase::EligibilityPrepare);
@@ -394,13 +429,13 @@ impl HarnessController {
             Ok(Some(config)) => config,
             Ok(None) => {
                 self.startup.fail_active(&session_id, "CONFIG_NOT_FOUND");
-                return Err(lifecycle_error(
+                return Err(self.record_prestart_failure(lifecycle_error(
                     "Save configuration before starting Harness.",
-                ));
+                )));
             }
             Err(error) => {
                 self.startup.fail_active(&session_id, &error.code);
-                return Err(error);
+                return Err(self.record_prestart_failure(error));
             }
         };
         self.update(|inner| {
@@ -587,6 +622,23 @@ impl HarnessController {
             Some(error) => Err(error),
             None => Ok(status),
         }
+    }
+
+    fn record_prestart_failure(
+        &self,
+        error: crate::commands::ControlError,
+    ) -> crate::commands::ControlError {
+        self.update(|inner| {
+            if matches!(
+                inner.status.lifecycle,
+                HarnessLifecycle::Stopped | HarnessLifecycle::Error
+            ) {
+                inner.status.lifecycle = HarnessLifecycle::Error;
+                inner.status.last_error = Some(error_summary(&error));
+            }
+        });
+        self.emit_status(&self.status());
+        error
     }
 
     fn fail_start(

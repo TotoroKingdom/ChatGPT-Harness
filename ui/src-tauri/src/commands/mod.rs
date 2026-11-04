@@ -773,15 +773,8 @@ pub fn harness_start_eligibility(
 #[tauri::command]
 pub async fn harness_start(app: AppHandle) -> Result<HarnessStatus, ControlError> {
     lifecycle_in_background(move || {
-        let desktop = app.state::<DesktopLifecycleCoordinator>();
-        if !desktop.start_allowed() {
-            return Err(ControlError {
-                code: "LIFECYCLE_CONFLICT".into(),
-                message: "Harness is already running, changing state, or quitting.".into(),
-            });
-        }
-        app.state::<HarnessController>()
-            .start(&app, &app.state::<Mutex<BackendState>>())
+        app.state::<DesktopLifecycleCoordinator>()
+            .dispatch_start(&app, &app.state::<Mutex<BackendState>>())
     })
     .await
 }

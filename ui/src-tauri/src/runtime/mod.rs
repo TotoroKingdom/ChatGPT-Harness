@@ -1440,7 +1440,7 @@ mod m6_i18n_qa;
 mod m7_e2e;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use harness_control_protocol::{
         DecimalU64, RpcResponse, RuntimeLifecycle, RuntimeReadiness, SecurityConfig, SecurityMode,
@@ -1507,7 +1507,17 @@ mod tests {
         assert!(!serialized.contains("apiKeyRef"));
     }
 
-    fn test_supervisor(mode: &str, stop_timeout: Duration) -> RuntimeSupervisor {
+    #[test]
+    fn runtime_snapshot_ignores_auto_start_preference() {
+        let mut config = config(7);
+        let before = serde_json::to_value(runtime_config_snapshot(&config)).unwrap();
+        config.desktop.auto_start_harness_on_app_launch = true;
+        let after = serde_json::to_value(runtime_config_snapshot(&config)).unwrap();
+        assert_eq!(before, after);
+        assert!(after.get("desktop").is_none());
+    }
+
+    pub(crate) fn test_supervisor(mode: &str, stop_timeout: Duration) -> RuntimeSupervisor {
         let mut supervisor = RuntimeSupervisor::new();
         supervisor.test_command = Some(TestRuntimeCommand {
             executable_path: env::current_exe().expect("test executable path"),

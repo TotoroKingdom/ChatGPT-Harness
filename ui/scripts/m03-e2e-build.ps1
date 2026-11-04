@@ -6,6 +6,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$CandidateDirectory,
 
+    [string]$AppIdentifier = "",
+
     [switch]$KeepGeneratedConfig
 )
 
@@ -68,6 +70,13 @@ $generatedConfigValue = [ordered]@{
         # mock IPC implementation.
         withGlobalTauri = $true
     }
+}
+if (-not [string]::IsNullOrWhiteSpace($AppIdentifier)) {
+    if ($AppIdentifier -notmatch '^com\.chatgpt\.harness\.m07\.qa\.[a-z0-9]+$') {
+        throw "QA app identifier is invalid."
+    }
+    # An isolated M07 QA build must not activate or compete with a real app.
+    $generatedConfigValue["identifier"] = $AppIdentifier
 }
 
 try {

@@ -582,6 +582,11 @@
   },
   "settings": {
     "appearance": "Appearance",
+    "autoStart": {
+      "title": "Auto Start Harness on app launch",
+      "help": "Automatically starts Harness after you open ChatGPT-Harness. This does not open the app when you sign in to Windows. Changes take effect the next time you launch the app.",
+      "saved": "Auto Start preference saved for the next app launch."
+    },
     "notifications": {
       "title": "Background & notifications",
       "approvalTitle": "Approval Tray reminder",

@@ -1,6 +1,11 @@
+pub mod autostart;
+#[cfg(all(test, windows, feature = "native-tray-tests"))]
+mod autostart_development;
 pub mod incidents;
 pub mod lifecycle;
 pub mod notifications;
+#[cfg(windows)]
+pub mod single_instance;
 
 use crate::{
     commands::{BackendState, ControlError},
@@ -326,6 +331,13 @@ impl DesktopLifecycleCoordinator {
             .unwrap_or(false)
     }
 
+    pub(crate) fn automatic_start_cancelled(&self) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| inner.lifecycle.quit_was_requested)
+            .unwrap_or(true)
+    }
+
     pub fn begin_quit(&self) -> bool {
         let began = self
             .inner
@@ -357,7 +369,7 @@ impl DesktopLifecycleCoordinator {
         }
         // The flag is set before entering HarnessController's serialized stop
         // path, so a racing Tray Start cannot create a new owned process.
-        if let Err(error) = self.harness.stop(app) {
+        if let Err(error) = self.harness.stop_for_quit(app) {
             // Do not exit while Harness reports a cleanup failure: the bounded
             // stop path may have left an owned child alive. Keep the Host up,
             // release the quit lock, and let the command surface the error so
@@ -401,13 +413,30 @@ impl DesktopLifecycleCoordinator {
         app: &AppHandle,
         backend: &Mutex<BackendState>,
     ) -> Result<HarnessStatus, ControlError> {
+        self.dispatch_start_inner(app, backend, false)
+    }
+
+    pub(crate) fn dispatch_automatic_start(
+        &self,
+        app: &AppHandle,
+        backend: &Mutex<BackendState>,
+    ) -> Result<HarnessStatus, ControlError> {
+        self.dispatch_start_inner(app, backend, true)
+    }
+
+    fn dispatch_start_inner(
+        &self,
+        app: &AppHandle,
+        backend: &Mutex<BackendState>,
+        automatic: bool,
+    ) -> Result<HarnessStatus, ControlError> {
         if !self.start_allowed() {
             return Err(ControlError {
                 code: "LIFECYCLE_CONFLICT".into(),
                 message: "Harness is already running, changing state, or quitting.".into(),
             });
         }
-        self.harness.start(app, backend)
+        self.harness.start_with_origin(app, backend, automatic)
     }
 
     pub fn dispatch_stop(&self, app: &AppHandle) -> Result<HarnessStatus, ControlError> {

@@ -56,6 +56,8 @@ function makeContext(overrides: Record<string, unknown> = {}) {
     continueInBackground: vi.fn().mockResolvedValue({ ok: true }),
     quitDesktop: vi.fn().mockResolvedValue({ ok: true }),
     resetConfig: vi.fn().mockResolvedValue({ ok: true }),
+    startHarness: vi.fn().mockResolvedValue({ ok: true }),
+    stopHarness: vi.fn().mockResolvedValue({ ok: true }),
     restartHarness: vi.fn().mockResolvedValue({ ok: true }),
     runDiagnostics: vi.fn().mockResolvedValue({ checks: [] }),
     ...overrides,
@@ -82,6 +84,45 @@ afterEach(() => {
 });
 
 describe("M8 Settings section/list workflow", () => {
+  it("saves the independent Auto Start preference for the next app launch", async () => {
+    const setDesktopPreferences = vi.fn().mockResolvedValue({ ok: true });
+    state.context = makeContext({ setDesktopPreferences });
+    state.context.config.desktop.autoStartHarnessOnAppLaunch = true;
+    const view = render(<SettingsPage />);
+    const toggle = screen.getByRole("checkbox", { name: "Auto Start Harness on app launch" });
+    expect(toggle).toBeChecked();
+    expect(screen.getByText(/does not open the app when you sign in to Windows/)).toBeInTheDocument();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(setDesktopPreferences).toHaveBeenCalledWith({ autoStartHarnessOnAppLaunch: false }));
+    expect(await screen.findByText("Auto Start preference saved for the next app launch.")).toBeInTheDocument();
+    state.context.config.desktop.autoStartHarnessOnAppLaunch = false;
+    view.rerender(<SettingsPage />);
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(setDesktopPreferences).toHaveBeenCalledWith({ autoStartHarnessOnAppLaunch: true }));
+    expect(state.context.startHarness).not.toHaveBeenCalled();
+    expect(state.context.stopHarness).not.toHaveBeenCalled();
+    expect(state.context.restartHarness).not.toHaveBeenCalled();
+    expect(screen.queryByText("Config Mismatch — Restart Required")).not.toBeInTheDocument();
+  });
+
+  it("disables only Auto Start while saving and refreshes persisted truth on failure", async () => {
+    let finish!: (result: { ok: false; error: { code: string } }) => void;
+    const setDesktopPreferences = vi.fn().mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    const refreshConfig = vi.fn().mockResolvedValue(undefined);
+    state.context = makeContext({ setDesktopPreferences, refreshConfig });
+    render(<SettingsPage />);
+    const toggle = screen.getByRole("checkbox", { name: "Auto Start Harness on app launch" });
+    fireEvent.click(toggle);
+    expect(toggle).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Connection notifications" })).toBeEnabled();
+    finish({ ok: false, error: { code: "CONFIG_WRITE_FAILED" } });
+    await waitFor(() => expect(refreshConfig).toHaveBeenCalledOnce());
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText("CONFIG_WRITE_FAILED")).toBeInTheDocument();
+  });
+
   it("renders the six settings sections without a page-level Save action", () => {
     render(<SettingsPage />);
     ["general", "notifications", "workspace", "connection", "security", "advanced", "danger"].forEach((name) => {

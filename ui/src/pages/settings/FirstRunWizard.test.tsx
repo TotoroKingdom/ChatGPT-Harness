@@ -18,6 +18,7 @@ function view(onDone = vi.fn()) {
 async function workspace() {
   fireEvent.click(await screen.findByRole("button", { name: "Choose Folder" }));
   await screen.findByRole("heading", { name: "Connection" });
+  await waitFor(() => expect(screen.getByLabelText("Tunnel ID (required)")).toBeEnabled());
 }
 function connection() {
   fireEvent.change(screen.getByLabelText("Tunnel ID (required)"), { target: { value: "setup-tunnel" } });

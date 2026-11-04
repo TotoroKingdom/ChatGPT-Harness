@@ -10,6 +10,7 @@ pub enum CloseDecision {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DesktopLifecycleState {
     pub app_quitting: bool,
+    pub quit_was_requested: bool,
     pub background_notice_acknowledged: bool,
     pub education_visible: bool,
 }
@@ -56,6 +57,7 @@ impl DesktopLifecycleState {
             return false;
         }
         self.app_quitting = true;
+        self.quit_was_requested = true;
         self.education_visible = false;
         true
     }
@@ -136,6 +138,7 @@ mod tests {
         assert!(state.begin_quit());
         state.cancel_quit();
         assert!(!state.app_quitting);
+        assert!(state.quit_was_requested);
         assert!(state.begin_quit());
     }
 

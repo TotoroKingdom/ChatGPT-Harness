@@ -69,6 +69,15 @@ function MutationProbe() {
     });
   };
 
+  const saveDesktopPreferences = () => {
+    void Promise.all([
+      data.setDesktopPreferences({ autoStartHarnessOnAppLaunch: true }),
+      data.setDesktopPreferences({ connectionNotifications: false }),
+      data.setUiLanguage("zh-CN"),
+      data.mutateConfig((latest) => ({ ...latest, tunnel: { ...latest.tunnel, tunnelId: "concurrent-connection" } })),
+    ]).then((results) => setResult(`desktop:${results.every((result) => result.ok) ? "ok" : "failed"}`));
+  };
+
   const saveWithRefreshFailure = () => {
     void data.mutateConfig((latest) => ({ ...latest, tunnel: { ...latest.tunnel, tunnelId: "refresh-unconfirmed" } })).then((next) => {
       setResult(`refresh-check:${next.ok ? "ok" : "failed"}${next.refreshUnconfirmed ? ":refresh-unconfirmed" : ""}`);
@@ -97,6 +106,7 @@ function MutationProbe() {
       <button type="button" onClick={saveAfterFailure}>Save after failure</button>
       <button type="button" onClick={saveRuleConnectionLanguage}>Save interleaved rule connection language</button>
       <button type="button" onClick={saveAndReset}>Save then reset</button>
+      <button type="button" onClick={saveDesktopPreferences}>Save desktop preferences concurrently</button>
       <button type="button" onClick={saveWithRefreshFailure}>Save with refresh failure</button>
       <button type="button" onClick={refreshThenSave}>Refresh then save</button>
       <button type="button" onClick={() => void data.deleteApiKey().then(() => setResult("delete:done"))}>Delete API Key</button>
@@ -175,6 +185,25 @@ describe("M8 config mutation coordination", () => {
     const persisted = await state.client.configGet();
     expect(persisted?.tunnel.tunnelId).toBe("quick-tunnel");
     expect(persisted?.workspace.rootPath).toBe("D:\\quick-workspace");
+  });
+
+  it("preserves Auto Start, notification, language, and connection intents without lifecycle actions", async () => {
+    await renderMutationProbe();
+    const priorSession = state.client.getHarnessStatus().activeSessionId;
+    const start = vi.spyOn(state.client, "harnessStart");
+    const stop = vi.spyOn(state.client, "harnessStop");
+    const restart = vi.spyOn(state.client, "harnessRestart");
+    fireEvent.click(screen.getByRole("button", { name: "Save desktop preferences concurrently" }));
+    await waitFor(() => expect(screen.getByTestId("mutation-result")).toHaveTextContent("desktop:ok"), { timeout: 6000 });
+    const persisted = await state.client.configGet();
+    expect(persisted?.desktop.autoStartHarnessOnAppLaunch).toBe(true);
+    expect(persisted?.desktop.connectionNotifications).toBe(false);
+    expect(persisted?.ui.language).toBe("zh-CN");
+    expect(persisted?.tunnel.tunnelId).toBe("concurrent-connection");
+    expect(state.client.getHarnessStatus().activeSessionId).toBe(priorSession);
+    expect(start).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(restart).not.toHaveBeenCalled();
   });
 
   it("continues with the next intent after the first queued save fails", async () => {

@@ -80,6 +80,8 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
   const [themeFeedback, setThemeFeedback] = useState<Feedback | null>(null);
   const [notificationSaving, setNotificationSaving] = useState(false);
   const [notificationFeedback, setNotificationFeedback] = useState<Feedback | null>(null);
+  const [autoStartSaving, setAutoStartSaving] = useState(false);
+  const [autoStartFeedback, setAutoStartFeedback] = useState<Feedback | null>(null);
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [workspaceFeedback, setWorkspaceFeedback] = useState<Feedback | null>(null);
   const [connectionOpen, setConnectionOpen] = useState(false);
@@ -197,6 +199,26 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
       setNotificationFeedback(errorFeedback(error));
     } finally {
       setNotificationSaving(false);
+    }
+  };
+
+  const changeAutoStart = async (enabled: boolean) => {
+    if (autoStartSaving || resetting || !data.config) return;
+    setAutoStartSaving(true);
+    setAutoStartFeedback(null);
+    try {
+      const result = await data.setDesktopPreferences({ autoStartHarnessOnAppLaunch: enabled });
+      if (result.ok) {
+        setAutoStartFeedback({ kind: "success", key: "settings.autoStart.saved" });
+      } else {
+        await data.refreshConfig();
+        setAutoStartFeedback(saveError(result));
+      }
+    } catch (error) {
+      await data.refreshConfig();
+      setAutoStartFeedback(errorFeedback(error));
+    } finally {
+      setAutoStartSaving(false);
     }
   };
 
@@ -378,6 +400,18 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
         </Select>} />
         {languageSaving && <InlineFeedback>{t("settings.languageSaving")}</InlineFeedback>}
         {languageFeedback && <FeedbackNotice feedback={languageFeedback} />}
+        <Row
+          title={t("settings.autoStart.title")}
+          summary={t("settings.autoStart.help")}
+          controls={<input
+            type="checkbox"
+            aria-label={t("settings.autoStart.title")}
+            checked={currentConfig?.desktop.autoStartHarnessOnAppLaunch ?? false}
+            onChange={(event) => void changeAutoStart(event.target.checked)}
+            disabled={autoStartSaving || resetting || !data.config}
+          />}
+        />
+        {autoStartFeedback && <FeedbackNotice feedback={autoStartFeedback} />}
       </Section>)}
 
       {section("appearance", <Section title={t("settings.appearance")}>
