@@ -1,0 +1,235 @@
+{
+  "id": 1,
+  "result": {
+    "result": {
+      "type": "object",
+      "value": {
+        "runId": "diagnostic_5db650b8-573c-4f7a-840f-788dfd278154",
+        "startedAt": "2026-11-04T14:47:09.352Z",
+        "finishedAt": "2026-11-04T14:47:09.353Z",
+        "overallStatus": "pass",
+        "checks": [
+          {
+            "id": "config",
+            "status": "pass",
+            "summary": "Current configuration is valid.",
+            "scope": "config",
+            "evidence": [
+              {
+                "key": "configured",
+                "value": "true"
+              },
+              {
+                "key": "version",
+                "value": "3"
+              }
+            ]
+          },
+          {
+            "id": "workspace",
+            "status": "pass",
+            "summary": "Workspace is accessible.",
+            "scope": "workspace",
+            "evidence": [
+              {
+                "key": "exists",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "id": "runtime_distribution",
+            "status": "pass",
+            "summary": "Runtime distribution is available.",
+            "scope": "runtime",
+            "evidence": [
+              {
+                "key": "version",
+                "value": "0.1.3"
+              }
+            ]
+          },
+          {
+            "id": "runtime_process",
+            "status": "pass",
+            "summary": "Runtime process is running.",
+            "scope": "runtime",
+            "evidence": [
+              {
+                "key": "process_phase",
+                "value": "running"
+              }
+            ]
+          },
+          {
+            "id": "runtime_readiness",
+            "status": "pass",
+            "summary": "Runtime readiness is authoritative and ready.",
+            "scope": "runtime",
+            "evidence": [
+              {
+                "key": "readiness",
+                "value": "ready"
+              }
+            ]
+          },
+          {
+            "id": "runtime_diagnostics",
+            "status": "pass",
+            "summary": "Runtime diagnostics completed successfully.",
+            "scope": "runtime",
+            "evidence": [
+              {
+                "key": "configured",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "id": "mcp_endpoint",
+            "status": "pass",
+            "summary": "The current MCP endpoint is available.",
+            "scope": "mcp",
+            "evidence": [
+              {
+                "key": "endpoint_reachable",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "id": "tunnel_distribution",
+            "status": "pass",
+            "summary": "Tunnel distribution is available.",
+            "scope": "tunnel",
+            "evidence": [
+              {
+                "key": "version",
+                "value": "0.0.13"
+              }
+            ]
+          },
+          {
+            "id": "tunnel_process",
+            "status": "pass",
+            "summary": "A managed Tunnel process is present.",
+            "scope": "tunnel",
+            "evidence": [
+              {
+                "key": "process_phase",
+                "value": "ready"
+              }
+            ]
+          },
+          {
+            "id": "tunnel_readiness",
+            "status": "pass",
+            "summary": "Current Tunnel readiness evidence is healthy.",
+            "scope": "tunnel",
+            "evidence": [
+              {
+                "key": "readiness",
+                "value": "ready"
+              },
+              {
+                "key": "last_success_age_seconds",
+                "value": "5"
+              }
+            ]
+          },
+          {
+            "id": "control_plane",
+            "status": "pass",
+            "summary": "Control plane is connected with current evidence.",
+            "scope": "control_plane",
+            "evidence": [
+              {
+                "key": "configured",
+                "value": "true"
+              },
+              {
+                "key": "route_mode",
+                "value": "proxy"
+              },
+              {
+                "key": "proxy_source",
+                "value": "control-plane.http-proxy"
+              }
+            ]
+          },
+          {
+            "id": "mcp_target",
+            "status": "pass",
+            "summary": "MCP target is reachable.",
+            "scope": "mcp",
+            "evidence": [
+              {
+                "key": "endpoint_reachable",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "id": "proxy_config",
+            "status": "pass",
+            "summary": "A valid proxy configuration is present.",
+            "scope": "proxy",
+            "evidence": [
+              {
+                "key": "configured",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "id": "proxy_route",
+            "status": "pass",
+            "summary": "Observed control-plane route is available.",
+            "scope": "proxy",
+            "evidence": [
+              {
+                "key": "route_mode",
+                "value": "proxy"
+              },
+              {
+                "key": "proxy_source",
+                "value": "control-plane.http-proxy"
+              }
+            ]
+          },
+          {
+            "id": "credential_presence",
+            "status": "pass",
+            "summary": "The referenced credential is present in the SecretStore.",
+            "scope": "credential",
+            "evidence": [
+              {
+                "key": "exists",
+                "value": "true"
+              }
+            ]
+          },
+          {
+            "id": "credential_state",
+            "status": "pass",
+            "summary": "Current control-plane connectivity proves credential acceptance.",
+            "scope": "credential",
+            "evidence": []
+          },
+          {
+            "id": "harness_lifecycle",
+            "status": "pass",
+            "summary": "Harness lifecycle is Ready.",
+            "scope": "lifecycle",
+            "evidence": [
+              {
+                "key": "lifecycle",
+                "value": "ready"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
