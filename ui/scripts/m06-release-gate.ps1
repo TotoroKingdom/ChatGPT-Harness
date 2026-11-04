@@ -237,6 +237,7 @@ function ConvertTo-CanonicalJson {
 
 function Get-TreeHash {
     param([string]$Root)
+    $Root = [IO.Path]::GetFullPath($Root)
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
         throw "Tree root is missing: $Root"
     }
@@ -947,6 +948,9 @@ function Test-PackageContract {
         [switch]$RequireInstallerPayload
     )
     $reasons = @()
+    if (-not [string]::IsNullOrWhiteSpace($Portable)) {
+        $Portable = [IO.Path]::GetFullPath($Portable)
+    }
     $details = [ordered]@{
         portable_status = "UNAVAILABLE"
         installer_status = "UNAVAILABLE"
