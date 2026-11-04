@@ -14,5 +14,5 @@ if (-not $appDataPath.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreC
     throw "M07 QA AppData must be a disposable directory under the system temporary directory."
 }
 $identifier = "com.chatgpt.harness.m07.qa." + [guid]::NewGuid().ToString("N")
-& (Join-Path $PSScriptRoot "m03-e2e-build.ps1") -AppDataRoot $appDataPath -CandidateDirectory $CandidateDirectory -AppIdentifier $identifier
+& (Join-Path $PSScriptRoot "m03-e2e-build.ps1") -AppDataRoot $appDataPath -CandidateDirectory $CandidateDirectory -AppIdentifier $identifier -IsolatedCredentials
 if ($LASTEXITCODE -ne 0) { throw "M07 isolated QA build failed." }

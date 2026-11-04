@@ -8,6 +8,8 @@ param(
 
     [string]$AppIdentifier = "",
 
+    [switch]$IsolatedCredentials,
+
     [switch]$KeepGeneratedConfig
 )
 
@@ -78,6 +80,10 @@ if (-not [string]::IsNullOrWhiteSpace($AppIdentifier)) {
     # An isolated M07 QA build must not activate or compete with a real app.
     $generatedConfigValue["identifier"] = $AppIdentifier
 }
+if ($IsolatedCredentials -and [string]::IsNullOrWhiteSpace($AppIdentifier)) {
+    throw "Isolated QA credentials require an isolated QA app identifier."
+}
+$tauriFeatures = if ($IsolatedCredentials) { "custom-protocol,qa-isolated-credentials" } else { "custom-protocol" }
 
 try {
     Write-Utf8Json $generatedConfig $generatedConfigValue
@@ -98,7 +104,7 @@ try {
         & npx tauri build `
             --no-bundle `
             --ci `
-            --features custom-protocol `
+            --features $tauriFeatures `
             --config src-tauri/tauri.portable.conf.json `
             --config $generatedConfig
         if ($LASTEXITCODE -ne 0) {
@@ -142,6 +148,7 @@ try {
         executableSha256 = Get-Sha256 (Join-Path $candidatePath "chatgpt-harness-ui.exe")
         generatedConfig = $generatedConfig
         generatedConfigValue = $generatedConfigValue
+        isolatedCredentials = [bool]$IsolatedCredentials
         manifest = $manifest
         builtAtUtc = [DateTime]::UtcNow.ToString("O")
     }

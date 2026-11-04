@@ -1,5 +1,19 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    #[cfg(feature = "qa-isolated-credentials")]
+    assert!(
+        context
+            .config()
+            .identifier
+            .starts_with("com.chatgpt.harness.m07.qa."),
+        "isolated QA credentials require an isolated M07 application identifier"
+    );
+    #[cfg(feature = "qa-isolated-credentials")]
+    let secrets = crate::secrets::qa_fixture_secrets(
+        std::env::var_os("M07_QA_SYNTHETIC_CREDENTIAL").is_some_and(|value| value == "present"),
+    );
+    #[cfg(not(feature = "qa-isolated-credentials"))]
     let secrets: Box<dyn crate::secrets::SecretStore> = if cfg!(windows) {
         #[cfg(windows)]
         {
@@ -205,7 +219,7 @@ pub fn run() {
             crate::commands::harness_stop,
             crate::commands::harness_restart
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running ChatGPT-Harness application");
 }
 

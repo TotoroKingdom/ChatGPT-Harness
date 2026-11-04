@@ -42,6 +42,19 @@ impl SecretStore for MemorySecretStore {
     }
 }
 
+/// The dedicated QA build uses only ephemeral synthetic credentials, never
+/// the real user's Windows Credential Manager. Normal builds omit this code.
+#[cfg(feature = "qa-isolated-credentials")]
+pub(crate) fn qa_fixture_secrets(present: bool) -> Box<dyn SecretStore> {
+    let store = MemorySecretStore::default();
+    if present {
+        store
+            .set("tunnel-api-key", "m07-synthetic-fixture")
+            .expect("memory fixture");
+    }
+    Box::new(store)
+}
+
 #[cfg(windows)]
 pub struct WindowsCredentialStore;
 #[cfg(windows)]
@@ -97,6 +110,19 @@ pub fn api_key_ref() -> SecretReference {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "qa-isolated-credentials")]
+    #[test]
+    fn isolated_qa_credentials_are_ephemeral_and_can_be_missing() {
+        let missing = qa_fixture_secrets(false);
+        assert!(!missing.exists("tunnel-api-key").unwrap());
+        let present = qa_fixture_secrets(true);
+        assert!(present.exists("tunnel-api-key").unwrap());
+        present
+            .set("tunnel-api-key", "another-synthetic-value")
+            .unwrap();
+        assert!(!qa_fixture_secrets(false).exists("tunnel-api-key").unwrap());
+    }
 
     #[test]
     fn memory_secret_store_replaces_and_deletes_values() {
