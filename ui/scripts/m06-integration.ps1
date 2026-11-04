@@ -160,7 +160,7 @@ try {
 
     foreach ($entry in $cases) {
         if ($requested -and $entry.Id -ne $requested) { continue }
-        $status = "PASS"
+        $status = "DEVELOPMENT_PASS"
         $log = $null
         $reason = ""
         try {
@@ -175,7 +175,7 @@ try {
                         $reason = "Package audit explicitly skipped."
                     } else {
                         if ($null -eq $packageResult) { $packageResult = Invoke-PackageAudit }
-                        $status = $packageResult.Status
+                        $status = if ($packageResult.Status -eq "PASS") { "DEVELOPMENT_PASS" } else { $packageResult.Status }
                         $log = $packageResult.Log
                         $reason = $packageResult.Reason
                     }
@@ -224,20 +224,22 @@ try {
                 default { throw "Unknown M06 integration kind $($entry.Kind)" }
             }
         } catch {
-            $status = "FAIL"
+            $status = "DEVELOPMENT_FAIL"
             $reason = $_.Exception.Message
         }
         $results += [ordered]@{
             id = $entry.Id
+            formal_case = $entry.Id
+            formal_status = "NOT_EXECUTED"
             description = $entry.Description
             status = $status
             evidence = $log
             reason = $reason
         }
-        Write-Host ("{0} {1}" -f $entry.Id, $status)
+        Write-Host ("{0} {1} (formal NOT_EXECUTED)" -f $entry.Id, $status)
     }
 
-    $formalBlocked = @($results | Where-Object { $_.status -in @("FAIL", "BLOCKED") }).Count -gt 0
+    $formalBlocked = @($results | Where-Object { $_.status -in @("DEVELOPMENT_FAIL", "BLOCKED") }).Count -gt 0
     $summary = [ordered]@{
         schema = "m06-development-integration-result-v1"
         scope = "M06 development regression; formal M06 Integration remains NOT_EXECUTED"
