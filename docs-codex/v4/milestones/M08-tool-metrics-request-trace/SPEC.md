@@ -65,7 +65,19 @@ Trace does not fabricate ChatGPT hidden reasoning, unissued Tool choices, comple
 
 ## Shared Evidence preservation
 
-SEC-AC01/02/03 remain mandatory. Metrics/Trace are observational projections only.
+### SEC-AC01
+
+The same real Tool request must use stable exact identity across Activity, Approval, History, Metrics and Trace. Fuzzy time matching is not an acceptable primary join.
+
+### SEC-AC02
+
+Durable evidence remains typed, bounded and sanitized. Metrics/Trace do not create a second Policy or authorization truth.
+
+### SEC-AC03
+
+History/Trace evidence cannot restore Pending Approval, SessionGrant, ExecutionPermit or any other live authorization state.
+
+All three Shared Evidence criteria remain mandatory. Metrics/Trace are observational projections only.
 
 ---
 
