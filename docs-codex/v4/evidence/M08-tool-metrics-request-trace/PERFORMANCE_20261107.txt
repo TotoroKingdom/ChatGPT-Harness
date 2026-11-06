@@ -1,0 +1,25 @@
+query_plan=["SEARCH q USING COVERING INDEX idx_request_summary_tool_first_seen (tool_name=? AND first_seen_at_utc>? AND first_seen_at_utc<?)", "SEARCH s USING INDEX idx_request_spans_request_order (runtime_id=? AND request_id=?) LEFT-JOIN", "USE TEMP B-TREE FOR GROUP BY", "CORRELATED SCALAR SUBQUERY 1", "SEARCH e USING COVERING INDEX idx_evidence_events_request_stage (runtime_id=? AND request_id=? AND stage=?)"]
+fixture_sha256=bd38c7ba49cf03e0f351d730df465ecb35a1ac1e27ecfae63f8ceaa6e33c69b5
+query=0 variant=0 elapsed_ms=36.445
+query=1 variant=1 elapsed_ms=73.614
+query=2 variant=2 elapsed_ms=208.530
+query=3 variant=3 elapsed_ms=16.334
+query=4 variant=4 elapsed_ms=99.052
+query=5 variant=5 elapsed_ms=426.434
+query=6 variant=0 elapsed_ms=27.659
+query=7 variant=1 elapsed_ms=69.779
+query=8 variant=2 elapsed_ms=209.330
+query=9 variant=3 elapsed_ms=16.377
+query=10 variant=4 elapsed_ms=120.682
+query=11 variant=5 elapsed_ms=466.470
+query=12 variant=0 elapsed_ms=33.930
+query=13 variant=1 elapsed_ms=75.930
+query=14 variant=2 elapsed_ms=214.076
+query=15 variant=3 elapsed_ms=18.570
+query=16 variant=4 elapsed_ms=118.414
+query=17 variant=5 elapsed_ms=492.376
+query=18 variant=0 elapsed_ms=33.430
+query=19 variant=1 elapsed_ms=76.799
+fixture=deterministic-v1 summaries=50000 events=250000 spans=200000 p95_ms=466.470 timeouts=0 os=windows arch=x86_64
+test metrics_50k_requests_twenty_warm_queries ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.32s
