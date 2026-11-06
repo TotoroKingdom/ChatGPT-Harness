@@ -576,7 +576,7 @@ function Test-M11PackageContamination {
             if ($content -match '(?i)(OPENAI_API_KEY|M04_EVAL_API_KEY|M05_EVAL_API_KEY|M09_TEST_SECRET|BEGIN PRIVATE KEY|sk-[A-Za-z0-9])') { $reasons += "Portable contains a secret or provider credential sentinel: $relative." }
         }
     }
-    return $reasons
+    return @($reasons)
 }
 
 function New-M11ReleaseNotes {
@@ -620,7 +620,7 @@ function Test-M11ReleaseNotesText {
     if ($Text -notmatch "F09 Estimated Tokens: DEFERRED") { $issues += "Release notes do not mark F09 DEFERRED." }
     if ($Text -notmatch "F15 Policy Simulator: DEFERRED") { $issues += "Release notes do not mark F15 DEFERRED." }
     if ($Text -match "V4 Full $EmDash ACCEPTED|V4 $EmDash ACCEPTED / FROZEN") { $issues += "Release notes claim final acceptance prematurely." }
-    return $issues
+    return @($issues)
 }
 
 function New-M11GateResult {
@@ -740,7 +740,7 @@ switch ($Command) {
     "audit-package" {
         $candidate = Read-JsonFile $CandidatePath
         $base = Invoke-M06PackageAudit $CandidatePath $PortableDirectory $InstallerPath -RequireInstallerPayload:$RequireInstaller
-        $contamination = Test-M11PackageContamination $PortableDirectory
+        $contamination = @(Test-M11PackageContamination $PortableDirectory)
         $reasons = @($base.Reasons) + @($contamination)
         $result = [pscustomobject]@{ Pass = ($base.Pass -and $contamination.Count -eq 0); Reasons = $reasons; BaseAudit = $base }
         if ($Json) { Write-JsonResult $result $OutputPath } else { Write-Output ("M11 package audit: " + $(if ($result.Pass) { "PASS" } else { "FAIL" })); $result.Reasons | ForEach-Object { Write-Output " - $_" } }
@@ -749,7 +749,7 @@ switch ($Command) {
     "release-notes" {
         $candidate = Read-JsonFile $CandidatePath; $matrix = Read-JsonFile $MatrixPath
         $gate = [pscustomobject]@{ final_verdict = "BLOCKED"; f05_status = "NOT_EXECUTED"; f12_status = "NOT_EXECUTED"; f13_status = "NOT_EXECUTED" }
-        $notes = New-M11ReleaseNotes $candidate $matrix $gate; $issues = Test-M11ReleaseNotesText $notes
+        $notes = New-M11ReleaseNotes $candidate $matrix $gate; $issues = @(Test-M11ReleaseNotesText $notes)
         if ([string]::IsNullOrWhiteSpace($OutputPath)) { Write-Output $notes } else { [IO.File]::WriteAllText($OutputPath, $notes, [Text.UTF8Encoding]::new($false)); Write-Output "Wrote $OutputPath" }
         if ($issues.Count -gt 0) { $issues | ForEach-Object { Write-Output " - $_" }; exit 1 }
     }
