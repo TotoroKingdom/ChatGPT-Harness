@@ -96,6 +96,11 @@ impl McpExecutionContext {
             .execute_async_cancellable(prepare, request_cancel)
             .await
     }
+
+    pub(crate) fn observe_unknown_tool(&self) -> uuid::Uuid {
+        self.pipeline.observe_unknown_tool()
+    }
+
     pub(crate) fn effective_tools(&self) -> Vec<EffectiveTool> {
         self.pipeline.effective_tools()
     }

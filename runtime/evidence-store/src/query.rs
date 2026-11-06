@@ -18,8 +18,8 @@ use crate::{
 };
 
 pub struct EvidenceReader {
-    database: PathBuf,
-    connection: Option<Connection>,
+    pub(crate) database: PathBuf,
+    pub(crate) connection: Option<Connection>,
 }
 
 impl EvidenceReader {

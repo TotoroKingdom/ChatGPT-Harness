@@ -43,6 +43,7 @@ import {
   type ActivitySelection,
 } from "./activity-feed";
 import { HistoryPanel } from "./HistoryPanel";
+import { MetricsPanel } from "./MetricsPanel";
 
 type Snapshot = { rows: ActivityRow[] };
 
@@ -58,7 +59,7 @@ export function ActivityPage({ onNavigate }: { onNavigate?: Navigate } = {}) {
   const [toolFilter, setToolFilter] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [readError, setReadError] = useState<{ code: string } | null>(null);
-  const [tab, setTab] = useState<"live" | "history">("live");
+  const [tab, setTab] = useState<"live" | "history" | "metrics">("live");
 
   useEffect(() => {
     if (state.status === "loading") {
@@ -104,11 +105,14 @@ export function ActivityPage({ onNavigate }: { onNavigate?: Navigate } = {}) {
       options={[
         { value: "live", label: t("m03History.live") },
         { value: "history", label: t("m03History.history") },
+        { value: "metrics", label: t("m08Metrics.tab") },
       ]}
       onChange={setTab}
     />
     {tab === "history"
       ? <HistoryPanel />
+      : tab === "metrics"
+        ? <MetricsPanel />
       : <>
         {refreshing && <InlineFeedback>{t("m8Activity.refreshing")}</InlineFeedback>}
         {readError && snapshot && <div className="notice notice-warning" role="status">

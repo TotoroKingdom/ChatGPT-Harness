@@ -5,6 +5,7 @@ import type {
   HistoryGetResult,
   HistoryQueryResult,
   HistoryRequestSummary,
+  TraceGetResult,
 } from "@protocol/v1";
 import { i18n, initializeLanguage } from "@/i18n";
 import { HistoryPanel } from "./HistoryPanel";
@@ -74,6 +75,27 @@ function detail(): HistoryGetResult {
   };
 }
 
+function trace(): TraceGetResult {
+  return {
+    runtimeId: "runtime-a",
+    requestId: "request-a",
+    traceId: "trace-a",
+    toolName: "read_file",
+    outcome: "success",
+    policyDecision: "allow",
+    approvalState: "none",
+    executorStarted: true,
+    coverage: "complete",
+    availability: "available",
+    spans: [{
+      spanId: "span-a", traceId: "trace-a", runtimeId: "runtime-a", requestId: "request-a", spanSequence: 0,
+      spanName: "request_wall", startedAtUtc: "2026-11-01T00:00:00Z", startedOffsetMs: 0, durationMs: 12,
+      status: "success", coverage: "COMPLETE",
+    }],
+    storeStatus: healthy({ schemaVersion: 2 }),
+  };
+}
+
 function setup(result?: Partial<HistoryQueryResult>, status: EvidenceStoreStatus = healthy()) {
   const historyQuery = vi.fn().mockResolvedValue({
     items: [item()],
@@ -81,9 +103,10 @@ function setup(result?: Partial<HistoryQueryResult>, status: EvidenceStoreStatus
     ...result,
   });
   const historyGet = vi.fn().mockResolvedValue(detail());
-  harness.current = { client: { historyQuery, historyGet } };
+  const traceGet = vi.fn().mockResolvedValue(trace());
+  harness.current = { client: { historyQuery, historyGet, traceGet } };
   render(<HistoryPanel />);
-  return { historyQuery, historyGet };
+  return { historyQuery, historyGet, traceGet };
 }
 
 beforeEach(async () => {
@@ -118,6 +141,18 @@ describe("M03 History panel", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() => expect(view.historyQuery).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "mock:1", tool: "write" })));
+  });
+
+  it("opens an exact request trace from the selected History detail", async () => {
+    const view = setup();
+    await waitFor(() => expect(screen.getByTestId("history-row-runtime-a-request-a")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("history-row-runtime-a-request-a").querySelector("button")!);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open request trace" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Open request trace" }));
+    await waitFor(() => expect(view.traceGet).toHaveBeenCalledWith({ runtimeId: "runtime-a", requestId: "request-a" }));
+    expect(screen.getByText("Runtime-observed timeline")).toBeInTheDocument();
+    expect(screen.getByText("trace-a")).toBeInTheDocument();
+    expect(screen.getByText("Request wall time")).toBeInTheDocument();
   });
 
   it("renders historical detail without approval or retry authority", async () => {

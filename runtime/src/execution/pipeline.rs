@@ -225,6 +225,26 @@ impl ExecutionPipeline {
         )
     }
 
+    /// Records a well-formed MCP `tools/call` whose capability cannot be
+    /// resolved.  The resolver deliberately uses the bounded logical label
+    /// `unknown` rather than copying the caller-supplied name into durable
+    /// evidence.  No WorkspaceGuard, PolicyEngine, ApprovalManager or
+    /// executor is invoked for this observation.
+    pub(crate) fn observe_unknown_tool(&self) -> uuid::Uuid {
+        let _active = self.counters.active_guard();
+        let mut context = RequestContext::new("unknown", self.security.clone());
+        context.tool_enabled = false;
+        context.capability = None;
+        let mut audit_events = Vec::new();
+        self.emit(&context, PipelineEvent::RequestReceived, &mut audit_events);
+        context.mark_failure_category(AuditFailureCategory::ExecutionFailed);
+        let _ = self.transition(&mut context, RequestState::Validating);
+        let _ = self.transition(&mut context, RequestState::Failed);
+        self.emit(&context, PipelineEvent::ExecutionFailed, &mut audit_events);
+        self.emit(&context, PipelineEvent::RequestFinished, &mut audit_events);
+        context.request_id
+    }
+
     /// Parsing happens inside Validating, so invalid MCP payloads get the same
     /// lifecycle as typed Runtime calls without copying payloads into context.
     pub(crate) fn execute<E: ToolExecutor>(

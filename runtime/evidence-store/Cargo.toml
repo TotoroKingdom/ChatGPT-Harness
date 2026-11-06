@@ -8,7 +8,7 @@ publish = false
 chrono = { version = "0.4", features = ["clock"] }
 fs2 = "0.4"
 harness-control-protocol = { path = "../../protocol" }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "hooks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

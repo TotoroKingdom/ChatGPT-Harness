@@ -1,0 +1,25 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "fromUtc": {
+      "type": "string"
+    },
+    "toUtc": {
+      "type": "string"
+    },
+    "tool": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "fromUtc",
+    "toUtc"
+  ],
+  "title": "MetricsQueryParams",
+  "type": "object"
+}

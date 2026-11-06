@@ -1,0 +1,41 @@
+{
+  "runtimeId": "runtime-fixture",
+  "requestId": "request-fixture",
+  "traceId": "trace-fixture",
+  "toolName": "read_file",
+  "outcome": "success",
+  "policyDecision": "allow",
+  "policyReason": "tool_default",
+  "approvalState": "none",
+  "executorStarted": true,
+  "coverage": "complete",
+  "availability": "available",
+  "spans": [
+    {
+      "spanId": "span-root",
+      "traceId": "trace-fixture",
+      "runtimeId": "runtime-fixture",
+      "requestId": "request-fixture",
+      "spanSequence": 0,
+      "spanName": "request_wall",
+      "startedAtUtc": "2026-11-05T12:00:00.000Z",
+      "endedAtUtc": "2026-11-05T12:00:00.050Z",
+      "startedOffsetMs": 0,
+      "durationMs": 50,
+      "status": "complete",
+      "coverage": "COMPLETE"
+    }
+  ],
+  "storeStatus": {
+    "state": "healthy",
+    "schemaVersion": 2,
+    "queueDepth": 0,
+    "queueCapacity": 256,
+    "dropCount": 0,
+    "effectiveHistoryConfig": {
+      "enabled": true,
+      "retentionDays": 30,
+      "maxStorageMiB": 256
+    }
+  }
+}

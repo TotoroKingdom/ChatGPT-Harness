@@ -1,8 +1,8 @@
 use super::projector::{RuntimeEvidenceContext, SafeEvidenceProjector};
 use crate::audit::{AuditEvent, AuditSink};
 use chatgpt_harness_evidence_store::{
-    status_for_error, EvidenceEventV1, EvidenceWriter, HistoryClearResult, RetentionPolicy,
-    RuntimeSession, StoreError, WriterOptions,
+    status_for_error, EvidenceCoverage, EvidenceEventV1, EvidenceWriter, HistoryClearResult,
+    RequestTraceSpan, RetentionPolicy, RuntimeSession, StoreError, WriterOptions,
 };
 use harness_control_protocol::{
     EvidenceErrorCode, EvidenceStoreState, EvidenceStoreStatus, HistoryConfig,
@@ -29,6 +29,7 @@ const LOSS_TRACKER_CAPACITY: usize = 256;
 
 enum WriterCommand {
     Event(EvidenceEventV1),
+    EventWithSpans(EvidenceEventV1, Vec<RequestTraceSpan>),
     Clear(SyncSender<Result<HistoryClearResult, EvidenceErrorCode>>),
     Shutdown(SyncSender<Result<(), EvidenceErrorCode>>),
 }
@@ -75,6 +76,7 @@ struct Shared {
     persisted_drop_count: AtomicU64,
     last_drop_at_utc: Mutex<Option<String>>,
     losses: Mutex<LossTracker>,
+    trace_losses: Mutex<VecDeque<LostRequest>>,
     stopping: AtomicBool,
 }
 
@@ -121,6 +123,20 @@ impl Shared {
             .record(event);
     }
 
+    fn record_trace_drop(&self, event: &EvidenceEventV1) {
+        let mut losses = self
+            .trace_losses
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let key = LostRequest {
+            runtime_id: event.runtime_id.clone(),
+            request_id: event.request_id.clone(),
+        };
+        if losses.len() < LOSS_TRACKER_CAPACITY && !losses.contains(&key) {
+            losses.push_back(key);
+        }
+    }
+
     fn mark_error(&self, code: EvidenceErrorCode) {
         let mut status = self
             .status
@@ -151,6 +167,7 @@ impl EvidenceService {
             persisted_drop_count: AtomicU64::new(0),
             last_drop_at_utc: Mutex::new(None),
             losses: Mutex::new(LossTracker::default()),
+            trace_losses: Mutex::new(VecDeque::new()),
             stopping: AtomicBool::new(false),
         });
         Self {
@@ -177,6 +194,7 @@ impl EvidenceService {
             persisted_drop_count: AtomicU64::new(0),
             last_drop_at_utc: Mutex::new(None),
             losses: Mutex::new(LossTracker::default()),
+            trace_losses: Mutex::new(VecDeque::new()),
             stopping: AtomicBool::new(true),
         });
         Self {
@@ -226,6 +244,7 @@ impl EvidenceService {
             persisted_drop_count: AtomicU64::new(0),
             last_drop_at_utc: Mutex::new(None),
             losses: Mutex::new(LossTracker::default()),
+            trace_losses: Mutex::new(VecDeque::new()),
             stopping: AtomicBool::new(false),
         });
         let (sender, receiver) = mpsc::sync_channel(EVIDENCE_QUEUE_CAPACITY);
@@ -251,30 +270,52 @@ impl EvidenceService {
     }
 
     pub(crate) fn enqueue(&self, event: EvidenceEventV1) {
+        self.enqueue_command(WriterCommand::Event(event));
+    }
+
+    fn enqueue_command(&self, command: WriterCommand) {
         let Some(sender) = &self.sender else {
             return;
         };
         if self.shared.stopping.load(Ordering::Acquire) {
             return;
         }
-        match sender.try_send(WriterCommand::Event(event)) {
+        match sender.try_send(command) {
             Ok(()) => {
                 self.shared.queue_depth.fetch_add(1, Ordering::AcqRel);
             }
             Err(TrySendError::Full(command)) => {
-                if let WriterCommand::Event(event) = command {
-                    self.shared.record_drop(&event);
+                match command {
+                    WriterCommand::Event(event) => self.shared.record_drop(&event),
+                    WriterCommand::EventWithSpans(event, spans) => {
+                        self.shared.record_drop(&event);
+                        if !spans.is_empty() {
+                            self.shared.record_trace_drop(&event);
+                        }
+                    }
+                    WriterCommand::Clear(_) | WriterCommand::Shutdown(_) => {}
                 }
                 self.shared
                     .mark_error(EvidenceErrorCode::EvidenceQueueOverflow);
             }
             Err(TrySendError::Disconnected(command)) => {
-                if let WriterCommand::Event(event) = command {
-                    self.shared.record_drop(&event);
+                match command {
+                    WriterCommand::Event(event) => self.shared.record_drop(&event),
+                    WriterCommand::EventWithSpans(event, spans) => {
+                        self.shared.record_drop(&event);
+                        if !spans.is_empty() {
+                            self.shared.record_trace_drop(&event);
+                        }
+                    }
+                    WriterCommand::Clear(_) | WriterCommand::Shutdown(_) => {}
                 }
                 self.shared.mark_error(EvidenceErrorCode::EvidenceIo);
             }
         }
+    }
+
+    fn enqueue_event_with_spans(&self, event: EvidenceEventV1, spans: Vec<RequestTraceSpan>) {
+        self.enqueue_command(WriterCommand::EventWithSpans(event, spans));
     }
 
     pub(crate) fn status(&self) -> EvidenceStoreStatus {
@@ -354,20 +395,42 @@ impl Drop for EvidenceService {
 pub(crate) struct EvidenceAuditSink {
     projector: SafeEvidenceProjector,
     service: Arc<EvidenceService>,
+    trace_projector: crate::audit::TraceProjector,
 }
 
 impl EvidenceAuditSink {
     pub(crate) fn new(context: RuntimeEvidenceContext, service: Arc<EvidenceService>) -> Self {
+        let runtime_id = context.runtime_id.clone();
         Self {
             projector: SafeEvidenceProjector::new(context),
             service,
+            trace_projector: crate::audit::TraceProjector::new(runtime_id),
         }
     }
 }
 
 impl AuditSink for EvidenceAuditSink {
     fn on_audit_event(&self, event: &AuditEvent) {
-        self.service.enqueue(self.projector.project(event));
+        let mut evidence = self.projector.project(event);
+        let mutation = self.trace_projector.project(event);
+        let spans: Vec<RequestTraceSpan> = mutation
+            .as_ref()
+            .map(|mutation| {
+                mutation
+                    .spans
+                    .iter()
+                    .map(|span| span.to_protocol(&mutation.runtime_id))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if mutation.is_none()
+            || spans
+                .iter()
+                .any(|span| span.coverage == EvidenceCoverage::Unknown)
+        {
+            evidence.coverage = EvidenceCoverage::Unknown;
+        }
+        self.service.enqueue_event_with_spans(evidence, spans);
     }
 }
 
@@ -421,6 +484,42 @@ fn run_writer(
                     batch_started = None;
                 }
             }
+            Ok(WriterCommand::EventWithSpans(event, spans)) => {
+                shared.queue_depth.fetch_sub(1, Ordering::AcqRel);
+                flush_batch(
+                    &mut writer,
+                    &shared,
+                    &mut batch,
+                    &retention,
+                    &config,
+                    &mut committed_since_retention,
+                    &mut last_retention,
+                );
+                match writer.record_evidence(&event, &spans) {
+                    Ok(count) => {
+                        committed_since_retention =
+                            committed_since_retention.saturating_add(count as u64);
+                    }
+                    Err(error) => {
+                        shared.record_drop(&event);
+                        if !spans.is_empty() {
+                            shared.record_trace_drop(&event);
+                        }
+                        shared.mark_error(error_code(&error, &config));
+                    }
+                }
+                if committed_since_retention >= RETENTION_EVENT_INTERVAL {
+                    let report = writer.apply_retention(&now_utc(), &retention);
+                    if report.is_err()
+                        || report.as_ref().is_ok_and(|report| report.capacity_degraded)
+                    {
+                        shared.mark_error(EvidenceErrorCode::EvidenceCapacityDegraded);
+                    }
+                    committed_since_retention = 0;
+                    last_retention = Instant::now();
+                }
+                update_status(&writer, &shared);
+            }
             Ok(WriterCommand::Clear(response)) => {
                 flush_batch(
                     &mut writer,
@@ -443,10 +542,24 @@ fn run_writer(
             }
             Ok(WriterCommand::Shutdown(response)) => {
                 while let Ok(command) = receiver.try_recv() {
-                    if let WriterCommand::Event(event) = command {
-                        shared.queue_depth.fetch_sub(1, Ordering::AcqRel);
-                        batch.push(event);
-                        if batch.len() >= EVIDENCE_BATCH_MAX {
+                    match command {
+                        WriterCommand::Event(event) => {
+                            shared.queue_depth.fetch_sub(1, Ordering::AcqRel);
+                            batch.push(event);
+                            if batch.len() >= EVIDENCE_BATCH_MAX {
+                                flush_batch(
+                                    &mut writer,
+                                    &shared,
+                                    &mut batch,
+                                    &retention,
+                                    &config,
+                                    &mut committed_since_retention,
+                                    &mut last_retention,
+                                );
+                            }
+                        }
+                        WriterCommand::EventWithSpans(event, spans) => {
+                            shared.queue_depth.fetch_sub(1, Ordering::AcqRel);
                             flush_batch(
                                 &mut writer,
                                 &shared,
@@ -456,7 +569,18 @@ fn run_writer(
                                 &mut committed_since_retention,
                                 &mut last_retention,
                             );
+                            match writer.record_evidence(&event, &spans) {
+                                Ok(_) => {}
+                                Err(error) => {
+                                    shared.record_drop(&event);
+                                    if !spans.is_empty() {
+                                        shared.record_trace_drop(&event);
+                                    }
+                                    shared.mark_error(error_code(&error, &config));
+                                }
+                            }
                         }
+                        WriterCommand::Clear(_) | WriterCommand::Shutdown(_) => {}
                     }
                 }
                 flush_batch(
@@ -547,6 +671,15 @@ fn flush_batch(
         .take();
     for request in lost {
         let _ = writer.mark_request_incomplete(&request.runtime_id, &request.request_id);
+    }
+    let trace_lost = shared
+        .trace_losses
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .drain(..)
+        .collect::<Vec<_>>();
+    for request in trace_lost {
+        let _ = writer.mark_request_unknown(&request.runtime_id, &request.request_id);
     }
     if global_unknown {
         let _ = writer.mark_coverage_unknown(&now_utc());
@@ -789,6 +922,7 @@ mod tests {
             persisted_drop_count: AtomicU64::new(0),
             last_drop_at_utc: Mutex::new(None),
             losses: Mutex::new(LossTracker::default()),
+            trace_losses: Mutex::new(VecDeque::new()),
             stopping: AtomicBool::new(false),
         };
         shared.record_drop(&evidence(1));
@@ -806,5 +940,106 @@ mod tests {
             .take();
         assert_eq!(lost.len(), 1);
         assert!(!unknown);
+    }
+
+    #[test]
+    fn evidence_sink_commits_canonical_event_and_trace_spans_together() {
+        use crate::audit::{AuditEvent, AuditEventType, AuditLifecycleState, AuditOutcome};
+        use crate::execution::{PipelineEvent, RequestContext};
+        use harness_control_protocol::SecurityMode;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let service = Arc::new(EvidenceService::start(
+            &path,
+            HistoryConfig::default(),
+            context(),
+            "2026-11-06T00:00:00.000Z".into(),
+        ));
+        let sink = EvidenceAuditSink::new(context(), Arc::clone(&service));
+        let mut request = RequestContext::for_evidence_test("read_file", SecurityMode::Normal);
+        let request_id = request.request_id;
+        for pipeline_event in [
+            PipelineEvent::RequestReceived,
+            PipelineEvent::ExecutionStarted,
+            PipelineEvent::ExecutionCompleted,
+        ] {
+            if pipeline_event == PipelineEvent::ExecutionCompleted {
+                request.result_evidence = Some(
+                    harness_control_protocol::ExecutionResultEvidence::ReadFile { bytes_read: 1 },
+                );
+            }
+            let event = AuditEvent::from_pipeline_event(&request, pipeline_event).unwrap();
+            sink.on_audit_event(&event);
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let reader = EvidenceReader::open(&path).unwrap();
+            if let Ok(trace) = reader.trace_get(&harness_control_protocol::TraceGetParams {
+                runtime_id: "runtime-service".into(),
+                request_id: request_id.to_string(),
+            }) {
+                if !trace.spans.is_empty() {
+                    assert!(trace.trace_id.is_some());
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "trace spans were not committed");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        service.stop();
+        // Keep these enum imports exercised so this test remains explicit
+        // about the terminal request shape it feeds through the sink.
+        let _ = (
+            AuditEventType::ExecutionCompleted,
+            AuditLifecycleState::Completed,
+            AuditOutcome::Success,
+        );
+    }
+
+    #[test]
+    fn trace_capacity_unknown_is_persisted_with_the_first_request_event() {
+        use crate::audit::AuditEvent;
+        use crate::execution::{PipelineEvent, RequestContext};
+        use harness_control_protocol::SecurityMode;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let service = Arc::new(EvidenceService::start(
+            &path,
+            HistoryConfig::default(),
+            context(),
+            now_utc(),
+        ));
+        let sink = EvidenceAuditSink::new(context(), Arc::clone(&service));
+        // Fill only the bounded projector, leaving the writer queue empty so
+        // this test distinguishes trace capacity from queue overflow.
+        for _ in 0..crate::audit::MAX_ACTIVE_TRACE_REQUESTS {
+            let request = RequestContext::for_evidence_test("read_file", SecurityMode::Normal);
+            let event =
+                AuditEvent::from_pipeline_event(&request, PipelineEvent::RequestReceived).unwrap();
+            sink.trace_projector.project(&event);
+        }
+        let request = RequestContext::for_evidence_test("read_file", SecurityMode::Normal);
+        let event =
+            AuditEvent::from_pipeline_event(&request, PipelineEvent::RequestReceived).unwrap();
+        sink.on_audit_event(&event);
+        service.stop();
+        let reader = EvidenceReader::open(&path).unwrap();
+        let detail = reader
+            .get_required("runtime-service", &request.request_id.to_string())
+            .unwrap();
+        assert_eq!(detail.summary.evidence_coverage, EvidenceCoverage::Unknown);
+        let trace = reader
+            .trace_get(&harness_control_protocol::TraceGetParams {
+                runtime_id: "runtime-service".into(),
+                request_id: request.request_id.to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            trace.coverage,
+            harness_control_protocol::TraceCoverage::Unknown
+        );
+        assert!(trace.spans.iter().all(|span| span.duration_ms.is_none()));
     }
 }

@@ -15,6 +15,10 @@ import type {
   HistoryGetResult,
   HistoryQueryParams,
   HistoryQueryResult,
+  MetricsQueryParams,
+  MetricsQueryResult,
+  TraceGetParams,
+  TraceGetResult,
   PoliciesListResult,
   RuntimeState,
   RuntimeStopResult,
@@ -139,6 +143,9 @@ export interface HarnessControlClient extends ControlReadClient {
   historyGet(params: HistoryGetParams): Promise<HistoryGetResult>;
   historyStatus(): Promise<EvidenceStoreStatus>;
   historyClear(): Promise<HistoryClearResult>;
+  /** Read-only bounded projections of retained Runtime evidence. */
+  metricsQuery(params: MetricsQueryParams): Promise<MetricsQueryResult>;
+  traceGet(params: TraceGetParams): Promise<TraceGetResult>;
   activitySubscribe(listener: ActivityEventListener, afterSequence?: string): Promise<Unsubscribe>;
   toolsList(): Promise<ToolsListResult>;
   policiesList(): Promise<PoliciesListResult>;

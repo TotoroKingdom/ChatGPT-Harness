@@ -1,0 +1,469 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "ActivityFailureCategory": {
+      "enum": [
+        "approval_denied",
+        "approval_expired",
+        "approval_cancelled",
+        "tool_disabled",
+        "target_changed",
+        "atomic_failure",
+        "io_failure",
+        "workspace_violation",
+        "invalid_arguments",
+        "execution_failed",
+        "bash_unavailable",
+        "bash_invalid_command",
+        "bash_command_too_long",
+        "bash_timeout",
+        "bash_output_limit",
+        "bash_concurrency_limit",
+        "bash_spawn_failed",
+        "bash_cancelled",
+        "bash_process_failed",
+        "grep_timeout",
+        "grep_cancelled"
+      ],
+      "type": "string"
+    },
+    "ApprovalDecision": {
+      "enum": [
+        "allow_once",
+        "allow_for_session",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "EvidenceCoverage": {
+      "enum": [
+        "COMPLETE",
+        "INCOMPLETE",
+        "UNKNOWN"
+      ],
+      "type": "string"
+    },
+    "EvidenceErrorCode": {
+      "enum": [
+        "EVIDENCE_BUSY",
+        "EVIDENCE_WRITER_OWNERSHIP",
+        "EVIDENCE_IO",
+        "EVIDENCE_FULL",
+        "EVIDENCE_CORRUPT",
+        "EVIDENCE_INCOMPATIBLE_SCHEMA",
+        "EVIDENCE_MIGRATION_FAILED",
+        "EVIDENCE_QUEUE_OVERFLOW",
+        "EVIDENCE_CAPACITY_DEGRADED",
+        "EVIDENCE_INVALID_CURSOR",
+        "EVIDENCE_NOT_FOUND"
+      ],
+      "type": "string"
+    },
+    "EvidenceStoreState": {
+      "enum": [
+        "disabled",
+        "healthy",
+        "degraded",
+        "busy",
+        "incompatible",
+        "corrupt",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "EvidenceStoreStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "coverageUnknownSinceUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dropCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "effectiveHistoryConfig": {
+          "$ref": "#/$defs/HistoryConfig"
+        },
+        "footprintBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lastCommitAtUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastDropAtUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastErrorCode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "queueCapacity": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "queueDepth": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/EvidenceStoreState"
+        }
+      },
+      "required": [
+        "state",
+        "queueDepth",
+        "queueCapacity",
+        "dropCount",
+        "effectiveHistoryConfig"
+      ],
+      "type": "object"
+    },
+    "HistoryApprovalState": {
+      "enum": [
+        "none",
+        "required_observed",
+        "allow_once",
+        "allow_for_session",
+        "denied",
+        "expired",
+        "cancelled",
+        "incomplete",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "HistoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "maxStorageMiB": {
+          "default": 256,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retentionDays": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "HistoryOutcome": {
+      "enum": [
+        "in_progress",
+        "success",
+        "failed",
+        "denied",
+        "approval_required",
+        "cancelled",
+        "timed_out",
+        "approval_expired",
+        "approval_cancelled"
+      ],
+      "type": "string"
+    },
+    "PolicyDecision": {
+      "enum": [
+        "deny",
+        "ask",
+        "allow"
+      ],
+      "type": "string"
+    },
+    "PolicyReason": {
+      "description": "Reasons are typed because policy evidence is consumed by Runtime, control\nreads, activity, and the UI. They are not display-only log strings.",
+      "enum": [
+        "system_guardrail",
+        "matched_user_rules",
+        "tool_default",
+        "invalid_policy_snapshot",
+        "invalid_context",
+        "unsupported_capability",
+        "tool_disabled"
+      ],
+      "type": "string"
+    },
+    "RequestTraceSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/EvidenceCoverage"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "endedAtUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failureCategory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActivityFailureCategory"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parentSpanId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "runtimeId": {
+          "type": "string"
+        },
+        "spanId": {
+          "type": "string"
+        },
+        "spanName": {
+          "$ref": "#/$defs/TraceSpanName"
+        },
+        "spanSequence": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startedAtUtc": {
+          "type": "string"
+        },
+        "startedOffsetMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/TraceSpanStatus"
+        },
+        "traceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "spanId",
+        "traceId",
+        "runtimeId",
+        "requestId",
+        "spanSequence",
+        "spanName",
+        "startedAtUtc",
+        "startedOffsetMs",
+        "status",
+        "coverage"
+      ],
+      "type": "object"
+    },
+    "TraceAvailability": {
+      "enum": [
+        "available",
+        "legacy_untraced",
+        "migration_required",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "TraceCoverage": {
+      "enum": [
+        "complete",
+        "incomplete",
+        "unknown",
+        "legacy_untraced"
+      ],
+      "type": "string"
+    },
+    "TraceSpanName": {
+      "enum": [
+        "request_wall",
+        "request_received",
+        "tool_resolution",
+        "workspace_validation",
+        "policy_evaluation",
+        "approval_wait",
+        "execution",
+        "terminal"
+      ],
+      "type": "string"
+    },
+    "TraceSpanStatus": {
+      "enum": [
+        "open",
+        "complete",
+        "success",
+        "failed",
+        "denied",
+        "cancelled",
+        "timed_out",
+        "incomplete",
+        "unknown"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "approvalDecision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApprovalDecision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "approvalState": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HistoryApprovalState"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "availability": {
+      "$ref": "#/$defs/TraceAvailability"
+    },
+    "coverage": {
+      "$ref": "#/$defs/TraceCoverage"
+    },
+    "executorStarted": {
+      "type": "boolean"
+    },
+    "failureStage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TraceSpanName"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HistoryOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "policyDecision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyDecision"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "policyReason": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PolicyReason"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "requestId": {
+      "type": "string"
+    },
+    "runtimeId": {
+      "type": "string"
+    },
+    "slowestMeasuredSpan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TraceSpanName"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "spans": {
+      "items": {
+        "$ref": "#/$defs/RequestTraceSpan"
+      },
+      "type": "array"
+    },
+    "storeStatus": {
+      "$ref": "#/$defs/EvidenceStoreStatus"
+    },
+    "toolName": {
+      "type": "string"
+    },
+    "traceId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "runtimeId",
+    "requestId",
+    "toolName",
+    "executorStarted",
+    "coverage",
+    "availability",
+    "spans",
+    "storeStatus"
+  ],
+  "title": "TraceGetResult",
+  "type": "object"
+}

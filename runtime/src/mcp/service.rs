@@ -66,7 +66,10 @@ impl McpService {
             WRITE => Ok(write::execute(&self.context, arguments)),
             EDIT => Ok(edit::execute(&self.context, arguments)),
             BASH => Err(McpProtocolError::AsyncOnly),
-            _ => Err(McpProtocolError::UnknownTool),
+            _ => {
+                self.context.observe_unknown_tool();
+                Err(McpProtocolError::UnknownTool)
+            }
         }
     }
 
@@ -92,7 +95,10 @@ impl McpService {
             WRITE => Ok(write::execute_async(&self.context, arguments).await),
             EDIT => Ok(edit::execute_async(&self.context, arguments).await),
             BASH => Ok(bash::execute(&self.context, arguments, request_cancel).await),
-            _ => Err(McpProtocolError::UnknownTool),
+            _ => {
+                self.context.observe_unknown_tool();
+                Err(McpProtocolError::UnknownTool)
+            }
         }
     }
 }
@@ -1764,6 +1770,79 @@ mod tests {
             workspace.service().call_tool("unknown_tool", json!({})),
             Err(McpProtocolError::UnknownTool)
         ));
+    }
+
+    #[test]
+    fn unknown_tool_dispatch_creates_safe_history_trace_before_method_not_found() {
+        use chatgpt_harness_evidence_store::EvidenceReader;
+        use harness_control_protocol::{EvidenceStoreLaunchConfig, RuntimeHostContext};
+
+        let workspace = TestWorkspace::new();
+        let database = workspace.base.join("history").join("history.sqlite3");
+        let mut core = RuntimeCore::new();
+        core.initialize_with_host(
+            config_for(&workspace.root),
+            Some(RuntimeHostContext {
+                host_session_id: Some("m08-test-host".into()),
+                supervisor_generation_id: Some("m08-test-generation".into()),
+                evidence_store: Some(EvidenceStoreLaunchConfig {
+                    enabled: true,
+                    database_path: database.to_string_lossy().into_owned(),
+                    retention_days: 30,
+                    max_storage_mib: 32,
+                }),
+            }),
+        )
+        .expect("initialize runtime with evidence");
+        core.acknowledge().expect("acknowledge runtime");
+        let service = core.mcp_service().expect("MCP service");
+        let requested_name = "PRIVATE_UNKNOWN_TOOL_NAME";
+        assert!(matches!(
+            service.call_tool(requested_name, json!({ "secret": "PRIVATE_PAYLOAD" })),
+            Err(McpProtocolError::UnknownTool)
+        ));
+        let activity = core.activity_snapshot(10);
+        assert_eq!(activity.len(), 2);
+        assert_eq!(
+            activity[0].event_type,
+            crate::audit::AuditEventType::RequestReceived
+        );
+        assert_eq!(
+            activity[1].event_type,
+            crate::audit::AuditEventType::ExecutionFailed
+        );
+        // Activity sanitizes names through the configured registry and hides
+        // an unresolved caller-supplied name; the durable Trace uses the
+        // bounded canonical label `unknown`.
+        assert_eq!(activity[0].tool_name, None);
+        assert_eq!(activity[1].tool_name, None);
+        let request_id = activity[0].request_id.to_string();
+        core.stop_evidence();
+
+        let reader = EvidenceReader::open(&database).expect("open evidence database");
+        let trace = reader
+            .trace_get(&harness_control_protocol::TraceGetParams {
+                runtime_id: core.runtime_id.clone(),
+                request_id,
+            })
+            .expect("query unknown tool trace");
+        assert!(trace.trace_id.is_some());
+        assert_eq!(trace.tool_name, "unknown");
+        assert!(!trace.executor_started);
+        assert_eq!(
+            trace.availability,
+            harness_control_protocol::TraceAvailability::Available
+        );
+        assert!(trace.spans.iter().any(|span| span.span_name
+            == harness_control_protocol::TraceSpanName::ToolResolution
+            && span.status == harness_control_protocol::TraceSpanStatus::Failed));
+        assert_eq!(
+            trace.failure_stage,
+            Some(harness_control_protocol::TraceSpanName::ToolResolution)
+        );
+        let serialized = serde_json::to_string(&trace).expect("serialize trace");
+        assert!(!serialized.contains(requested_name));
+        assert!(!serialized.contains("PRIVATE_PAYLOAD"));
     }
 
     #[test]

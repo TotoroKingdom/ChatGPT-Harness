@@ -1,0 +1,384 @@
+{
+  "$comment": "GENERATED FILE — DO NOT EDIT",
+  "$defs": {
+    "DurationMetric": {
+      "additionalProperties": false,
+      "properties": {
+        "averageMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "p95Ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sampleCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sampleStatus": {
+          "$ref": "#/$defs/MetricsSampleStatus"
+        }
+      },
+      "required": [
+        "sampleCount",
+        "sampleStatus"
+      ],
+      "type": "object"
+    },
+    "EvidenceErrorCode": {
+      "enum": [
+        "EVIDENCE_BUSY",
+        "EVIDENCE_WRITER_OWNERSHIP",
+        "EVIDENCE_IO",
+        "EVIDENCE_FULL",
+        "EVIDENCE_CORRUPT",
+        "EVIDENCE_INCOMPATIBLE_SCHEMA",
+        "EVIDENCE_MIGRATION_FAILED",
+        "EVIDENCE_QUEUE_OVERFLOW",
+        "EVIDENCE_CAPACITY_DEGRADED",
+        "EVIDENCE_INVALID_CURSOR",
+        "EVIDENCE_NOT_FOUND"
+      ],
+      "type": "string"
+    },
+    "EvidenceStoreState": {
+      "enum": [
+        "disabled",
+        "healthy",
+        "degraded",
+        "busy",
+        "incompatible",
+        "corrupt",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "EvidenceStoreStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "coverageUnknownSinceUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dropCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "effectiveHistoryConfig": {
+          "$ref": "#/$defs/HistoryConfig"
+        },
+        "footprintBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lastCommitAtUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastDropAtUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastErrorCode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "queueCapacity": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "queueDepth": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/EvidenceStoreState"
+        }
+      },
+      "required": [
+        "state",
+        "queueDepth",
+        "queueCapacity",
+        "dropCount",
+        "effectiveHistoryConfig"
+      ],
+      "type": "object"
+    },
+    "HistoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "maxStorageMiB": {
+          "default": 256,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retentionDays": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "MetricsCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "approvalCancelledCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "approvalExpiredCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cancelledCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "completedExecutionDenominator": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deniedCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "executionAttempts": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "executionSuccessNumerator": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "executionSuccessRate": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "executionSuccessSampleStatus": {
+          "$ref": "#/$defs/MetricsSampleStatus"
+        },
+        "failedCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "incompleteCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "legacyUntracedCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "preExecutionFailedCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "receivedCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "successfulCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timedOutCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unknownCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "receivedCalls",
+        "executionAttempts",
+        "successfulCalls",
+        "failedCalls",
+        "deniedCalls",
+        "cancelledCalls",
+        "timedOutCalls",
+        "preExecutionFailedCalls",
+        "approvalExpiredCalls",
+        "approvalCancelledCalls",
+        "incompleteCalls",
+        "unknownCalls",
+        "legacyUntracedCalls",
+        "completedExecutionDenominator",
+        "executionSuccessNumerator",
+        "executionSuccessSampleStatus"
+      ],
+      "type": "object"
+    },
+    "MetricsCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "approvalWaitDurationEligibleCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "completeRequestCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "coverageUnknownSinceUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dropCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "executionDurationEligibleCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "incompleteRequestCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lastCommitAtUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "legacyUntracedRequestCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requestWallDurationEligibleCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "storeStatus": {
+          "$ref": "#/$defs/EvidenceStoreStatus"
+        },
+        "unknownRequestCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "completeRequestCount",
+        "incompleteRequestCount",
+        "unknownRequestCount",
+        "legacyUntracedRequestCount",
+        "executionDurationEligibleCount",
+        "approvalWaitDurationEligibleCount",
+        "requestWallDurationEligibleCount",
+        "storeStatus",
+        "dropCount"
+      ],
+      "type": "object"
+    },
+    "MetricsSampleStatus": {
+      "description": "The statistical status of a metric sample.  A low sample count may still\nexpose an average, but never a stable P95 conclusion.",
+      "enum": [
+        "NO_DATA",
+        "INSUFFICIENT",
+        "SUFFICIENT"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "approvalWait": {
+      "$ref": "#/$defs/DurationMetric"
+    },
+    "counts": {
+      "$ref": "#/$defs/MetricsCounts"
+    },
+    "coverage": {
+      "$ref": "#/$defs/MetricsCoverage"
+    },
+    "execution": {
+      "$ref": "#/$defs/DurationMetric"
+    },
+    "requestWall": {
+      "$ref": "#/$defs/DurationMetric"
+    }
+  },
+  "required": [
+    "counts",
+    "execution",
+    "approvalWait",
+    "requestWall",
+    "coverage"
+  ],
+  "title": "MetricsQueryResult",
+  "type": "object"
+}

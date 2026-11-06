@@ -1,5 +1,5 @@
 import type { ActivityEntry, RuntimeDiagnostics, ToolDiagnostic } from "./control-read";
-import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, EvidenceStoreStatus, HistoryClearResult, HistoryGetParams, HistoryGetResult, HistoryQueryParams, HistoryQueryResult, HistoryRequestSummary, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, StartupAttempt, ToolsListResult, ToolDescriptor, UiLanguage } from "@protocol/v1";
+import type { AppConfig, ActivityEvent, ActivityListResult, ActivitySubscribeResult, ActivityEventType, ApprovalDecision, ApprovalRequest, ApprovalsListResult, DiagnosticRun, EvidenceStoreStatus, HistoryClearResult, HistoryGetParams, HistoryGetResult, HistoryQueryParams, HistoryQueryResult, HistoryRequestSummary, MetricsQueryParams, MetricsQueryResult, PoliciesListResult, StartEligibility, PolicyDecision, PolicyEffectiveSnapshot, PolicyRule, RuntimeState, SecurityMode, StartupAttempt, ToolsListResult, ToolDescriptor, TraceGetParams, TraceGetResult, UiLanguage } from "@protocol/v1";
 import { HarnessClientError } from "./errors";
 import type { ActivityEventListener, ComponentStates, ComponentStatesListener, DesktopNavigationIntent, DesktopPreferencesPatch, HarnessControlClient, HarnessStatus, RuntimeProcessStatus, Unsubscribe } from "./client";
 export type MockScenario = "ready" | "disconnected" | "empty" | "error";
@@ -188,6 +188,39 @@ export class MockHarnessControlClient implements HarnessControlClient {
     });
   }
   historyStatus(): Promise<EvidenceStoreStatus> { return this.respond(this.historyStatusValue()); }
+  metricsQuery(_params: MetricsQueryParams): Promise<MetricsQueryResult> {
+    const status = this.historyStatusValue();
+    const noData = { sampleCount: 0, averageMs: undefined, p95Ms: undefined, sampleStatus: "NO_DATA" as const };
+    return this.respond({
+      counts: {
+        receivedCalls: 0, executionAttempts: 0, successfulCalls: 0, failedCalls: 0,
+        deniedCalls: 0, cancelledCalls: 0, timedOutCalls: 0, preExecutionFailedCalls: 0,
+        approvalExpiredCalls: 0, approvalCancelledCalls: 0, incompleteCalls: 0,
+        unknownCalls: 0, legacyUntracedCalls: this.storedHistory.length,
+        completedExecutionDenominator: 0, executionSuccessNumerator: 0,
+        executionSuccessRate: undefined, executionSuccessSampleStatus: "NO_DATA" as const,
+      }, execution: noData, approvalWait: noData, requestWall: noData,
+      coverage: {
+        completeRequestCount: 0, incompleteRequestCount: 0, unknownRequestCount: 0,
+        legacyUntracedRequestCount: this.storedHistory.length,
+        executionDurationEligibleCount: 0, approvalWaitDurationEligibleCount: 0,
+        requestWallDurationEligibleCount: 0, storeStatus: status,
+        lastCommitAtUtc: status.lastCommitAtUtc, dropCount: status.dropCount,
+        coverageUnknownSinceUtc: status.coverageUnknownSinceUtc,
+      },
+    });
+  }
+  traceGet(params: TraceGetParams): Promise<TraceGetResult> {
+    const item = this.storedHistory.find((candidate) => candidate.runtimeId === params.runtimeId && candidate.requestId === params.requestId);
+    if (!item) throw new HarnessClientError("error", "History request was not found.", undefined, "EVIDENCE_NOT_FOUND");
+    return this.respond({
+      runtimeId: item.runtimeId, requestId: item.requestId, traceId: undefined, toolName: item.toolName,
+      outcome: item.outcome, policyDecision: item.policyDecision, approvalState: item.approvalState,
+      executorStarted: item.outcome === "success" || item.outcome === "failed" || item.outcome === "cancelled" || item.outcome === "timed_out",
+      coverage: "legacy_untraced" as const, availability: "legacy_untraced" as const, spans: [],
+      failureStage: undefined, slowestMeasuredSpan: undefined, storeStatus: this.historyStatusValue(),
+    });
+  }
   async historyClear(): Promise<HistoryClearResult> {
     const deletedRequestCount = this.storedHistory.length;
     this.storedHistory.splice(0, this.storedHistory.length);

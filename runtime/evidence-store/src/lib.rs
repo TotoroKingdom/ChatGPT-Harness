@@ -6,11 +6,13 @@
 
 mod dto;
 mod maintenance;
+mod metrics;
 mod migration;
 mod query;
 mod retention;
 mod schema;
 mod status;
+mod trace;
 mod writer;
 
 #[cfg(test)]
@@ -21,7 +23,10 @@ pub use maintenance::{clear_history_offline, OfflineMaintenance};
 pub use migration::{migration_backup_path, MigrationReport};
 pub use query::{filter_fingerprint, EvidenceReader};
 pub use retention::{file_footprint_bytes, RetentionPolicy};
-pub use schema::{computed_schema_checksum, SCHEMA_CHECKSUM, SCHEMA_V1_SQL, SCHEMA_VERSION};
+pub use schema::{
+    computed_schema_checksum, SCHEMA_CHECKSUM, SCHEMA_V1_CHECKSUM, SCHEMA_V1_SQL, SCHEMA_V2_SQL,
+    SCHEMA_VERSION,
+};
 pub use status::{status_for_error, StoreStatusSnapshot};
 pub use writer::{EvidenceWriter, WriterLock};
 
@@ -77,7 +82,9 @@ impl StoreError {
     pub(crate) fn from_sqlite(error: rusqlite::Error) -> Self {
         match &error {
             rusqlite::Error::SqliteFailure(failure, _) => match failure.code {
-                ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked => Self::Busy,
+                ErrorCode::DatabaseBusy
+                | ErrorCode::DatabaseLocked
+                | ErrorCode::OperationInterrupted => Self::Busy,
                 ErrorCode::NotADatabase | ErrorCode::NotFound => Self::Corrupt {
                     path: None,
                     reason: error.to_string(),

@@ -5,7 +5,9 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use crate::schema::{
-    create_v1_schema, integrity_check, verify_schema_checksum, verify_schema_shape, SCHEMA_VERSION,
+    create_latest_schema, integrity_check, verify_schema_checksum, verify_schema_shape,
+    verify_schema_shape_v1, SCHEMA_CHECKSUM, SCHEMA_V1_CHECKSUM, SCHEMA_V1_VERSION, SCHEMA_V2_SQL,
+    SCHEMA_VERSION,
 };
 use crate::{Result, StoreError};
 
@@ -75,7 +77,7 @@ pub(crate) fn initialize_or_migrate(
                 reason: "schema_migrations table is missing".to_owned(),
             });
         }
-        apply_schema(connection, database, false)
+        apply_schema(connection, database, false, false)
     } else {
         let latest = latest_schema_version(connection)?;
         if latest > SCHEMA_VERSION as i64 {
@@ -90,13 +92,19 @@ pub(crate) fn initialize_or_migrate(
                 migrated: false,
                 backup_path: None,
             })
+        } else if latest == i64::from(SCHEMA_V1_VERSION) {
+            // A v1 reader remains compatible, but the writer owns the normal
+            // transactional upgrade to v2 before accepting new evidence.
+            verify_v1_checksum_and_shape(connection)
+                .map_err(|error| attach_database_path(error, database))?;
+            apply_schema(connection, database, true, true)
         } else if latest < 0 {
             Err(StoreError::Corrupt {
                 path: Some(database.to_path_buf()),
                 reason: "negative schema version".to_owned(),
             })
         } else {
-            apply_schema(connection, database, true)
+            apply_schema(connection, database, true, false)
         }
     }
 }
@@ -105,6 +113,7 @@ fn apply_schema(
     connection: &mut Connection,
     database: &Path,
     migration: bool,
+    from_v1: bool,
 ) -> Result<MigrationReport> {
     let backup = if migration && database.exists() && fs::metadata(database)?.len() > 0 {
         checkpoint(connection)?;
@@ -114,7 +123,7 @@ fn apply_schema(
     };
 
     let transaction = connection.transaction().map_err(StoreError::from_sqlite)?;
-    let result = apply_schema_transaction(&transaction);
+    let result = apply_schema_transaction(&transaction, from_v1);
     if let Err(error) = result {
         let _ = transaction.rollback();
         if let Some(backup_path) = backup {
@@ -137,22 +146,48 @@ fn apply_schema(
         return Err(attach_database_path(error, database));
     }
 
-    if let Some(backup_path) = &backup {
-        // A successful migration has passed the integrity check.  The source
-        // backup is only a recovery artifact and can now be removed.
-        let _ = fs::remove_file(backup_path);
-    }
+    // Keep the verified pre-migration sibling backup.  The M08 rollback
+    // contract restores this v1 copy for an older binary; cleanup is an
+    // explicit maintenance decision, never an implicit post-migration delete.
     Ok(MigrationReport {
         migrated: migration,
         backup_path: backup,
     })
 }
 
-fn apply_schema_transaction(transaction: &Transaction<'_>) -> Result<()> {
-    create_v1_schema(transaction)?;
+fn apply_schema_transaction(transaction: &Transaction<'_>, from_v1: bool) -> Result<()> {
+    if from_v1 {
+        transaction.execute_batch(SCHEMA_V2_SQL)?;
+        transaction.execute(
+            "INSERT OR REPLACE INTO schema_migrations(version, checksum, applied_at_utc)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![SCHEMA_VERSION, SCHEMA_CHECKSUM, crate::now_utc()],
+        )?;
+        transaction.execute(
+            "UPDATE evidence_health SET schema_version = ?1 WHERE id = 1",
+            rusqlite::params![SCHEMA_VERSION],
+        )?;
+    } else {
+        create_latest_schema(transaction)?;
+    }
     verify_schema_shape(transaction)?;
     integrity_check(transaction)?;
     Ok(())
+}
+
+fn verify_v1_checksum_and_shape(connection: &Connection) -> Result<()> {
+    let actual: String = connection.query_row(
+        "SELECT checksum FROM schema_migrations WHERE version = ?1",
+        rusqlite::params![SCHEMA_V1_VERSION],
+        |row| row.get(0),
+    )?;
+    if actual != SCHEMA_V1_CHECKSUM {
+        return Err(StoreError::SchemaChecksumMismatch {
+            expected: SCHEMA_V1_CHECKSUM.to_owned(),
+            actual,
+        });
+    }
+    verify_schema_shape_v1(connection)
 }
 
 fn create_backup(database: &Path) -> Result<PathBuf> {
@@ -187,9 +222,15 @@ fn create_backup(database: &Path) -> Result<PathBuf> {
 }
 
 fn checkpoint(connection: &Connection) -> Result<()> {
-    connection
-        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-        .map_err(StoreError::from_sqlite)
+    let (busy, _log_frames, _checkpointed): (i64, i64, i64) = connection
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(StoreError::from_sqlite)?;
+    if busy != 0 {
+        return Err(StoreError::Busy);
+    }
+    Ok(())
 }
 
 fn table_exists(connection: &Connection, table: &str) -> Result<bool> {

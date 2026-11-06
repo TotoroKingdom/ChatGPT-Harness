@@ -19,8 +19,9 @@ use harness_control_protocol::{
     ApprovalsResolveResult, DiagnosticCheck, DiagnosticEvidence, DiagnosticEvidenceKey,
     DiagnosticRemediation, DiagnosticRemediationTarget, DiagnosticRun, DiagnosticScope,
     DiagnosticStatus, EvidenceStoreStatus, HistoryClearResult, HistoryGetParams, HistoryGetResult,
-    HistoryQueryParams, HistoryQueryResult, PoliciesListResult, RuntimeState, RuntimeStopResult,
-    SecurityMode, StartEligibility, StartEligibilityStatus, ToolsListResult, UiLanguage,
+    HistoryQueryParams, HistoryQueryResult, MetricsQueryParams, MetricsQueryResult,
+    PoliciesListResult, RuntimeState, RuntimeStopResult, SecurityMode, StartEligibility,
+    StartEligibilityStatus, ToolsListResult, TraceGetParams, TraceGetResult, UiLanguage,
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -105,6 +106,19 @@ pub fn history_get(
     params: HistoryGetParams,
 ) -> Result<HistoryGetResult, ControlError> {
     crate::history::get(&app, params)
+}
+
+#[tauri::command]
+pub fn metrics_query(
+    app: AppHandle,
+    params: MetricsQueryParams,
+) -> Result<MetricsQueryResult, ControlError> {
+    crate::history::metrics_query(&app, params)
+}
+
+#[tauri::command]
+pub fn trace_get(app: AppHandle, params: TraceGetParams) -> Result<TraceGetResult, ControlError> {
+    crate::history::trace_get(&app, params)
 }
 
 #[tauri::command]

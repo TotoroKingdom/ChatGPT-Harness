@@ -17,6 +17,10 @@ import type {
   HistoryGetResult,
   HistoryQueryParams,
   HistoryQueryResult,
+  MetricsQueryParams,
+  MetricsQueryResult,
+  TraceGetParams,
+  TraceGetResult,
   PoliciesListResult,
   RuntimeState,
   RuntimeStopResult,
@@ -378,6 +382,14 @@ export class TauriHarnessControlClient implements HarnessControlClient {
 
   historyClear() {
     return this.call<HistoryClearResult>("history_clear");
+  }
+
+  metricsQuery(params: MetricsQueryParams) {
+    return this.call<MetricsQueryResult>("metrics_query", { params });
+  }
+
+  traceGet(params: TraceGetParams) {
+    return this.call<TraceGetResult>("trace_get", { params });
   }
 
   async activitySubscribe(

@@ -4,7 +4,7 @@ use harness_control_protocol::v1::{
     EvidenceLifecycleState, EvidenceStage, EvidenceWorkspaceValidation, HistoryOutcome,
     PolicyDecision, PolicyReason,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -82,11 +82,30 @@ fn success_event(
     )
 }
 
+fn create_v1_fixture(path: &std::path::Path) {
+    let connection = Connection::open(path).unwrap();
+    connection.execute_batch(SCHEMA_V1_SQL).unwrap();
+    connection
+        .execute(
+            "INSERT INTO schema_migrations(version, checksum, applied_at_utc)
+             VALUES (1, ?1, '2026-01-01T00:00:00.000Z')",
+            [SCHEMA_V1_CHECKSUM],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO evidence_health(id, schema_version, drop_count)
+             VALUES (1, 1, 0)",
+            [],
+        )
+        .unwrap();
+}
+
 #[test]
-fn schema_v1_checksum_tables_and_indexes_are_frozen() {
+fn schema_v2_checksum_tables_and_indexes_are_frozen() {
     let (_directory, path) = database();
     let writer = EvidenceWriter::open(&path).expect("create schema");
-    assert_eq!(SCHEMA_VERSION, 1);
+    assert_eq!(SCHEMA_VERSION, 2);
     assert_eq!(computed_schema_checksum(), SCHEMA_CHECKSUM);
     drop(writer);
 
@@ -108,7 +127,7 @@ fn schema_v1_checksum_tables_and_indexes_are_frozen() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(request_spans, 0);
+    assert_eq!(request_spans, 1);
     for index in [
         "idx_request_summary_first_seen",
         "idx_request_summary_tool_first_seen",
@@ -131,12 +150,122 @@ fn schema_v1_checksum_tables_and_indexes_are_frozen() {
     }
     let checksum: String = connection
         .query_row(
-            "SELECT checksum FROM schema_migrations WHERE version = 1",
+            "SELECT checksum FROM schema_migrations WHERE version = 2",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(checksum, SCHEMA_CHECKSUM);
+}
+
+#[test]
+fn v1_migrates_to_v2_without_inventing_trace_rows() {
+    let (_directory, path) = database();
+    create_v1_fixture(&path);
+    let writer = EvidenceWriter::open(&path).expect("v1 fixture migrates");
+    drop(writer);
+    let connection = Connection::open(&path).unwrap();
+    let version: i64 = connection
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(version, 2);
+    let trace_id: Option<String> = connection
+        .query_row("SELECT trace_id FROM request_summary LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .optional()
+        .unwrap()
+        .flatten();
+    assert!(trace_id.is_none());
+    let spans: i64 = connection
+        .query_row("SELECT COUNT(*) FROM request_spans", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(spans, 0);
+    assert!(migration_backup_path(&path).exists());
+}
+
+#[test]
+fn v1_migration_failure_preserves_sibling_backup() {
+    let (_directory, path) = database();
+    create_v1_fixture(&path);
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch("CREATE TABLE request_spans(bad INTEGER);")
+            .unwrap();
+    }
+    let before = fs::read(&path).unwrap();
+    let error = EvidenceWriter::open(&path).expect_err("malformed span table must fail");
+    let backup = match error {
+        StoreError::MigrationFailed { backup_path, .. } => backup_path,
+        other => panic!("expected migration failure, got {other:?}"),
+    };
+    assert!(backup.exists());
+    assert_eq!(fs::read(backup).unwrap(), before);
+}
+
+#[test]
+fn trace_spans_share_request_identity_and_are_bounded() {
+    let (_directory, path) = database();
+    let mut writer = EvidenceWriter::open(&path).unwrap();
+    writer
+        .record_event(&event(
+            "runtime-trace",
+            "request-trace",
+            "event-trace",
+            "2026-01-01T00:00:00.000Z",
+            EvidenceStage::RequestReceived,
+            HistoryOutcome::InProgress,
+        ))
+        .unwrap();
+    let span = RequestTraceSpan {
+        span_id: "span-root".into(),
+        trace_id: "trace-local".into(),
+        parent_span_id: None,
+        runtime_id: "runtime-trace".into(),
+        request_id: "request-trace".into(),
+        span_sequence: 0,
+        span_name: harness_control_protocol::TraceSpanName::RequestWall,
+        started_at_utc: "2026-01-01T00:00:00.000Z".into(),
+        ended_at_utc: None,
+        started_offset_ms: 0,
+        duration_ms: None,
+        status: harness_control_protocol::TraceSpanStatus::Open,
+        failure_category: None,
+        coverage: EvidenceCoverage::Complete,
+    };
+    assert_eq!(writer.record_spans(std::slice::from_ref(&span)).unwrap(), 1);
+    let mut closed = span.clone();
+    closed.ended_at_utc = Some("2026-01-01T00:00:00.050Z".into());
+    closed.duration_ms = Some(50);
+    closed.status = harness_control_protocol::TraceSpanStatus::Complete;
+    assert_eq!(
+        writer.record_spans(std::slice::from_ref(&closed)).unwrap(),
+        1
+    );
+    // A retried open snapshot cannot reopen a span that was already closed.
+    assert_eq!(writer.record_spans(std::slice::from_ref(&span)).unwrap(), 0);
+    drop(writer);
+    let connection = Connection::open(&path).unwrap();
+    let (trace_id, count, duration, status): (String, i64, Option<i64>, String) = connection
+        .query_row(
+            "SELECT request_summary.trace_id, COUNT(request_spans.span_id),
+                     MAX(request_spans.duration_ms), MAX(request_spans.status)
+             FROM request_summary
+             LEFT JOIN request_spans USING(runtime_id, request_id)
+             WHERE request_summary.runtime_id = 'runtime-trace'
+               AND request_summary.request_id = 'request-trace'
+             GROUP BY request_summary.trace_id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(trace_id, "trace-local");
+    assert_eq!(count, 1);
+    assert_eq!(duration, Some(50));
+    assert_eq!(status, "complete");
 }
 
 #[test]
@@ -149,17 +278,17 @@ fn newer_and_corrupt_databases_are_preserved() {
         connection
             .execute(
                 "INSERT INTO schema_migrations(version, checksum, applied_at_utc)
-                 VALUES (2, 'future', '2099-01-01T00:00:00.000Z')",
+                VALUES (3, 'future', '2099-01-01T00:00:00.000Z')",
                 [],
             )
             .unwrap();
     }
     let before = fs::read(&path).unwrap();
     let error = EvidenceWriter::open(&path).expect_err("newer schema must be rejected");
-    assert!(matches!(error, StoreError::IncompatibleSchema { found: 2 }));
+    assert!(matches!(error, StoreError::IncompatibleSchema { found: 3 }));
     assert!(matches!(
         EvidenceReader::open(&path),
-        Err(StoreError::IncompatibleSchema { found: 2 })
+        Err(StoreError::IncompatibleSchema { found: 3 })
     ));
     assert_eq!(fs::read(&path).unwrap(), before);
 
@@ -184,7 +313,7 @@ fn checksum_mismatch_is_preserved_and_never_recreated() {
         let connection = Connection::open(&path).unwrap();
         connection
             .execute(
-                "UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 1",
+                "UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 2",
                 [],
             )
             .unwrap();
@@ -226,7 +355,7 @@ fn legacy_migration_uses_backup_and_failed_migration_preserves_source() {
     migration::create_legacy_v0(&path).unwrap();
     let writer = EvidenceWriter::open(&path).expect("legacy v0 migrates");
     drop(writer);
-    assert!(!migration_backup_path(&path).exists());
+    assert!(migration_backup_path(&path).exists());
 
     let (_failed_directory, failed_path) = database();
     migration::create_legacy_v0(&failed_path).unwrap();
@@ -267,7 +396,7 @@ fn second_writer_is_rejected_and_wal_reader_is_query_only() {
         .unwrap();
     let result = reader.query(&HistoryQueryParams::default()).unwrap();
     assert_eq!(result.items.len(), 1);
-    assert_eq!(result.store_status.schema_version, Some(1));
+    assert_eq!(result.store_status.schema_version, Some(2));
 }
 
 #[test]

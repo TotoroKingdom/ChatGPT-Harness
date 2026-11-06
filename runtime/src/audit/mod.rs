@@ -9,6 +9,7 @@
 pub(crate) mod event;
 mod fanout;
 mod redaction;
+pub(crate) mod trace;
 
 pub(crate) use event::{
     AuditEvent, AuditEventType, AuditFailureCategory, AuditLifecycleState, AuditOutcome,
@@ -16,6 +17,10 @@ pub(crate) use event::{
 };
 pub(crate) use fanout::AuditFanout;
 pub(crate) use redaction::redact_value;
+pub(crate) use trace::{
+    TraceCoverage, TraceMutation, TraceObserver, TraceProjector, TraceSpan, TraceSpanName,
+    TraceSpanStatus, MAX_ACTIVE_TRACE_REQUESTS, MAX_SPANS_PER_REQUEST,
+};
 
 /// Internal observation-only receiver of an already-created audit event.
 /// It cannot return an authorization or execution result.

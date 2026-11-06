@@ -7,12 +7,15 @@
 
 pub use harness_control_protocol::v1::control_read::ActivityFailureCategory;
 pub use harness_control_protocol::v1::{
-    ApprovalDecision, DurableSanitizedArgumentsEvidence, EvidenceCoverage, EvidenceErrorCode,
-    EvidenceEventV1, EvidenceLifecycleState, EvidenceStage, EvidenceStoreState,
+    ApprovalDecision, DurableSanitizedArgumentsEvidence, DurationMetric, EvidenceCoverage,
+    EvidenceErrorCode, EvidenceEventV1, EvidenceLifecycleState, EvidenceStage, EvidenceStoreState,
     EvidenceStoreStatus, EvidenceWorkspaceValidation, ExecutionResultEvidence,
     HistoryApprovalEvidence, HistoryApprovalState, HistoryClearResult, HistoryConfig,
     HistoryGetParams, HistoryGetResult, HistoryOutcome, HistoryQueryParams, HistoryQueryResult,
-    HistoryRequestSummary, HistoryStoreNotice, HistoryTerminalState, PolicyDecision, PolicyReason,
+    HistoryRequestSummary, HistoryStoreNotice, HistoryTerminalState, MetricsCounts,
+    MetricsCoverage, MetricsQueryParams, MetricsQueryResult, MetricsSampleStatus, PolicyDecision,
+    PolicyReason, RequestTraceSpan, TraceAvailability, TraceCoverage, TraceGetParams,
+    TraceGetResult, TraceSpanName, TraceSpanStatus,
 };
 
 pub const EVIDENCE_SCHEMA_VERSION: u32 = 1;

@@ -186,6 +186,8 @@ pub fn run() {
             crate::commands::config_reset,
             crate::commands::history_query,
             crate::commands::history_get,
+            crate::commands::metrics_query,
+            crate::commands::trace_get,
             crate::commands::history_status,
             crate::commands::history_clear,
             crate::commands::secret_api_key_status,

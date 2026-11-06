@@ -488,7 +488,7 @@ fn int_06() {
     assert!(!database.exists(), "query-only reader created a database");
     drop(missing_reader);
 
-    let writer = EvidenceWriter::open(&database).expect("create v1 schema through writer");
+    let writer = EvidenceWriter::open(&database).expect("create v2 schema through writer");
     assert!(!writer
         .connection_is_query_only()
         .expect("writer query_only pragma"));
@@ -516,7 +516,7 @@ fn int_06() {
             &database,
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='request_spans';",
         ),
-        "0"
+        "1"
     );
     let indexes = sqlite_script(
         &database,
@@ -532,6 +532,9 @@ fn int_06() {
         "idx_request_summary_outcome_first_seen",
         "idx_request_summary_policy_first_seen",
         "idx_request_summary_tool_first_seen",
+        "idx_request_spans_name_duration",
+        "idx_request_spans_request_order",
+        "idx_request_spans_trace_order",
     ] {
         assert!(
             indexes.lines().any(|value| value == index),
@@ -579,12 +582,12 @@ fn int_06() {
         ),
         "2"
     );
-    assert_eq!(SCHEMA_VERSION, 1);
+    assert_eq!(SCHEMA_VERSION, 2);
     assert_eq!(computed_schema_checksum(), SCHEMA_CHECKSUM);
     assert_eq!(
         sqlite_value(
             &database,
-            "SELECT checksum FROM schema_migrations WHERE version=1;"
+            "SELECT checksum FROM schema_migrations WHERE version=2;"
         ),
         SCHEMA_CHECKSUM
     );
@@ -594,16 +597,16 @@ fn int_06() {
     drop(EvidenceWriter::open(&newer_database).expect("create newer-schema fixture"));
     sqlite_script(
         &newer_database,
-        "INSERT INTO schema_migrations(version, checksum, applied_at_utc) VALUES (2, 'future', '2099-01-01T00:00:00.000Z');",
+        "INSERT INTO schema_migrations(version, checksum, applied_at_utc) VALUES (3, 'future', '2099-01-01T00:00:00.000Z');",
     );
     let newer_before = fs::read(&newer_database).expect("read newer schema source");
     assert!(matches!(
         EvidenceWriter::open(&newer_database),
-        Err(StoreError::IncompatibleSchema { found: 2 })
+        Err(StoreError::IncompatibleSchema { found: 3 })
     ));
     assert!(matches!(
         EvidenceReader::open(&newer_database),
-        Err(StoreError::IncompatibleSchema { found: 2 })
+        Err(StoreError::IncompatibleSchema { found: 3 })
     ));
     assert_eq!(fs::read(&newer_database).unwrap(), newer_before);
 
@@ -611,7 +614,7 @@ fn int_06() {
     drop(EvidenceWriter::open(&checksum_database).expect("create checksum fixture"));
     sqlite_script(
         &checksum_database,
-        "UPDATE schema_migrations SET checksum='tampered' WHERE version=1;",
+        "UPDATE schema_migrations SET checksum='tampered' WHERE version=2;",
     );
     let checksum_before = fs::read(&checksum_database).expect("read checksum source");
     assert!(matches!(
@@ -639,11 +642,11 @@ fn int_06() {
         "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL, applied_at_utc TEXT NOT NULL); INSERT INTO schema_migrations VALUES(0, 'legacy-v0', '1970-01-01T00:00:00.000Z');",
     );
     drop(EvidenceWriter::open(&migrated_database).expect("transactional v0 migration"));
-    assert!(!migration_backup_path(&migrated_database).exists());
+    assert!(migration_backup_path(&migrated_database).exists());
     assert_eq!(
         sqlite_value(
             &migrated_database,
-            "SELECT checksum FROM schema_migrations WHERE version=1;"
+            "SELECT checksum FROM schema_migrations WHERE version=2;"
         ),
         SCHEMA_CHECKSUM
     );
@@ -1495,7 +1498,7 @@ fn int_17() {
     drop(EvidenceWriter::open(&incompatible_database).expect("create incompatible DB"));
     sqlite_script(
         &incompatible_database,
-        "INSERT INTO schema_migrations(version, checksum, applied_at_utc) VALUES(2, 'future', '2099-01-01T00:00:00.000Z');",
+        "INSERT INTO schema_migrations(version, checksum, applied_at_utc) VALUES(3, 'future', '2099-01-01T00:00:00.000Z');",
     );
     let incompatible_before = fs::read(&incompatible_database).unwrap();
     let incompatible_service = EvidenceService::start(
@@ -1519,7 +1522,7 @@ fn int_17() {
     drop(EvidenceWriter::open(&checksum_database).expect("create checksum DB"));
     sqlite_script(
         &checksum_database,
-        "UPDATE schema_migrations SET checksum='wrong' WHERE version=1;",
+        "UPDATE schema_migrations SET checksum='wrong' WHERE version=2;",
     );
     let checksum_service = EvidenceService::start(
         &checksum_database,

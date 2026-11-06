@@ -9,6 +9,7 @@ import type {
   HistoryQueryParams,
   HistoryRequestSummary,
   PolicyDecision,
+  TraceGetResult,
 } from "@protocol/v1";
 import { useHarnessData } from "@/app/providers/HarnessDataProvider";
 import {
@@ -98,6 +99,7 @@ export function HistoryPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<HistoryGetResult | null>(null);
+  const [trace, setTrace] = useState<TraceGetResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
   const query = useMemo(() => queryFor(filters), [filters]);
@@ -133,6 +135,7 @@ export function HistoryPanel() {
     setDetailLoading(true);
     setError(null);
     try {
+      setTrace(null);
       setSelected(await client.historyGet({ runtimeId: item.runtimeId, requestId: item.requestId }));
     } catch (failure) {
       setError(typeof failure === "object" && failure !== null && "code" in failure
@@ -204,16 +207,24 @@ export function HistoryPanel() {
       {nextCursor && <div className="settings-actions"><Button variant="secondary" onClick={() => void load(true)} disabled={loading}>{loading ? t("m03History.loading") : t("m03History.loadMore")}</Button></div>}
     </Card>
     {detailLoading && <InlineFeedback>{t("m03History.loadingDetail")}</InlineFeedback>}
-    {selected && <HistoryInspector result={selected} onClose={() => setSelected(null)} />}
+    {selected && <HistoryInspector result={selected} onClose={() => { setSelected(null); setTrace(null); }} onTrace={async () => {
+      try {
+        setTrace(await client.traceGet({ runtimeId: selected.summary.runtimeId, requestId: selected.summary.requestId }));
+      } catch (failure) {
+        setError(typeof failure === "object" && failure !== null && "code" in failure ? String(failure.code) : "EVIDENCE_IO");
+      }
+    }} />}
+    {trace && <TraceInspector result={trace} onClose={() => setTrace(null)} />}
   </>;
 }
 
-function HistoryInspector({ result, onClose }: { result: HistoryGetResult; onClose: () => void }) {
+function HistoryInspector({ result, onClose, onTrace }: { result: HistoryGetResult; onClose: () => void; onTrace: () => void | Promise<void> }) {
   const { t } = useTranslation();
   const item = result.summary;
   return <Inspector title={t("m03History.detailTitle")} onClose={onClose}>
     <section className="workspace-section">
       <SectionHeading title={t("m03History.request")} />
+      <Button variant="secondary" onClick={() => void onTrace()}>{t("m08Trace.open")}</Button>
       <dl className="detail-list">
         <Fact label={t("m03History.tool")}>{item.toolName}</Fact>
         <Fact label={t("m03History.requestId")}><code>{item.requestId}</code></Fact>
@@ -247,6 +258,34 @@ function HistoryInspector({ result, onClose }: { result: HistoryGetResult; onClo
     <Disclosure title={t("m03History.advanced")}>
       <pre>{JSON.stringify(result, null, 2)}</pre>
     </Disclosure>
+  </Inspector>;
+}
+
+function TraceInspector({ result, onClose }: { result: TraceGetResult; onClose: () => void }) {
+  const { t } = useTranslation();
+  const tone = result.coverage === "complete" ? "success" : result.coverage === "incomplete" ? "warning" : "danger";
+  return <Inspector title={t("m08Trace.title")} onClose={onClose}>
+    <section className="workspace-section">
+      <SectionHeading title={t("m03History.request")} />
+      <dl className="detail-list">
+        <Fact label={t("m03History.tool")}>{result.toolName}</Fact>
+        <Fact label={t("m03History.requestId")}><code>{result.requestId}</code></Fact>
+        <Fact label={t("m03History.runtimeId")}><code>{result.runtimeId}</code></Fact>
+        {result.traceId && <Fact label={t("m08Trace.traceId")}><code>{result.traceId}</code></Fact>}
+        <Fact label={t("m08Trace.availabilityLabel")}>{t(`m08Trace.availability.${result.availability}`)}</Fact>
+        <Fact label={t("m08Trace.executorStarted")}>{result.executorStarted ? t("m08Trace.yes") : t("m08Trace.no")}</Fact>
+        {result.policyDecision && <Fact label={t("m03History.policy")}>{result.policyDecision.toUpperCase()}</Fact>}
+        {result.policyReason && <Fact label={t("m7.evidence.policyReason")}>{result.policyReason.toUpperCase()}</Fact>}
+        {result.approvalState && <Fact label={t("m03History.approval")}>{t(`m03History.approvalState.${result.approvalState}`)}</Fact>}
+        {result.approvalDecision && <Fact label={t("m7.evidence.approvalDecision")}>{result.approvalDecision.toUpperCase()}</Fact>}
+        <Fact label={t("m03History.coverage")}><StatusBadge tone={tone}>{t(`m08Trace.coverage.${result.coverage}`)}</StatusBadge></Fact>
+        {result.failureStage && <Fact label={t("m08Trace.failureStage")}>{t(`m08Trace.stage.${result.failureStage}`)}</Fact>}
+        {result.slowestMeasuredSpan && <Fact label={t("m08Trace.slowestSpan")}>{t(`m08Trace.stage.${result.slowestMeasuredSpan}`)}</Fact>}
+      </dl>
+    </section>
+    {result.spans.length === 0
+      ? <InlineFeedback>{result.availability === "legacy_untraced" ? t("m08Trace.legacyUnavailable") : result.availability === "migration_required" ? t("m08Trace.migrationRequired") : t("m08Trace.noSpans")}</InlineFeedback>
+      : <section className="workspace-section"><SectionHeading title={t("m08Trace.timeline")} /><ol className="history-timeline">{[...result.spans].sort((a, b) => a.spanSequence - b.spanSequence).map((span) => <li key={span.spanId}><strong>{t(`m08Trace.stage.${span.spanName}`)}</strong><span>{span.durationMs === undefined ? t("m08Trace.timingUnavailable") : `${span.durationMs} ms`}</span><span>{t(`m08Trace.status.${span.status}`)}</span></li>)}</ol></section>}
   </Inspector>;
 }
 

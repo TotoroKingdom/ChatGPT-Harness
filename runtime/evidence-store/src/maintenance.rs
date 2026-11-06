@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::migration::{configure_writer, initialize_or_migrate, open_connection};
 use crate::retention::file_footprint_bytes;
+use crate::schema::verify_schema_checksum;
 use crate::writer::WriterLock;
 use crate::{now_utc, HistoryClearResult, Result, StoreError, StorePaths};
 
@@ -35,8 +36,13 @@ impl OfflineMaintenance {
             .unwrap_or(false);
         let mut connection = open_connection(&paths.database)?;
         if had_source {
-            initialize_or_migrate(&mut connection, &paths.database)?;
-            configure_writer(&connection)?;
+            // Explicit offline maintenance may operate on compatible v1
+            // History, but normal v1->v2 migration belongs to Runtime.
+            verify_schema_checksum(&connection)?;
+            // Keep the existing journal/schema untouched until an explicit
+            // maintenance operation writes data. These are connection-local.
+            connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+            connection.busy_timeout(std::time::Duration::from_millis(1_000))?;
         } else {
             configure_writer(&connection)?;
             initialize_or_migrate(&mut connection, &paths.database)?;

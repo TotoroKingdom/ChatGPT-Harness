@@ -4,11 +4,12 @@ use crate::{
     runtime::{RuntimeProcessPhase, RuntimeSupervisor, SupervisorError},
 };
 use chatgpt_harness_evidence_store::{
-    clear_history_offline, status_for_error, EvidenceReader, OfflineMaintenance, StoreError,
+    clear_history_offline, status_for_error, EvidenceReader, StoreError,
 };
 use harness_control_protocol::{
     AppConfig, EvidenceErrorCode, EvidenceStoreState, EvidenceStoreStatus, HistoryClearResult,
-    HistoryGetParams, HistoryGetResult, HistoryQueryParams, HistoryQueryResult,
+    HistoryGetParams, HistoryGetResult, HistoryQueryParams, HistoryQueryResult, MetricsQueryParams,
+    MetricsQueryResult, TraceGetParams, TraceGetResult,
 };
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
@@ -23,9 +24,8 @@ pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, ControlError> {
         })
 }
 
-/// Performs compatible migration only while Runtime is stopped. A missing
-/// database is never created by startup preparation, and failures preserve the
-/// source file for the Runtime writer/status path to report.
+/// Startup inspection is read-only. The Runtime writer acquires ownership
+/// before migrating v1 evidence; merely opening the app cannot upgrade it.
 pub(crate) fn prepare_before_runtime_start(app: &AppHandle) {
     let Ok(database) = database_path(app) else {
         return;
@@ -33,7 +33,7 @@ pub(crate) fn prepare_before_runtime_start(app: &AppHandle) {
     if !database.is_file() {
         return;
     }
-    let _ = OfflineMaintenance::open(database);
+    let _ = EvidenceReader::open(database);
 }
 
 fn desired_config(app: &AppHandle) -> Result<AppConfig, ControlError> {
@@ -77,6 +77,12 @@ fn evidence_error_code(code: EvidenceErrorCode) -> &'static str {
 }
 
 fn store_error(error: StoreError, config: &AppConfig) -> ControlError {
+    if matches!(&error, StoreError::InvalidEvidence(_)) {
+        return ControlError {
+            code: "INVALID_REQUEST".into(),
+            message: "The evidence query parameters are invalid.".into(),
+        };
+    }
     let status = status_for_error(&error, config.history.clone());
     ControlError {
         code: evidence_error_code(
@@ -98,12 +104,115 @@ fn store_error(error: StoreError, config: &AppConfig) -> ControlError {
     }
 }
 
+fn observability_store_error(error: StoreError, config: &AppConfig) -> ControlError {
+    match &error {
+        StoreError::InvalidEvidence(_) => ControlError {
+            code: "INVALID_REQUEST".into(),
+            message: "The observability query parameters are invalid.".into(),
+        },
+        StoreError::NotFound => ControlError {
+            code: "EVIDENCE_NOT_FOUND".into(),
+            message: "The retained request evidence was not found.".into(),
+        },
+        StoreError::IncompatibleSchema { found: 1 } => ControlError {
+            code: "EVIDENCE_MIGRATION_REQUIRED".into(),
+            message: "Metrics and Trace require the evidence store migration.".into(),
+        },
+        _ => store_error(error, config),
+    }
+}
+
+fn observability_disabled() -> ControlError {
+    ControlError {
+        code: "EVIDENCE_UNAVAILABLE".into(),
+        message: "Metrics and Trace are unavailable while History storage is disabled.".into(),
+    }
+}
+
 pub(crate) fn query(
     app: &AppHandle,
     params: HistoryQueryParams,
 ) -> Result<HistoryQueryResult, ControlError> {
     let config = desired_config(app)?;
     query_at(database_path(app)?, &config, params)
+}
+
+/// Read-only M08 metrics projection. This path never migrates or writes the
+/// evidence database and therefore remains safe while Runtime owns the writer.
+pub(crate) fn metrics_query(
+    app: &AppHandle,
+    params: MetricsQueryParams,
+) -> Result<MetricsQueryResult, ControlError> {
+    let config = desired_config(app)?;
+    if !config.history.enabled {
+        return Err(observability_disabled());
+    }
+    metrics_query_at(database_path(app)?, &config, params)
+}
+
+fn metrics_query_at(
+    database: PathBuf,
+    config: &AppConfig,
+    params: MetricsQueryParams,
+) -> Result<MetricsQueryResult, ControlError> {
+    if !config.history.enabled {
+        return Err(observability_disabled());
+    }
+    let reader =
+        EvidenceReader::open(database).map_err(|error| observability_store_error(error, config))?;
+    let mut result = reader
+        .metrics_query(&params)
+        .map_err(|error| observability_store_error(error, config))?;
+    result.coverage.store_status = with_desired_status(result.coverage.store_status, config);
+    Ok(result)
+}
+
+/// Read-only exact request trace projection. Correlation is always the
+/// canonical `(runtime_id, request_id)` pair; no timestamp fallback exists.
+pub(crate) fn trace_get(
+    app: &AppHandle,
+    params: TraceGetParams,
+) -> Result<TraceGetResult, ControlError> {
+    let config = desired_config(app)?;
+    if !config.history.enabled {
+        return Err(observability_disabled());
+    }
+    trace_get_at(database_path(app)?, &config, params)
+}
+
+fn trace_get_at(
+    database: PathBuf,
+    config: &AppConfig,
+    params: TraceGetParams,
+) -> Result<TraceGetResult, ControlError> {
+    if !config.history.enabled {
+        return Err(observability_disabled());
+    }
+    let reader =
+        EvidenceReader::open(database).map_err(|error| observability_store_error(error, config))?;
+    let mut result = reader
+        .trace_get(&params)
+        .map_err(|error| observability_store_error(error, config))?;
+    result.store_status = with_desired_status(result.store_status, config);
+    Ok(result)
+}
+
+#[cfg(test)]
+pub(crate) fn metrics_query_at_for_test(
+    database: PathBuf,
+    config: &AppConfig,
+    params: MetricsQueryParams,
+) -> Result<MetricsQueryResult, ControlError> {
+    metrics_query_at(database, config, params)
+}
+
+#[cfg(test)]
+pub(crate) fn trace_get_at_for_test(
+    database: PathBuf,
+    config: &AppConfig,
+    params: TraceGetParams,
+) -> Result<TraceGetResult, ControlError> {
+    trace_get_at(database, config, params)
 }
 
 fn query_at(
@@ -376,6 +485,25 @@ mod tests {
     }
 
     #[test]
+    fn observability_errors_keep_migration_and_request_failures_distinct() {
+        let config = app_config(HistoryConfig::default());
+        assert_eq!(
+            observability_store_error(StoreError::InvalidEvidence("bad range".into()), &config)
+                .code,
+            "INVALID_REQUEST"
+        );
+        assert_eq!(
+            observability_store_error(StoreError::NotFound, &config).code,
+            "EVIDENCE_NOT_FOUND"
+        );
+        assert_eq!(
+            observability_store_error(StoreError::IncompatibleSchema { found: 1 }, &config).code,
+            "EVIDENCE_MIGRATION_REQUIRED"
+        );
+        assert_eq!(observability_disabled().code, "EVIDENCE_UNAVAILABLE");
+    }
+
+    #[test]
     fn read_only_query_works_under_writer_and_offline_clear_requires_ownership() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("history").join("history.sqlite3");
@@ -407,6 +535,36 @@ mod tests {
         let result = query_at(database.clone(), &config, HistoryQueryParams::default()).unwrap();
         assert_eq!(result.items.len(), 2);
         assert!(result.store_status.state == EvidenceStoreState::Healthy);
+
+        // M08 projections share the same read-only facade while this writer
+        // holds ownership. Completion alone cannot prove ExecutionStarted.
+        let metrics = metrics_query_at(
+            database.clone(),
+            &config,
+            MetricsQueryParams {
+                from_utc: "2026-11-01T00:00:00.000Z".into(),
+                to_utc: "2026-11-02T00:00:00.000Z".into(),
+                tool: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(metrics.counts.execution_attempts, 0);
+        assert_eq!(metrics.counts.unknown_calls, 2);
+        let trace = trace_get_at(
+            database.clone(),
+            &config,
+            TraceGetParams {
+                runtime_id: "runtime-ui".into(),
+                request_id: "request-1".into(),
+            },
+        )
+        .unwrap();
+        assert!(!trace.executor_started);
+        assert_eq!(
+            trace.availability,
+            harness_control_protocol::TraceAvailability::LegacyUntraced
+        );
+        assert!(trace.spans.is_empty());
 
         let blocked = clear_offline_at(database.clone(), &config).unwrap_err();
         assert_eq!(blocked.code, "EVIDENCE_BUSY");
