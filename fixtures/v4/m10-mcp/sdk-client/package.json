@@ -1,0 +1,12 @@
+{
+  "name": "chatgpt-harness-m10-sdk-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preflight": "node client.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.3.6"
+  }
+}

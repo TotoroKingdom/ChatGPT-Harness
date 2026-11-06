@@ -4,6 +4,7 @@
 //! It deliberately owns no transport and performs no filesystem access.
 
 mod bash;
+mod compatibility;
 mod context;
 mod edit;
 mod errors;

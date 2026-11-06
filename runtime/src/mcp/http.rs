@@ -250,6 +250,17 @@ mod tests {
         }
     }
 
+    fn canonical_tool_payload(message: &Value) -> Value {
+        assert!(message["result"].get("structuredContent").is_none());
+        let text = message["result"]["content"]
+            .as_array()
+            .and_then(|content| content.first())
+            .and_then(|content| content.get("text"))
+            .and_then(Value::as_str)
+            .expect("canonical MCP TextContent");
+        serde_json::from_str(text).expect("canonical tool payload JSON")
+    }
+
     async fn request(
         address: SocketAddr,
         method: &str,
@@ -405,6 +416,181 @@ mod tests {
             .to_owned()
     }
 
+    async fn initialize_response(address: SocketAddr) -> HttpResponse {
+        mcp_post(
+            address,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": { "name": "wire-contract-client", "version": "1.0" }
+                }
+            }),
+            None,
+            None,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn initialize_negotiates_frozen_revision_and_truthful_capabilities() {
+        let workspace = TestWorkspace::new();
+        let mut endpoint = start_mcp_http_endpoint(workspace.context())
+            .await
+            .expect("start endpoint");
+        let response = initialize_response(endpoint.local_addr()).await;
+        assert_eq!(response.status, 200);
+        let body = response.json_rpc();
+        assert_eq!(body["result"]["protocolVersion"], "2025-03-26");
+        assert_eq!(body["result"]["serverInfo"]["name"], "chatgpt-harness");
+        assert_eq!(
+            body["result"]["serverInfo"]["version"],
+            env!("CARGO_PKG_VERSION")
+        );
+        assert!(body["result"]["capabilities"]["tools"].is_object());
+        for unsupported in ["resources", "prompts", "sampling", "roots", "logging"] {
+            assert!(
+                body["result"]["capabilities"].get(unsupported).is_none(),
+                "unsupported capability was advertised: {unsupported}"
+            );
+        }
+        endpoint.shutdown().await.expect("shutdown endpoint");
+    }
+
+    #[tokio::test]
+    async fn initialized_notification_and_session_header_failures_remain_bounded() {
+        let workspace = TestWorkspace::new();
+        let mut first = start_mcp_http_endpoint(workspace.context())
+            .await
+            .expect("start first endpoint");
+        let mut second = start_mcp_http_endpoint(workspace.context())
+            .await
+            .expect("start second endpoint");
+        let first_address = first.local_addr();
+        let second_address = second.local_addr();
+        let session_id = initialize(first_address, None).await;
+
+        let initialized = mcp_post(
+            first_address,
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            Some(&session_id),
+            None,
+        )
+        .await;
+        assert!((200..300).contains(&initialized.status));
+
+        let missing_session = mcp_post(
+            first_address,
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }),
+            None,
+            None,
+        )
+        .await;
+        assert!(missing_session.status >= 400);
+        assert!(String::from_utf8_lossy(&missing_session.body).len() < 2048);
+
+        let invalid_session = mcp_post(
+            first_address,
+            json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {} }),
+            Some("invalid-session-id"),
+            None,
+        )
+        .await;
+        assert!(invalid_session.status >= 400);
+        assert!(String::from_utf8_lossy(&invalid_session.body).len() < 2048);
+
+        let cross_session = mcp_post(
+            second_address,
+            json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {} }),
+            Some(&session_id),
+            None,
+        )
+        .await;
+        assert!(cross_session.status >= 400);
+        assert!(!String::from_utf8_lossy(&cross_session.body).contains(&session_id));
+
+        first.shutdown().await.expect("shutdown first endpoint");
+        second.shutdown().await.expect("shutdown second endpoint");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_notification_stops_inflight_grep_without_fabricated_success() {
+        let workspace = TestWorkspace::new();
+        workspace.write("file.txt", "needle\nneedle\n");
+        let mut endpoint = start_mcp_http_endpoint(workspace.context())
+            .await
+            .expect("start endpoint");
+        let address = endpoint.local_addr();
+        let session_id = initialize(address, None).await;
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let hook_entered = entered.clone();
+        let hook_release = release.clone();
+        let _hook = crate::tools::install_scan_hook(move |scanned| {
+            if scanned.file_name().is_some_and(|name| name == "file.txt") {
+                hook_entered.wait();
+                hook_release.wait();
+            }
+        });
+
+        let request_task = tokio::spawn({
+            let session_id = session_id.clone();
+            async move {
+                mcp_post(
+                    address,
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": 55,
+                        "method": "tools/call",
+                        "params": { "name": "grep", "arguments": { "query": "needle" } }
+                    }),
+                    Some(&session_id),
+                    None,
+                )
+                .await
+            }
+        });
+        tokio::task::spawn_blocking(move || entered.wait())
+            .await
+            .expect("scan start waiter");
+
+        let cancelled = mcp_post(
+            address,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": { "requestId": 55, "reason": "M10 controlled cancellation" }
+            }),
+            Some(&session_id),
+            None,
+        )
+        .await;
+        assert!((200..300).contains(&cancelled.status));
+        tokio::task::spawn_blocking(move || release.wait())
+            .await
+            .expect("scan release waiter");
+
+        let response = request_task.await.expect("grep request task");
+        if response.status == 200 {
+            let body = String::from_utf8_lossy(&response.body);
+            assert!(!body.contains("\"isError\":false"));
+            assert!(!body.contains("\"matches\""));
+        }
+
+        let next = mcp_post(
+            address,
+            json!({ "jsonrpc": "2.0", "id": 56, "method": "tools/list", "params": {} }),
+            Some(&session_id),
+            None,
+        )
+        .await;
+        assert_eq!(next.status, 200);
+        endpoint.shutdown().await.expect("shutdown endpoint");
+    }
+
     #[tokio::test]
     async fn http_transport_exposes_available_tools_and_preserves_workspace_security() {
         let workspace = TestWorkspace::new();
@@ -449,7 +635,7 @@ mod tests {
         .await
         .json_rpc();
         assert_eq!(
-            pre_ack["result"]["structuredContent"]["code"],
+            canonical_tool_payload(&pre_ack)["code"],
             "RUNTIME_NOT_READY"
         );
         core.acknowledge().expect("acknowledge runtime");
@@ -481,7 +667,7 @@ mod tests {
         )
         .await
         .json_rpc();
-        let read_result = &read["result"]["structuredContent"];
+        let read_result = canonical_tool_payload(&read);
         assert_eq!(read_result["content"], "one\n");
         assert_eq!(read_result["offset"], 1);
         assert_eq!(read_result["linesRead"], 1);
@@ -503,7 +689,7 @@ mod tests {
         )
         .await
         .json_rpc();
-        let glob_result = &glob["result"]["structuredContent"];
+        let glob_result = canonical_tool_payload(&glob);
         assert_eq!(glob_result["matches"][0]["path"], "src/main.rs");
         assert_eq!(glob_result["matches"][1]["path"], "src/nested/lib.rs");
         assert!(glob_result.get("diagnostics").is_some());
@@ -521,7 +707,7 @@ mod tests {
         .json_rpc();
         assert_eq!(glob_escape["result"]["isError"], true);
         assert_eq!(
-            glob_escape["result"]["structuredContent"]["code"],
+            canonical_tool_payload(&glob_escape)["code"],
             "WORKSPACE_VIOLATION"
         );
 
@@ -538,7 +724,7 @@ mod tests {
         .json_rpc();
         assert_eq!(escape["result"]["isError"], true);
         assert_eq!(
-            escape["result"]["structuredContent"]["code"],
+            canonical_tool_payload(&escape)["code"],
             "WORKSPACE_VIOLATION"
         );
         assert!(!escape
@@ -688,10 +874,8 @@ mod tests {
         )
         .await
         .json_rpc();
-        assert_eq!(
-            malformed_arguments["result"]["structuredContent"]["code"],
-            "INVALID_ARGUMENTS"
-        );
+        assert_eq!(malformed_arguments["error"]["code"], -32602);
+        assert!(malformed_arguments["result"].is_null());
 
         let unknown_tool = mcp_post(
             address,
@@ -704,7 +888,9 @@ mod tests {
         )
         .await
         .json_rpc();
-        assert!(unknown_tool.get("error").is_some());
+        assert_eq!(unknown_tool["error"]["code"], -32602);
+        assert_eq!(unknown_tool["error"]["message"], "Tool request is invalid.");
+        assert!(unknown_tool.to_string().len() < 512);
 
         let list = mcp_post(
             address,
