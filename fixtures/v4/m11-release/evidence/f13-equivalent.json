@@ -1,0 +1,17 @@
+{
+  "schema": "m11-evidence-identity-v1",
+  "accepted": true,
+  "status": "PASS",
+  "identity": {
+    "portable_runtime_sha256": "7bcdc008c5888c86d4164384616bb4ad33fb866563579ccc8a3ecfaead93ea36",
+    "m10_rmcp_version": "3.2.0",
+    "m10_mcp_revision": "2025-03-26",
+    "m10_transport_identity": "2323232323232323232323232323232323232323232323232323232323232323",
+    "effective_tool_catalog_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+    "m10_official_runner_commit": "c37eec888e1c6ff140af79987a40008548b7cc5f",
+    "m10_official_runner_package": "0.2.0-alpha.12",
+    "m10_runner_sdk_version": "1.29.0",
+    "optional_f09_disposition": "DEFERRED",
+    "optional_f15_disposition": "DEFERRED"
+  }
+}

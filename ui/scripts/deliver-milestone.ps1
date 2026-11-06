@@ -17,11 +17,11 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot "docs-codex\v4\milestones\$Milestone") -PathType Container)) {
     throw "Milestone plans do not exist: $Milestone"
 }
-& (Join-Path $PSScriptRoot "check-milestone-layout.ps1")
+& (Join-Path $PSScriptRoot "check-milestone-layout.ps1") -Milestone $Milestone
 if ($ReuseInstallerPayload) {
-    & (Join-Path $PSScriptRoot "build-portable.ps1") -ReuseInstallerPayload -InstallerPath $InstallerPath
+    & (Join-Path $PSScriptRoot "build-portable.ps1") -ReuseInstallerPayload -InstallerPath $InstallerPath -Milestone $Milestone
 } else {
-    & (Join-Path $PSScriptRoot "build-portable.ps1")
+    & (Join-Path $PSScriptRoot "build-portable.ps1") -Milestone $Milestone
 }
 if ($LASTEXITCODE -ne 0) { throw "Portable build failed." }
 $package = Get-Content -LiteralPath (Join-Path $repositoryRoot "ui\package.json") -Raw | ConvertFrom-Json

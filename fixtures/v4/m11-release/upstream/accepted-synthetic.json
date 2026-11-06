@@ -1,0 +1,10 @@
+{
+  "schema": "m11-upstream-state-v1",
+  "milestones": [
+    { "id": "M06", "status": "ACCEPTED_FROZEN", "identity": "m06-accepted-identity", "evidence_reference": "M06-accepted" },
+    { "id": "M07", "status": "ACCEPTED_FROZEN", "identity": "m07-accepted-identity", "evidence_reference": "M07-accepted" },
+    { "id": "M08", "status": "ACCEPTED_FROZEN", "identity": "m08-accepted-identity", "evidence_reference": "M08-accepted" },
+    { "id": "M09", "status": "ACCEPTED_FROZEN", "identity": "m09-accepted-identity", "evidence_reference": "M09-accepted" },
+    { "id": "M10", "status": "ACCEPTED_FROZEN", "identity": "m10-accepted-identity", "evidence_reference": "M10-accepted" }
+  ]
+}
