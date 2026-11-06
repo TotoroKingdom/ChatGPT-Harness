@@ -563,9 +563,11 @@ impl McpClient {
                 json!({ "name": name, "arguments": arguments }),
             )
             .await?;
-        value.get("result").cloned().ok_or_else(|| {
+        let mut result = value.get("result").cloned().ok_or_else(|| {
             EvalError::new("INFRA_ERROR", format!("tools/call {name} omitted result"))
-        })
+        })?;
+        restore_structured_view_for_evaluator(&mut result);
+        Ok(result)
     }
 
     async fn request(
@@ -619,6 +621,33 @@ impl McpClient {
             ));
         }
         Ok((value, headers))
+    }
+}
+
+/// The M10 wire deliberately omits `structuredContent`. Older evaluator
+/// scoring code consumes the same typed payload through an in-process view;
+/// restore that view only after the HTTP response has been parsed so no
+/// client-side compatibility shape can be mistaken for server wire evidence.
+fn restore_structured_view_for_evaluator(result: &mut Value) {
+    if result.get("structuredContent").is_some() {
+        return;
+    }
+    let Some(text) = result
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|content| content.first())
+        .and_then(|content| content.get("text"))
+        .and_then(Value::as_str)
+    else {
+        return;
+    };
+    let Ok(payload) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    if payload.is_object() {
+        if let Some(object) = result.as_object_mut() {
+            object.insert("structuredContent".into(), payload);
+        }
     }
 }
 
@@ -725,6 +754,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(value["id"], 1);
+    }
+
+    #[test]
+    fn evaluator_restores_typed_view_without_changing_wire_parser_contract() {
+        let mut result = serde_json::json!({
+            "content": [{"type": "text", "text": "{\"code\":\"POLICY_DENIED\"}"}],
+            "isError": true
+        });
+        restore_structured_view_for_evaluator(&mut result);
+        assert_eq!(result["structuredContent"]["code"], "POLICY_DENIED");
     }
 
     #[test]

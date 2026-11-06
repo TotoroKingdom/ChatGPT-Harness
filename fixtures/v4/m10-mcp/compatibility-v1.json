@@ -1,0 +1,53 @@
+{
+  "manifestVersion": 1,
+  "protocolRevision": "2025-03-26",
+  "transport": "streamable_http",
+  "serverRole": "mcp_server",
+  "runtimeSdk": "rmcp 3.2.0",
+  "runtimeHttpFramework": "axum 0.8",
+  "endpoint": "http://127.0.0.1:<port>/mcp",
+  "controlProtocolRevision": 1,
+  "appConfigSchema": 3,
+  "officialRunner": {
+    "repository": "modelcontextprotocol/conformance",
+    "commit": "c37eec888e1c6ff140af79987a40008548b7cc5f",
+    "packageVersion": "0.2.0-alpha.12",
+    "sdkVersion": "1.29.0",
+    "requirementsSet": null
+  },
+  "standaloneSdk": {
+    "package": "@modelcontextprotocol/sdk",
+    "version": "1.29.0",
+    "packageLockSha256": "C18EDC415FFBF3ABC171F5E4DB39DF26141FF1CE610CD728C425172FBCBBF34B"
+  },
+  "requiredCoverage": [
+    "initialize",
+    "tools/list",
+    "tool_schema",
+    "tools/call_success",
+    "tools/call_product_error",
+    "invalid_params",
+    "unknown_tool",
+    "session",
+    "cancellation",
+    "timeout_cleanup"
+  ],
+  "resultClassification": [
+    "SUCCESS",
+    "FAILURE",
+    "WARNING",
+    "SKIP",
+    "NOT_APPLICABLE",
+    "NOT_VERIFIED"
+  ],
+  "fixtureInputs": [
+    {
+      "path": "runtime/Cargo.toml",
+      "sha256": "F412E23EC7679C472EAD51F69C58D5DFA55FFE8E6028CF92061A04DB2913E0A2"
+    },
+    {
+      "path": "Cargo.lock",
+      "sha256": "0A468E7F0D9AD97C283730814317DBFC1A54B6E5DC97A4FAB796BA5801C6BE9B"
+    }
+  ]
+}

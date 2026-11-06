@@ -4,12 +4,14 @@ use crate::tools::{EffectiveTool, ToolAvailability};
 use rmcp::handler::server::common::schema_for_input;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode, Implementation,
-    ListToolsResult, ServerCapabilities, ServerInfo, Tool, ToolAnnotations,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
+    Implementation, ListToolsResult, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
+    ToolAnnotations,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::ErrorData;
 use serde_json::Value;
+use std::borrow::Cow;
 use tokio_util::sync::CancellationToken;
 
 const READ_FILE: &str = "read_file";
@@ -51,6 +53,59 @@ impl McpService {
             })
             .filter_map(tool_from_effective)
             .collect()
+    }
+
+    fn wire_tools(&self) -> Vec<Tool> {
+        self.tools()
+            .into_iter()
+            .map(strip_later_revision_tool_fields)
+            .collect()
+    }
+
+    fn is_known_tool(&self, name: &str) -> bool {
+        matches!(name, READ_FILE | GLOB | GREP | WRITE | EDIT | BASH)
+    }
+
+    fn tool_schema(&self, name: &str) -> Option<Value> {
+        let tool = match name {
+            READ_FILE => read_file_tool_with_metadata(READ_FILE, ""),
+            GLOB => glob_tool_with_metadata(GLOB, ""),
+            GREP => grep_tool_with_metadata(GREP, ""),
+            WRITE => write_tool_with_metadata(WRITE, ""),
+            EDIT => edit_tool_with_metadata(EDIT, ""),
+            BASH => bash_tool_with_metadata(BASH, ""),
+            _ => return None,
+        };
+        serde_json::to_value(tool.input_schema.as_ref()).ok()
+    }
+
+    fn validate_tool_arguments(&self, name: &str, arguments: &Value) -> Result<(), ErrorData> {
+        let Some(schema) = self.tool_schema(name) else {
+            return Err(ErrorData::new(
+                ErrorCode::INVALID_PARAMS,
+                "Tool request is invalid.",
+                None,
+            ));
+        };
+        let validator = jsonschema::validator_for(&schema).map_err(|_| {
+            ErrorData::new(
+                ErrorCode::INTERNAL_ERROR,
+                "Tool schema is unavailable.",
+                None,
+            )
+        })?;
+        if validator.validate(arguments).is_err() {
+            return Err(ErrorData::new(
+                ErrorCode::INVALID_PARAMS,
+                "Tool arguments are invalid.",
+                None,
+            ));
+        }
+        Ok(())
+    }
+
+    fn observe_unknown_tool(&self) {
+        self.context.observe_unknown_tool();
     }
 
     /// Executes one MCP tool adapter without creating a transport.
@@ -104,6 +159,10 @@ impl McpService {
 }
 
 impl ServerHandler for McpService {
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(&[ProtocolVersion::V_2025_03_26])
+    }
+
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
             Implementation::new("chatgpt-harness", env!("CARGO_PKG_VERSION")),
@@ -121,7 +180,7 @@ impl ServerHandler for McpService {
     ) -> impl std::future::Future<Output = Result<ListToolsResult, ErrorData>>
            + rmcp::service::MaybeSendFuture
            + '_ {
-        std::future::ready(Ok(ListToolsResult::with_all_items(self.tools())))
+        std::future::ready(Ok(ListToolsResult::with_all_items(self.wire_tools())))
     }
 
     fn call_tool(
@@ -133,26 +192,67 @@ impl ServerHandler for McpService {
            + '_ {
         let service = self.clone();
         async move {
+            if !service.is_known_tool(&request.name) {
+                service.observe_unknown_tool();
+                return Err(ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    "Tool request is invalid.",
+                    None,
+                ));
+            }
+            let arguments = Value::Object(request.arguments.unwrap_or_default());
+            service.validate_tool_arguments(&request.name, &arguments)?;
             service
-                .call_tool_async_with_cancel(
-                    &request.name,
-                    Value::Object(request.arguments.unwrap_or_default()),
-                    context.ct.clone(),
-                )
+                .call_tool_async_with_cancel(&request.name, arguments, context.ct.clone())
                 .await
+                .map(project_call_tool_result)
                 .map(Into::into)
                 .map_err(|error| match error {
                     McpProtocolError::UnknownTool => {
-                        ErrorData::new(ErrorCode::METHOD_NOT_FOUND, "unknown tool", None)
+                        ErrorData::new(ErrorCode::INVALID_PARAMS, "Tool request is invalid.", None)
                     }
-                    McpProtocolError::AsyncOnly => ErrorData::new(
-                        ErrorCode::INTERNAL_ERROR,
-                        "Bash requires asynchronous MCP execution",
-                        None,
-                    ),
+                    McpProtocolError::AsyncOnly => {
+                        ErrorData::new(ErrorCode::INVALID_PARAMS, "Tool request is invalid.", None)
+                    }
                 })
         }
     }
+}
+
+fn strip_later_revision_tool_fields(mut tool: Tool) -> Tool {
+    tool.output_schema = None;
+    tool
+}
+
+/// Projects the Runtime's typed safe result into the frozen MCP 2025-03-26
+/// CallToolResult shape. Internal callers continue to receive the structured
+/// result; only the protocol boundary drops `structuredContent`.
+fn project_call_tool_result(mut result: CallToolResult) -> CallToolResult {
+    let canonical_json = result
+        .structured_content
+        .take()
+        .and_then(|value| serde_json::to_string(&value).ok());
+    let existing_content = std::mem::take(&mut result.content);
+    let mut content = Vec::new();
+    if let Some(canonical_json) = canonical_json {
+        content.push(ContentBlock::text(canonical_json));
+    }
+    for block in existing_content {
+        let Some(text) = block.as_text() else {
+            content.push(block);
+            continue;
+        };
+        let duplicate = content.iter().any(|existing| {
+            existing
+                .as_text()
+                .is_some_and(|existing| existing.text == text.text)
+        });
+        if !duplicate {
+            content.push(block);
+        }
+    }
+    result.content = content;
+    result
 }
 
 fn tool_from_effective(tool: EffectiveTool) -> Option<Tool> {
@@ -1882,6 +1982,55 @@ mod tests {
         assert_eq!(annotations.read_only_hint, Some(false));
         assert_eq!(annotations.destructive_hint, Some(true));
         assert_eq!(annotations.open_world_hint, Some(true));
+    }
+
+    #[test]
+    fn frozen_wire_projector_moves_typed_payload_to_canonical_text() {
+        let mut result = CallToolResult::structured(json!({
+            "code": "OK",
+            "value": 7,
+        }));
+        result
+            .content
+            .push(ContentBlock::text("deterministic summary"));
+
+        let projected = project_call_tool_result(result);
+        let wire = serde_json::to_value(&projected).expect("serialize projected result");
+        assert!(wire.get("structuredContent").is_none());
+        assert_eq!(wire["isError"], false);
+        assert_eq!(wire["content"][0]["text"], "{\"code\":\"OK\",\"value\":7}");
+        assert_eq!(wire["content"][1]["text"], "deterministic summary");
+    }
+
+    #[test]
+    fn frozen_wire_projector_preserves_safe_tool_error_without_structured_content() {
+        let projected = project_call_tool_result(crate::mcp::errors::read_file_error(
+            &crate::tools::ReadFileError::InvalidArguments {
+                message: "caller input is invalid".into(),
+            },
+        ));
+        let wire = serde_json::to_value(&projected).expect("serialize projected error");
+        assert!(wire.get("structuredContent").is_none());
+        assert_eq!(wire["isError"], true);
+        let text = wire["content"][0]["text"]
+            .as_str()
+            .expect("error JSON text");
+        assert!(text.starts_with('{'));
+        assert!(text.contains("INVALID_ARGUMENTS"));
+    }
+
+    #[test]
+    fn server_advertises_only_the_frozen_mcp_revision_and_no_output_schema() {
+        let workspace = TestWorkspace::new();
+        let service = workspace.service();
+        assert_eq!(
+            service.supported_protocol_versions().as_ref(),
+            &[ProtocolVersion::V_2025_03_26]
+        );
+        assert!(service
+            .wire_tools()
+            .into_iter()
+            .all(|tool| tool.output_schema.is_none()));
     }
 
     #[test]
