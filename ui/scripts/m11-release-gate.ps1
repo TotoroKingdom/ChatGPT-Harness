@@ -280,6 +280,11 @@ function Get-M11CandidateIdentity {
         $identity.candidate_id += "-" + ([string]$base.portable_ui_sha256).Substring(0, 8).ToLowerInvariant()
     }
     $identity.desktop_preferences_hash = Get-DesktopPreferencesHash $Profile
+    $evidenceSchemaSource = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "runtime\evidence-store\src\schema.rs")
+    $physicalSchemaMatch = [regex]::Match($evidenceSchemaSource, 'SCHEMA_VERSION\s*:\s*u32\s*=\s*(\d+)')
+    if (-not $physicalSchemaMatch.Success) { throw "Could not read Evidence Store physical schema version." }
+    $identity.evidence_store_physical_schema_version = [int]$physicalSchemaMatch.Groups[1].Value
+    $identity.model_adapter_id_version = $identity.adapter_id_version
     $identity.evidence_migration_identity = Get-CodeIdentityHash @(
         "runtime/evidence-store/src/schema.rs",
         "runtime/evidence-store/src/migration.rs"
@@ -337,7 +342,7 @@ function Test-M11CandidateIdentity {
             if ($value -notmatch '^[A-Fa-f0-9]{64}$') { $reasons += "Candidate identity has an invalid or missing SHA-256: $field." }
         }
     }
-    foreach ($field in @("control_protocol_revision", "config_schema_version", "evidence_schema_version")) {
+    foreach ($field in @("control_protocol_revision", "config_schema_version", "evidence_schema_version", "evidence_store_physical_schema_version")) {
         if ([int](Get-Field $Candidate $field) -lt 1) { $reasons += "$field is invalid." }
     }
     if ([int](Get-Field $Candidate "config_schema_version") -ne 3) { $reasons += "AppConfig schema must remain 3." }
@@ -345,16 +350,25 @@ function Test-M11CandidateIdentity {
     foreach ($field in @("effective_config_revision", "desktop_preferences_hash", "evidence_migration_identity", "m10_transport_identity", "m10_official_runner_commit", "m10_official_runner_package", "m10_runner_sdk_version")) {
         if ([string]::IsNullOrWhiteSpace([string](Get-Field $Candidate $field))) { $reasons += "Candidate identity is missing $field." }
     }
-    foreach ($field in @("adapter_id_version", "requested_model", "resolved_model")) {
+    foreach ($field in @("adapter_id_version", "model_adapter_id_version", "requested_model")) {
         if ([string]::IsNullOrWhiteSpace([string](Get-Field $Candidate $field))) { $reasons += "Candidate identity is missing $field." }
+    }
+    if (-not $AllowIncompleteEvidence -and [string]::IsNullOrWhiteSpace([string](Get-Field $Candidate "resolved_model"))) {
+        $reasons += "Candidate identity is missing resolved_model."
     }
     if ([string](Get-Field $Candidate "m10_mcp_revision") -ne "2025-03-26") { $reasons += "M10 MCP revision drifted from 2025-03-26." }
     if ([string](Get-Field $Candidate "m10_rmcp_version") -ne "3.2.0") { $reasons += "M10 rmcp version drifted from 3.2.0." }
     if ([string](Get-Field $Candidate "optional_f09_disposition") -ne "DEFERRED") { $reasons += "F09 must remain DEFERRED." }
     if ([string](Get-Field $Candidate "optional_f15_disposition") -ne "DEFERRED") { $reasons += "F15 must remain DEFERRED." }
-    if ([string](Get-Field $Candidate "portable_ui_sha256") -ne [string](Get-Field $Candidate "installed_ui_sha256")) { $reasons += "Portable and installed UI hashes differ." }
-    if ([string](Get-Field $Candidate "portable_runtime_sha256") -ne [string](Get-Field $Candidate "installed_runtime_sha256")) { $reasons += "Portable and installed Runtime hashes differ." }
-    if ([string](Get-Field $Candidate "portable_tunnel_sha256") -ne [string](Get-Field $Candidate "installed_tunnel_sha256")) { $reasons += "Portable and installed Tunnel hashes differ." }
+    if (-not $AllowIncompleteEvidence -or -not [string]::IsNullOrWhiteSpace([string](Get-Field $Candidate "installed_ui_sha256"))) {
+        if ([string](Get-Field $Candidate "portable_ui_sha256") -ne [string](Get-Field $Candidate "installed_ui_sha256")) { $reasons += "Portable and installed UI hashes differ." }
+    }
+    if (-not $AllowIncompleteEvidence -or -not [string]::IsNullOrWhiteSpace([string](Get-Field $Candidate "installed_runtime_sha256"))) {
+        if ([string](Get-Field $Candidate "portable_runtime_sha256") -ne [string](Get-Field $Candidate "installed_runtime_sha256")) { $reasons += "Portable and installed Runtime hashes differ." }
+    }
+    if (-not $AllowIncompleteEvidence -or -not [string]::IsNullOrWhiteSpace([string](Get-Field $Candidate "installed_tunnel_sha256"))) {
+        if ([string](Get-Field $Candidate "portable_tunnel_sha256") -ne [string](Get-Field $Candidate "installed_tunnel_sha256")) { $reasons += "Portable and installed Tunnel hashes differ." }
+    }
     $perTool = Get-Field $Candidate "per_tool_schema_hashes"
     if ($null -eq $perTool -or @($perTool.PSObject.Properties).Count -lt 1) { $reasons += "per_tool_schema_hashes is empty." }
     if (-not $AllowIncompleteEvidence -and [string](Get-Field $Candidate "m10_conformance_result_identity") -notmatch '^[A-Fa-f0-9]{64}$') { $reasons += "M10 conformance result identity is unavailable." }
