@@ -555,6 +555,12 @@ async fn preflight(options: &Options) -> EvalResult<()> {
 
 async fn run_suite(options: &Options) -> EvalResult<()> {
     let profile = options.profile();
+    if profile.is_m09() {
+        return Err(EvalError::new(
+            "BLOCKED",
+            "M09 requires its admission evidence boundary; legacy M04 run cannot authorize an M09 profile. Use m09_eval for offline validation/preflight.",
+        ));
+    }
     let adapter = options.adapter.as_deref().ok_or_else(|| {
         EvalError::new("INVALID_ARGUMENT", "run requires --adapter scripted|openai")
     })?;
@@ -743,6 +749,31 @@ async fn run_suite(options: &Options) -> EvalResult<()> {
 struct PreflightIdentity {
     tool_schema_hash: String,
     schema_map: BTreeMap<String, Value>,
+}
+
+#[cfg(test)]
+mod m09_boundary_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn legacy_runner_rejects_m09_before_adapter_dataset_or_provider_access() {
+        for id in [
+            "m09-five-tool-control-v1",
+            "m09-mkdir-candidate-v1",
+            "m09-list-directory-candidate-v1",
+            "m09-copy-candidate-v1",
+            "m09-move-candidate-v1",
+            "m09-rename-candidate-v1",
+            "m09-delete-candidate-v1",
+            "m09-final-candidate-v1",
+        ] {
+            let options = Options {
+                profile: Some(EvalProfile::parse(id).unwrap()),
+                ..Default::default()
+            };
+            assert_eq!(run_suite(&options).await.unwrap_err().code, "BLOCKED");
+        }
+    }
 }
 
 async fn preflight_identity(

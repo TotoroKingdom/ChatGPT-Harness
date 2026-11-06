@@ -8,7 +8,9 @@ param(
 
     [switch]$IncludeInstaller,
 
-    [string]$InstallerPath = ""
+    [string]$InstallerPath = "",
+
+    [switch]$AllowM09DevelopmentIncomplete
 )
 
 Set-StrictMode -Version Latest
@@ -17,11 +19,18 @@ $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot "docs-codex\v4\milestones\$Milestone") -PathType Container)) {
     throw "Milestone plans do not exist: $Milestone"
 }
-& (Join-Path $PSScriptRoot "check-milestone-layout.ps1") -Milestone $Milestone
-if ($ReuseInstallerPayload) {
-    & (Join-Path $PSScriptRoot "build-portable.ps1") -ReuseInstallerPayload -InstallerPath $InstallerPath -Milestone $Milestone
+if ($AllowM09DevelopmentIncomplete) {
+    if ($Milestone -ne "M09-file-tool-admission-qualified-expansion") {
+        throw "-AllowM09DevelopmentIncomplete is valid only for M09-file-tool-admission-qualified-expansion."
+    }
+    & (Join-Path $PSScriptRoot "check-milestone-layout.ps1") -Milestone $Milestone -AllowM09DevelopmentIncomplete
 } else {
-    & (Join-Path $PSScriptRoot "build-portable.ps1") -Milestone $Milestone
+    & (Join-Path $PSScriptRoot "check-milestone-layout.ps1") -Milestone $Milestone
+}
+if ($ReuseInstallerPayload) {
+    & (Join-Path $PSScriptRoot "build-portable.ps1") -ReuseInstallerPayload -InstallerPath $InstallerPath -Milestone $Milestone -AllowM09DevelopmentIncomplete:$AllowM09DevelopmentIncomplete
+} else {
+    & (Join-Path $PSScriptRoot "build-portable.ps1") -Milestone $Milestone -AllowM09DevelopmentIncomplete:$AllowM09DevelopmentIncomplete
 }
 if ($LASTEXITCODE -ne 0) { throw "Portable build failed." }
 $package = Get-Content -LiteralPath (Join-Path $repositoryRoot "ui\package.json") -Raw | ConvertFrom-Json
@@ -77,6 +86,8 @@ $record = [ordered]@{
     installer = $installerRecord
     external_e2e = "NOT_VERIFIED_BY_DELIVERY_SCRIPT"
     manual_acceptance = "NOT_EXECUTED"
+    development_only = [bool]$AllowM09DevelopmentIncomplete
+    validation_documents = if ($AllowM09DevelopmentIncomplete) { "MISSING_M09_FORMAL_VALIDATION_PLANS" } else { "PRESENT" }
     acceptance_status = "CANDIDATE_ONLY_MANUAL_ACCEPTANCE_NOT_EXECUTED"
     acceptance_plan = "docs-codex/v4/milestones/$Milestone/MANUAL_ACCEPTANCE_CHECKLIST.md"
     entry = "$portableName/chatgpt-harness-ui.exe"

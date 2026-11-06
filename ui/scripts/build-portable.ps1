@@ -2,7 +2,8 @@
 param(
     [switch]$ReuseInstallerPayload,
     [string]$InstallerPath = "",
-    [string]$Milestone = ""
+    [string]$Milestone = "",
+    [switch]$AllowM09DevelopmentIncomplete
 )
 
 Set-StrictMode -Version Latest
@@ -11,7 +12,9 @@ $ErrorActionPreference = "Stop"
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $uiDirectory = (Resolve-Path (Join-Path $scriptDirectory "..")).Path
 $repositoryRoot = (Resolve-Path (Join-Path $uiDirectory "..")).Path
-if ([string]::IsNullOrWhiteSpace($Milestone)) {
+if ($AllowM09DevelopmentIncomplete) {
+    & (Join-Path $scriptDirectory "check-milestone-layout.ps1") -Milestone "M09-file-tool-admission-qualified-expansion" -AllowM09DevelopmentIncomplete
+} elseif ([string]::IsNullOrWhiteSpace($Milestone)) {
     & (Join-Path $scriptDirectory "check-milestone-layout.ps1")
 } else {
     & (Join-Path $scriptDirectory "check-milestone-layout.ps1") -Milestone $Milestone
