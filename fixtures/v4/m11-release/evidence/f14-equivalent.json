@@ -1,0 +1,14 @@
+{
+  "schema": "m11-evidence-identity-v1",
+  "accepted": true,
+  "status": "PASS",
+  "identity": {
+    "portable_runtime_sha256": "7bcdc008c5888c86d4164384616bb4ad33fb866563579ccc8a3ecfaead93ea36",
+    "evidence_schema_version": 2,
+    "evidence_schema_checksum": "7777777777777777777777777777777777777777777777777777777777777777",
+    "evidence_migration_identity": "8888888888888888888888888888888888888888888888888888888888888888",
+    "m08_trace_contract_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+    "optional_f09_disposition": "DEFERRED",
+    "optional_f15_disposition": "DEFERRED"
+  }
+}

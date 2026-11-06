@@ -1,0 +1,20 @@
+{
+  "schema": "m11-evidence-identity-v1",
+  "accepted": true,
+  "status": "PASS",
+  "identity": {
+    "portable_runtime_sha256": "7bcdc008c5888c86d4164384616bb4ad33fb866563579ccc8a3ecfaead93ea36",
+    "effective_tool_catalog_hash": "9999999999999999999999999999999999999999999999999999999999999999",
+    "m04_dataset_hash": "1313131313131313131313131313131313131313131313131313131313131313",
+    "m04_system_prompt_hash": "1414141414141414141414141414141414141414141414141414141414141414",
+    "m04_scorer_hash": "1515151515151515151515151515151515151515151515151515151515151515",
+    "m05_regression_profile_hash": "1919191919191919191919191919191919191919191919191919191919191919",
+    "m09_eval_profile_or_decision_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "m09_decision_set_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "adapter_id_version": "openai-responses-v1/1",
+    "requested_model": "gpt-6.1-terra",
+    "resolved_model": "gpt-6.1-terra",
+    "optional_f09_disposition": "DEFERRED",
+    "optional_f15_disposition": "DEFERRED"
+  }
+}

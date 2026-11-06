@@ -1,0 +1,16 @@
+{
+  "schema": "m11-evidence-identity-v1",
+  "accepted": true,
+  "status": "PASS",
+  "identity": {
+    "portable_ui_sha256": "f1428bfbd83ed8134f5414772d8cab361a673b6234ef16b695f5ec3878d34473",
+    "portable_runtime_sha256": "7bcdc008c5888c86d4164384616bb4ad33fb866563579ccc8a3ecfaead93ea36",
+    "portable_tunnel_sha256": "83f08fb39b1c154747debd31b81b65dd4ee834cacf5a073b6301b2688699bc76",
+    "config_profile_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+    "startup_benchmark_harness_version": "m02-startup-benchmark-v1",
+    "windows_environment_class": "windows-10.0.19045-x64",
+    "m02_performance_contract_identity": "1212121212121212121212121212121212121212121212121212121212121212",
+    "optional_f09_disposition": "DEFERRED",
+    "optional_f15_disposition": "DEFERRED"
+  }
+}
