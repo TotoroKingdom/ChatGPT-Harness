@@ -2561,22 +2561,66 @@ fn run_int_18() -> QaResult<()> {
     }
     check!(harness_control_protocol::PROTOCOL_VERSION == 1);
     run_protocol_contract_regression(&repository_root)?;
-    let m02_check = Command::new("git")
-        .args([
-            "diff",
-            "--quiet",
-            "1224fa9",
-            "--",
+    verify_archived_m02_is_unchanged(&repository_root)?;
+    Ok(())
+}
+
+fn verify_archived_m02_is_unchanged(repository_root: &Path) -> QaResult<()> {
+    for (baseline_prefix, archive_prefix) in [
+        (
             "docs-codex/v4/evidence/M02-startup-performance-diagnostics",
+            "docs/archive/v4-2026-11/v4/evidence/M02-startup-performance-diagnostics",
+        ),
+        (
             "docs-codex/v4/milestones/M02-startup-performance-diagnostics",
-        ])
-        .current_dir(&repository_root)
-        .status()
-        .map_err(|error| format!("check frozen M02 evidence diff: {error}"))?;
-    check!(
-        m02_check.success(),
-        "frozen M02 performance evidence changed during M03 QA"
-    );
+            "docs/archive/v4-2026-11/v4/milestones/M02-startup-performance-diagnostics",
+        ),
+    ] {
+        let listing = Command::new("git")
+            .args([
+                "ls-tree",
+                "-r",
+                "--name-only",
+                "1224fa9",
+                "--",
+                baseline_prefix,
+            ])
+            .current_dir(repository_root)
+            .output()
+            .map_err(|error| format!("list frozen M02 evidence: {error}"))?;
+        check!(
+            listing.status.success(),
+            "list frozen M02 evidence failed: {}",
+            String::from_utf8_lossy(&listing.stderr)
+        );
+
+        let mut checked = 0usize;
+        for baseline_path in String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .filter(|path| !path.is_empty())
+        {
+            let relative = baseline_path
+                .strip_prefix(baseline_prefix)
+                .and_then(|path| path.strip_prefix('/'))
+                .ok_or_else(|| format!("unexpected frozen M02 path: {baseline_path}"))?;
+            let archive_path = format!("{archive_prefix}/{relative}");
+            let baseline_blob = format!("1224fa9:{baseline_path}");
+            let comparison = Command::new("git")
+                .args(["diff", "--quiet", &baseline_blob, &archive_path])
+                .current_dir(repository_root)
+                .status()
+                .map_err(|error| format!("check archived M02 evidence diff: {error}"))?;
+            check!(
+                comparison.success(),
+                "frozen M02 performance document changed during archive: {baseline_path}"
+            );
+            checked += 1;
+        }
+        check!(
+            checked > 0,
+            "frozen M02 baseline is empty: {baseline_prefix}"
+        );
+    }
     Ok(())
 }
 

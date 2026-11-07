@@ -4,11 +4,12 @@
 
 - `protocol/`：共享控制协议、生成的 TypeScript 类型、JSON Schema（结构约束）、样例与契约测试。
 - `runtime/`：MCP 服务、工作区隔离、工具执行、策略、审批和审计；集成测试位于 `runtime/tests/`。
-- `ui/src/`：React 界面及前端测试；`ui/src-tauri/`：Tauri 桌面宿主、配置、凭据和进程管理。
+- `runtime/evidence-store/`：History、Metrics、Trace 使用的 SQLite 证据存储，包含 schema、迁移、保留期和查询实现。
+- `ui/src/`：React 界面及前端测试；`ui/src-tauri/`：Tauri 桌面宿主、配置、凭据、托盘、通知和进程管理。
 - `ui/scripts/`：Windows 打包与验证；`fixtures/`、`assets/`：测试数据和媒体资源。
-- `docs-codex/`：当前需求及里程碑文档；`wiki/`：技术参考；`docs/archive/`：历史资料。
+- `docs-codex/`：下一版本文档工作区；`wiki/`：当前实现的代码地图与技术参考；`docs/archive/`：历史资料（含 V2/V3/V4 归档）。
 
-UI 展示状态并表达操作意图，Tauri 管理桌面进程，Runtime 负责授权和执行；Tunnel 只负责传输。
+UI 展示状态并表达操作意图，Tauri 管理桌面进程、托盘与系统集成，Runtime 负责授权和执行；Tunnel 只负责传输。
 
 ## 构建、测试与本地开发
 
@@ -26,6 +27,7 @@ cargo test --workspace         # 运行 Rust 测试
 
 ```powershell
 npm install                   # 安装依赖
+npm run distribution:stage    # 首次构建 Tauri crate 前生成 Runtime/Tunnel 分发资源
 npm run dev                   # 启动浏览器前端
 npm run tauri:dev              # 构建调试 Runtime 并启动桌面应用
 npm run typecheck             # TypeScript 类型检查
@@ -35,7 +37,7 @@ npm run portable:windows      # 构建 Windows 便携版
 npm run tauri:build            # 构建并验证 NSIS 安装包
 ```
 
-打包还需构建脚本指定的 Runtime/Tunnel 分发资源。
+`ui/src-tauri` 的 build script 需要 `target-exe/distribution` 中的 `distribution.json` 与 Runtime/Tunnel 资源；若该目录尚不存在，先运行 `npm run distribution:stage`，否则 `cargo check --workspace` 会在 Tauri build script 阶段失败。
 
 ## 代码风格与命名
 
@@ -57,6 +59,16 @@ Rust 使用 rustfmt 默认格式、四空格缩进；模块和函数采用 `snak
 
 实现状态以源码、测试、清单和构建脚本为准；规划文档不代表功能已发布。里程碑开发先阅读当前需求与验收计划，不为通过测试降低标准。README 保持中文优先、面向用户；阶段性规则和验收记录放入对应里程碑文档。
 
+文档分层：
+
+- `README.md`：面向用户的能力、安装、使用与安全边界，必须跟随当前代码。
+- `AGENTS.md`：仓库级开发、测试、提交和文档规则。
+- `wiki/**`：当前 `main` / HEAD 的实现事实，包括架构、代码地图、能力矩阵和 MCP/Tunnel 集成。
+- `docs-codex/**`：下一版本规划与实施契约，不代表当前已实现。
+- `docs/archive/**`：历史资料，只提供历史上下文，不是当前实现证据。
+
+过时文档应整体移动到 `docs/archive/<版本>-<YYYY-MM>/`，同步更新 `docs/archive/README.md` 和受影响的链接；归档不得改写历史结论、验证证据或人为补齐缺失记录。已冻结的 SPEC、PLAN、TASKS 和验证计划归档后仍按原文保留，不得为了通过当前测试或验收而修改。
+
 ## 沿用既有开发与测试布局
 
 | 内容 | 沿用的位置与做法 |
@@ -73,4 +85,4 @@ Rust 使用 rustfmt 默认格式、四空格缩进；模块和函数采用 `snak
 
 - 仓库顶级目录结构固定，以 `ui/scripts/check-repository-layout.ps1` 白名单为准。未经用户明确授权，不得新增顶级目录，也不得自行扩展白名单；技术方案或 TASKS 中建议的路径不等于目录变更授权。优先使用既有模块目录。
 - `runtime/`、`protocol/` 和 `ui/` 是正式产品模块，不是实验或杂项收纳目录。
--  已冻结的 SPEC、PLAN、TASKS 和验证计划属于实施契约。除非发现文档本身无法实施、与代码事实冲突，或用户明确批准需求/架构变更，否则 Coding/QA Agent 不得为记录执行结果、修复测试失败或达成验收而修改这些文档。
+- 已冻结的 SPEC、PLAN、TASKS 和验证计划属于实施契约。除非发现文档本身无法实施、与代码事实冲突，或用户明确批准需求/架构变更，否则 Coding/QA Agent 不得为记录执行结果、修复测试失败或达成验收而修改这些文档。

@@ -1,8 +1,8 @@
 # V2 Acceptance — Historical Record
 
-> **历史文档。** 本页只记录 V2 当时的验收边界，**不能用于判断当前 main / HEAD 的功能**。
+> **历史文档，已归档。** 本页只记录 V2 当时的验收边界，**不能用于判断当前 main / HEAD 的功能**。
 >
-> 当前实现已经包含 `write`、`edit`、`bash`、Tool Configuration、typed Policy、Approval、Session Grant、中文/英文与 light/dark/system theme 等后续能力。当前事实请从 [Wiki README](./README.md) 开始阅读。
+> 原位置：`wiki/V2-ACCEPTANCE.md`。当前实现已经包含 `grep`、`write`、`edit`、`bash`、Tool Configuration、typed Policy、Approval、Session Grant、History、中文/英文与 light/dark/system theme 等后续能力。当前事实请从 [Wiki README](../../../wiki/README.md) 开始阅读。
 
 ```yaml
 Historical milestone: V2 — Read-only Harness
@@ -56,9 +56,9 @@ ChatGPT
 
 当前实现请看：
 
-- [README.md](./README.md)
-- [ARCHITECTURE.md](./ARCHITECTURE.md)
-- [IMPLEMENTATION-MATRIX.md](./IMPLEMENTATION-MATRIX.md)
-- [MCP-AND-TUNNEL.md](./MCP-AND-TUNNEL.md)
+- [Wiki README](../../../wiki/README.md)
+- [ARCHITECTURE.md](../../../wiki/ARCHITECTURE.md)
+- [IMPLEMENTATION-MATRIX.md](../../../wiki/IMPLEMENTATION-MATRIX.md)
+- [MCP-AND-TUNNEL.md](../../../wiki/MCP-AND-TUNNEL.md)
 
-历史 V3 文档位于 `docs/archive/`；V4 开发文档位于 `docs-codex/`。历史 milestone 结论不覆盖当前源码事实。
+历史 V3/V4 文档位于 `docs/archive/`；V4 归档入口见 [V4 archive](../v4-2026-11/README.md)。`docs-codex/` 是下一版本文档工作区。历史 milestone 结论不覆盖当前源码事实。

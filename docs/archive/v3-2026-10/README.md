@@ -25,4 +25,4 @@
 
 各 Milestone 的验收结论以对应历史文件为准，归档过程未重写这些结论。M9 的最终记录为 **M9 — ACCEPTED / FROZEN**，范围仅限 M9 Light Theme & Appearance；这不等同于整个 V3 已完成最终验收。
 
-本次归档不代表产品验收、发布或版本冻结，也不创建 Release 或版本 tag。当前实现以源码、Tests、Manifests 和最新 `wiki/**` 为准；下一版本入口见 [`ChatGPT-Harness_V4_PRD.md`](../../../docs-codex/ChatGPT-Harness_V4_PRD.md)。
+本次归档不代表产品验收、发布或版本冻结，也不创建 Release 或版本 tag。当前实现以源码、Tests、Manifests 和最新 `wiki/**` 为准；V4 历史文档见 [`../v4-2026-11/README.md`](../v4-2026-11/README.md)，下一版本入口见 [`docs-codex/README.md`](../../../docs-codex/README.md)。

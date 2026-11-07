@@ -114,7 +114,7 @@ function Invoke-M11LayoutStep {
 }
 
 function Test-M11MilestoneLayout {
-    $milestonePath = Join-Path $repositoryRoot "docs-codex\v4\milestones\$milestone"
+    $milestonePath = Join-Path $repositoryRoot "docs\archive\v4-2026-11\v4\milestones\$milestone"
     $allowed = @("SPEC.md", "PLAN.md", "TASKS.md", "INTEGRATION_TEST_PLAN.md", "E2E_TEST_PLAN.md", "MANUAL_ACCEPTANCE_CHECKLIST.md")
     if (-not (Test-Path -LiteralPath $milestonePath -PathType Container)) { throw "M11 milestone directory is missing." }
     $entries = @(Get-ChildItem -LiteralPath $milestonePath -Force)

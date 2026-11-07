@@ -3,7 +3,7 @@
 > **Status:** V4 UPSTREAM PLANNING BASELINE / FROZEN FOR M00 (2026-10-23)  
 > **Product:** [V4 PRD](./ChatGPT-Harness_V4_PRD.md)  
 > **Design:** [V4 Architecture](./ChatGPT-Harness_V4_ARCHITECTURE.md)  
-> **Reference:** [V3 historical Roadmap](../docs/archive/v3-2026-10/ChatGPT-Harness_V3_ROADMAP.md)  
+> **Reference:** [V3 historical Roadmap](../v3-2026-10/ChatGPT-Harness_V3_ROADMAP.md)  
 > **Scope:** 里程碑、交付顺序、三层验收与版本 Gate；不代表已开发或已通过验收。  
 > **Freeze semantics:** 本 Roadmap 作为 M00 的上游交付基线冻结；M00 验证若要求改变依赖、Milestone scope、release gate 或 canonical AC owner，必须先显式修订并重新冻结 Roadmap，而不是在下游 TASK 中临时改路线。
 

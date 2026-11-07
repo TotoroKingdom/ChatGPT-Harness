@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 & (Join-Path $PSScriptRoot "check-repository-layout.ps1")
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$milestonesRoot = Join-Path $repositoryRoot "docs-codex\v4\milestones"
+$milestonesRoot = Join-Path $repositoryRoot "docs\archive\v4-2026-11\v4\milestones"
 $allowed = @("SPEC.md", "PLAN.md", "TASKS.md", "INTEGRATION_TEST_PLAN.md", "E2E_TEST_PLAN.md", "MANUAL_ACCEPTANCE_CHECKLIST.md")
 $validationDocs = @("INTEGRATION_TEST_PLAN.md", "E2E_TEST_PLAN.md", "MANUAL_ACCEPTANCE_CHECKLIST.md")
 

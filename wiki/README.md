@@ -2,11 +2,11 @@
 
 > 本 Wiki 描述 **当前 main / HEAD 的实现事实**。当前源码版本为 **0.1.3**。若 Wiki 与源码、测试、manifest 或构建脚本冲突，以后者为准。
 >
-> V4 正在开发中；`docs-codex/` 中的 PRD / Architecture / Roadmap / Milestone 文档描述目标与计划，**不等于已经实现**。
+> V4 的开发与验收文档已归档；`docs/archive/v4-2026-11/` 中的 PRD / Architecture / Roadmap / Milestone 文档描述目标、计划与历史状态，**不等于已经实现或已经验收**。`docs-codex/` 是下一版本文档工作区。
 
 ## 1. 当前产品是什么
 
-ChatGPT-Harness 是一个面向 Windows 的本地 MCP Harness。它把 ChatGPT 的远程工具调用连接到本机 Runtime，并在 Runtime 内执行 Workspace 边界、Policy、Approval、工具执行和 Activity/Audit 记录。
+ChatGPT-Harness 是一个面向 Windows 的本地 MCP Harness。它把 ChatGPT 的远程工具调用连接到本机 Runtime，并在 Runtime 内执行 Workspace 边界、Policy、Approval、工具执行和 Activity/Audit/History 记录。
 
 当前主链路：
 
@@ -28,9 +28,11 @@ Approval（需要时）
 Tool executor
    ↓
 Audit / Activity
+   ↓
+History / Metrics / Trace（本地 SQLite，按配置）
 ```
 
-桌面应用由 React UI + Tauri Host 组成。Tauri 负责配置、Secret、Runtime/Tunnel 进程生命周期和 Harness 编排；它不是每一次 MCP tool call 的代理。
+桌面应用由 React UI + Tauri Host 组成。Tauri 负责配置、Secret、系统托盘、通知、自动启动策略、Runtime/Tunnel 进程生命周期和 Harness 编排；它不是每一次 MCP tool call 的代理。
 
 ## 2. 当前已实现能力
 
@@ -40,6 +42,7 @@ Audit / Activity
 | Workspace confinement | 已实现 |
 | `read_file` | 已实现 |
 | `glob` | 已实现 |
+| `grep` | 已实现，仅工作区文本搜索 |
 | `write` | 已实现，原子整文件写入 |
 | `edit` | 已实现，唯一精确匹配后原子替换 |
 | `bash` | 已实现，Developer/Test mode 下可用 |
@@ -52,10 +55,17 @@ Audit / Activity
 | Approval | 已实现：Allow once / Allow for session / Deny |
 | Session Grant | 已实现，Runtime generation 内存级、按精确 scope 匹配 |
 | Activity / Audit | 已实现，安全投影、bounded、Runtime 内存态 |
+| SQLite History | 已实现，跨重启持久化、可分页查询、可清空 |
+| Metrics / Trace | 已实现，基于 History 的只读聚合与精确请求追踪 |
 | Bash 风险分析与受控执行 | 已实现 |
 | Runtime diagnostics / control reads | 已实现 |
-| Config persistence / migration | 已实现，当前 schema version = 2 |
-| SecretStore | 已实现 |
+| 启动阶段耗时观测 | 已实现 |
+| 系统托盘 / 关闭到托盘 | 已实现 |
+| 审批 / 连接通知 | 已实现，默认启用 |
+| 应用启动后自动启动 Harness | 已实现，默认关闭；不是 Windows 登录自启 |
+| 单实例运行 | 已实现（Windows） |
+| Config persistence / migration | 已实现，当前 schema version = 3 |
+| SecretStore | 已实现，Windows Credential Manager |
 | Tunnel launch / readiness / cleanup | 已实现 |
 | 中文 / 英文 UI | 已实现 |
 | dark / light / system theme | 已实现 |
@@ -68,20 +78,24 @@ Runtime 的稳定工具目录：
 ```text
 read_file
 glob
+grep
 write
 edit
 bash
 ```
 
-默认配置：
+新配置默认值：
 
 | Tool | 默认 enabled | 默认 Policy |
 | --- | ---: | --- |
 | read_file | true | ALLOW |
 | glob | true | ALLOW |
+| grep | true | ALLOW |
 | write | true | ALLOW |
 | edit | true | ALLOW |
 | bash | false | ASK |
+
+升级配置的差异：由 v1/v2 升级、或缺少 `grep` 字段的旧 v3 配置，会把 `grep` 显式补为 **disabled**，避免静默扩大工具面；用户可在 Tools 页面手动启用。
 
 工具是否真正暴露给 MCP，不只看“是否实现”，而是由 Runtime 的 effective catalog 共同决定：
 
@@ -140,12 +154,12 @@ Bash 工作目录固定在 active Workspace，但 **Bash 不是 OS filesystem sa
 
 当前主要页面：
 
-- Overview：Harness 状态与 Start / Stop / Restart；
+- Overview：Harness 状态、Start / Stop / Restart、诊断结果与最近一次启动阶段耗时；
 - Tools：工具 desired/effective 状态、Policy default、Bash readiness；
 - Policies：Tool Defaults、User Rules、System Rules；
 - Approvals：处理 pending approval；
-- Activity：查看执行、Policy、Approval 和结果证据；
-- Settings：Workspace、Tunnel、Proxy、Git Bash、语言、主题等。
+- Activity：实时 Activity、History、Metrics 与请求追踪；
+- Settings：Workspace、Tunnel、Proxy、Security、通知、自动启动、History、语言、主题、诊断与重置。
 
 ### Tauri Host
 
@@ -156,6 +170,13 @@ Tauri 负责：
 - RuntimeSupervisor；
 - TunnelProcessManager；
 - HarnessController；
+- DesktopLifecycleCoordinator；
+- 系统托盘与窗口关闭行为；
+- Approval / Connection notifications；
+- 应用启动后的 Harness 自动启动；
+- 单实例；
+- local / connection diagnostics；
+- startup benchmark capture；
 - Tauri commands / events；
 - 打包与本机分发资源协调。
 
@@ -168,13 +189,23 @@ Runtime 负责：
 - PolicyEngine；
 - ApprovalManager / SessionGrantStore；
 - ExecutionPipeline；
-- read/glob/write/edit；
+- read/glob/grep/write/edit；
 - Bash analyzer / runtime；
 - Audit / Activity；
 - Diagnostics；
-- MCP HTTP server。
+- MCP HTTP server；
+- 将脱敏生命周期证据写入 evidence store。
 
-## 7. 两条通信平面
+## 7. History 与可观测性
+
+- Activity 是 Runtime lifetime 内的实时有界视图，容量 256。
+- History 使用本地 SQLite：应用数据目录下的 `history/history.sqlite3`，默认启用，默认保留 30 天、最多 256 MiB。
+- History evidence schema 当前为 **1**；配置 schema 与 evidence schema 相互独立。
+- Metrics 与 Trace 是对 History 数据的只读投影；History 停用时不可用。
+- Trace 关联使用 `(runtime_id, request_id)` 精确匹配，不做时间戳猜测。
+- History 保留脱敏参数、生命周期、策略/审批结果和有界执行证据；不保存原始 API Key、原始命令输出或完整敏感参数。
+
+## 8. 两条通信平面
 
 ### Desktop Control Plane
 
@@ -200,7 +231,7 @@ Runtime authorization + execution
 
 Tauri 不位于单次工具调用的数据路径中。
 
-## 8. Harness 生命周期
+## 9. Harness 生命周期
 
 启动：
 
@@ -228,40 +259,48 @@ Harness stopping
 
 Runtime/Tunnel watcher 都带实例身份，旧 generation/session 的 callback 不应污染新会话。
 
-## 9. Repository Map
+桌面生命周期补充：
+
+- 关闭主窗口默认进入托盘，首次关闭先展示后台运行说明；
+- 托盘可显示状态与 pending approval 数，并提供 Start / Stop / Quit；
+- `autoStartHarnessOnAppLaunch` 只在应用启动时触发一次 Harness Start，不是登录自启；
+- 单实例插件确保重复启动回到现有窗口。
+
+## 10. Repository Map
 
 ```text
 ChatGPT-Harness/
-├── protocol/                 control/config/policy/approval/activity contracts
+├── protocol/                 control/config/policy/approval/activity/history contracts
 ├── runtime/                  MCP + authorization + tool execution
+│   └── evidence-store/       SQLite History / Metrics / Trace storage
 ├── ui/src/                   React UI
-├── ui/src-tauri/src/         Tauri host + lifecycle + config + secrets
+├── ui/src-tauri/src/         Tauri host + lifecycle + desktop + config + secrets
 ├── ui/scripts/               packaging/distribution scripts
 ├── tunnel-client-*/          bundled Tunnel payload
 ├── wiki/                     current implementation map
-├── docs-codex/               active V4 product/milestone documents
+├── docs-codex/               next-version documentation workspace
 └── docs/archive/             historical documents
 ```
 
-## 10. Wiki 导航
+## 11. Wiki 导航
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md)：当前进程、授权与生命周期架构。
 - [CODEBASE-MAP.md](./CODEBASE-MAP.md)：源码目录、模块职责与关键入口。
 - [IMPLEMENTATION-MATRIX.md](./IMPLEMENTATION-MATRIX.md)：当前能力矩阵与默认安全行为。
 - [MCP-AND-TUNNEL.md](./MCP-AND-TUNNEL.md)：MCP 暴露、调用链、Approval 与 Tunnel。
-- [V2-ACCEPTANCE.md](./V2-ACCEPTANCE.md)：**历史** V2 只读版本验收记录，不是当前能力说明。
-- [V4 PRD](../docs-codex/ChatGPT-Harness_V4_PRD.md)
-- [V4 Architecture](../docs-codex/ChatGPT-Harness_V4_ARCHITECTURE.md)
-- [V4 Roadmap](../docs-codex/ChatGPT-Harness_V4_ROADMAP.md)
+- [V2 历史验收记录](../docs/archive/v2-2026-09/V2-ACCEPTANCE.md)：**已归档**，不是当前能力说明。
+- [V4 PRD](../docs/archive/v4-2026-11/ChatGPT-Harness_V4_PRD.md)
+- [V4 Architecture](../docs/archive/v4-2026-11/ChatGPT-Harness_V4_ARCHITECTURE.md)
+- [V4 Roadmap](../docs/archive/v4-2026-11/ChatGPT-Harness_V4_ROADMAP.md)
 
-## 11. Source-of-Truth Rule
+## 12. Source-of-Truth Rule
 
 ```text
 源码 / Tests / Manifests / Build Scripts
         ↓
 wiki/**
         ↓
-active docs-codex/**（目标与计划）
+docs-codex/**（下一版本工作区）
         ↓
 docs/archive/**（历史）
 ```

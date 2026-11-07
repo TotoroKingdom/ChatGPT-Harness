@@ -7,14 +7,15 @@
 | 区域 | 当前职责 | Authority / 边界 |
 | --- | --- | --- |
 | `protocol/` | Control/config/tools/policy/approval/activity/diagnostics contracts、schema、TS 生成物 | 定义 contract，不执行授权 |
-| `runtime/` | MCP、Workspace、Tools、Policy、Approval、Bash、Execution、Audit/Activity | 工具授权与执行 authority |
+| `runtime/` | MCP、Workspace、Tools、Policy、Approval、Bash、Execution、Audit/Activity/History | 工具授权与执行 authority |
+| `runtime/evidence-store/` | SQLite History、Metrics、Trace、schema/迁移/保留期 | 本地证据存储，不参与授权 |
 | `ui/src/` | React UI、路由、页面、Provider、i18n、theme | 展示与用户意图，不是授权 authority |
 | `ui/src-tauri/src/` | Config、Secret、Runtime/Tunnel 生命周期、Harness orchestration | Desktop/process lifecycle authority |
 | `ui/scripts/` | distribution staging、Portable/NSIS packaging/verification | 分发链路 |
 | `tunnel-client-*/` | bundled Tunnel payload | transport payload |
 | `wiki/` | 当前代码地图 | 必须跟随 HEAD |
-| `docs-codex/` | V4 产品与 milestone 开发文档 | intended behavior，不是实现证据 |
-| `docs/archive/` | 历史资料 | 非当前事实来源 |
+| `docs-codex/` | 下一版本文档工作区 | 规划材料，不是当前实现证据 |
+| `docs/archive/` | 历史资料，包含 V4 产品与 milestone 文档 | 非当前事实来源 |
 
 ## 2. Runtime 入口
 
@@ -43,6 +44,7 @@ loopback MCP HTTP server
 ```text
 read_file   WorkspaceRead
 glob        WorkspaceRead
+grep        WorkspaceRead
 write       WorkspaceWrite
 edit        WorkspaceWrite
 bash        DeveloperShell
@@ -76,6 +78,7 @@ unavailable_disabled
 
 - `runtime/src/tools/read_file.rs`
 - `runtime/src/tools/glob.rs`
+- `runtime/src/tools/grep.rs`
 - `runtime/src/tools/write.rs`
 - `runtime/src/tools/edit.rs`
 - `runtime/src/tools/atomic_file.rs`
@@ -192,7 +195,7 @@ Bash 只在 Developer/Test mode 可用。
 - `runtime.rs`：MCP runtime lifecycle；
 - `http.rs`：loopback HTTP / Streamable HTTP；
 - `service.rs`：effective tool exposure + call dispatch；
-- `read_file.rs` / `glob.rs` / `write.rs` / `edit.rs` / `bash.rs`：adapter。
+- `read_file.rs` / `glob.rs` / `grep.rs` / `write.rs` / `edit.rs` / `bash.rs`：adapter。
 
 关键行为：
 
@@ -230,6 +233,15 @@ MCP adapter
 - Runtime lifetime 内存态；
 - category：Request / Workspace / Policy / Execution / Approval。
 
+### History / Metrics / Trace
+
+- `runtime/evidence-store/src/**`：SQLite schema、writer、query、retention、metrics、trace；
+- `runtime/src/evidence/**`：Runtime 将 audit lifecycle 投影为 durable evidence；
+- `protocol/src/v1/history.rs`：History / Metrics / Trace DTO；
+- `ui/src-tauri/src/history.rs`：Host 侧只读查询与数据库路径管理。
+
+History 默认写入 `<app data>/history/history.sqlite3`，默认保留 30 天 / 256 MiB。Metrics 与 Trace 依赖 History enabled，且 trace 关联只用 `(runtime_id, request_id)`。
+
 ### Control Reads
 
 - `runtime/src/control_read.rs`
@@ -255,7 +267,16 @@ MCP adapter
 - workspace/tunnel/bash picker；
 - runtime control；
 - tools/policies/activity/approvals/diagnostics；
+- history / metrics / trace；
+- desktop preferences / quit；
 - harness lifecycle。
+
+### Desktop / Diagnostics
+
+- `ui/src-tauri/src/desktop/**`：托盘、关闭到托盘、通知、单实例、自动启动编排；
+- `ui/src-tauri/src/diagnostics.rs`：local / connection / runtime diagnostics；
+- `ui/src-tauri/src/startup_benchmark.rs`：启动阶段耗时捕获；
+- `ui/src-tauri/src/startup.rs`：启动相关 Host 状态。
 
 ### Runtime Supervisor
 
@@ -282,7 +303,7 @@ MCP adapter
 - `ui/src-tauri/src/config/**`
 - `ui/src-tauri/src/secrets/**`
 
-当前 persistent schema version = 2。
+当前 persistent config schema version = 3。
 
 AppConfig：
 
@@ -294,6 +315,8 @@ ui
 tools
 bash
 policies
+desktop
+history
 ```
 
 ## 11. React UI
@@ -306,6 +329,9 @@ policies
 - `ui/src/pages/approvals/**`
 - `ui/src/pages/activity/**`
 - `ui/src/pages/settings/**`
+- `ui/src/pages/activity/HistoryPanel.tsx`
+- `ui/src/pages/activity/MetricsPanel.tsx`
+- `ui/src/components/status/DiagnosticsPanel.tsx`
 
 ### Harness data/service
 
@@ -350,6 +376,10 @@ zh-CN
 
 具体 payload 以当前 distribution manifest 和 scripts 为准，不应在 Wiki 固化旧包版本号。
 
+本地首次构建 `ui/src-tauri` 前，如 `target-exe/distribution` 不存在，先运行 `npm run distribution:stage`；Tauri build script 需要其中的 `distribution.json` 与 Runtime/Tunnel 资源。
+
+V4 的 milestone layout / delivery 脚本当前指向 `docs/archive/v4-2026-11/v4/milestones`，属于历史 V4 流程；开始下一版本前必须为新目录更新路径，不能把归档文档当作新版本交付契约。
+
 ## 13. 常见修改该看哪里
 
 | 修改目标 | 首选入口 |
@@ -359,6 +389,9 @@ zh-CN
 | 改 Policy | `protocol/src/v1/policies.rs`, `runtime/src/policy/**`, Policies UI |
 | 改 Approval | `protocol/src/v1/approvals.rs`, `runtime/src/approval.rs`, Approvals UI |
 | 改 Bash | `runtime/src/bash/**`, Tool/Policy/Approval UI |
+| 改 History / Metrics / Trace | `runtime/evidence-store/**`, `protocol/src/v1/history.rs`, Activity UI |
+| 改托盘 / 通知 / 自动启动 | `ui/src-tauri/src/desktop/**`, Settings UI |
+| 改诊断 / 启动耗时 | `ui/src-tauri/src/diagnostics.rs`, `ui/src-tauri/src/startup_benchmark.rs`, DiagnosticsPanel |
 | 改 Runtime 生命周期 | `runtime/src/server.rs`, `ui/src-tauri/src/runtime/**` |
 | 改整条 Harness 编排 | `ui/src-tauri/src/harness.rs` |
 | 改 Tunnel | `ui/src-tauri/src/tunnel/**` |

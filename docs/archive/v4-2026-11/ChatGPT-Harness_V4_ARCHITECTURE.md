@@ -3,8 +3,8 @@
 > **Status:** V4 UPSTREAM PLANNING BASELINE / FROZEN FOR M00 (2026-10-23)  
 > **Target:** Windows-first V4; not an implementation or acceptance statement  
 > **Product contract:** [V4 PRD](./ChatGPT-Harness_V4_PRD.md)  
-> **Inherited reference:** [V3 Architecture](../docs/archive/v3-2026-10/ChatGPT-Harness_V3_ARCHITECTURE.md)  
-> **As-is source:** source code, tests, manifests, [current Wiki](../wiki/ARCHITECTURE.md)  
+> **Inherited reference:** [V3 Architecture](../v3-2026-10/ChatGPT-Harness_V3_ARCHITECTURE.md)  
+> **As-is source:** source code, tests, manifests, [current Wiki](../../../wiki/ARCHITECTURE.md)  
 > **Next:** V4 Roadmap → M00 SPEC → PLAN → TASK → gated verification  
 > **Freeze semantics:** 本文当前冻结为 M00 的上游目标架构基线；M00 负责用源码、POC 与真实链路验证技术假设。M00 若证明某 ADR 不成立，必须先显式修订并重新冻结本 Architecture / PRD / Roadmap 的受影响部分，不能在下游 TASK 中静默改语义。
 
@@ -393,8 +393,8 @@ Host-only prefs 不进入 RuntimeConfigSnapshot，也不推进 Runtime configRev
 ## References
 
 - [V4 PRD](./ChatGPT-Harness_V4_PRD.md)
-- [Historical V3 Architecture](../docs/archive/v3-2026-10/ChatGPT-Harness_V3_ARCHITECTURE.md)
-- [Current Architecture Wiki](../wiki/ARCHITECTURE.md)
+- [Historical V3 Architecture](../v3-2026-10/ChatGPT-Harness_V3_ARCHITECTURE.md)
+- [Current Architecture Wiki](../../../wiki/ARCHITECTURE.md)
 - [Tauri 2 Tray](https://tauri.app/learn/system-tray/)
 - [Tauri 2 Notifications](https://v2.tauri.app/plugin/notification/)
 - [MCP Official Conformance](https://github.com/modelcontextprotocol/conformance)

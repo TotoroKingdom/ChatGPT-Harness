@@ -16,7 +16,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot "docs-codex\v4\milestones\$Milestone") -PathType Container)) {
+if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot "docs\archive\v4-2026-11\v4\milestones\$Milestone") -PathType Container)) {
     throw "Milestone plans do not exist: $Milestone"
 }
 if ($AllowM09DevelopmentIncomplete) {
@@ -89,7 +89,7 @@ $record = [ordered]@{
     development_only = [bool]$AllowM09DevelopmentIncomplete
     validation_documents = if ($AllowM09DevelopmentIncomplete) { "MISSING_M09_FORMAL_VALIDATION_PLANS" } else { "PRESENT" }
     acceptance_status = "CANDIDATE_ONLY_MANUAL_ACCEPTANCE_NOT_EXECUTED"
-    acceptance_plan = "docs-codex/v4/milestones/$Milestone/MANUAL_ACCEPTANCE_CHECKLIST.md"
+    acceptance_plan = "docs/archive/v4-2026-11/v4/milestones/$Milestone/MANUAL_ACCEPTANCE_CHECKLIST.md"
     entry = "$portableName/chatgpt-harness-ui.exe"
     files = $hashes
 }

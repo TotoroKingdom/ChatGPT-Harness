@@ -1,6 +1,6 @@
 # ChatGPT-Harness Architecture
 
-> 本文描述当前 main / HEAD 的架构事实，基于 0.1.3 源码。历史 V2/V3 milestone 状态不是本文的架构边界；V4 规划也不会提前算作现状。
+> 本文描述当前 main / HEAD 的架构事实，基于 0.1.3 源码。V4 开发文档已归档；归档中的规划、阶段状态与验收结论不等于当前实现或发布状态。
 
 ## 1. 总体架构
 
@@ -32,6 +32,8 @@ ChatGPT ↔ Tunnel ↔ Runtime MCP
 位于 `ui/src/`，负责：
 
 - Overview / Tools / Policies / Approvals / Activity / Settings；
+- Activity 内的 Live / History / Metrics 视图；
+- 诊断结果与启动阶段耗时展示；
 - config draft 与保存；
 - desired/effective 状态展示；
 - i18n；
@@ -49,6 +51,11 @@ UI 不直接启动 Runtime/Tunnel，也不负责工具授权。
 - RuntimeSupervisor；
 - TunnelProcessManager；
 - HarnessController；
+- DesktopLifecycleCoordinator；
+- 系统托盘、窗口关闭与单实例；
+- Approval / Connection notifications；
+- 应用启动后的 Harness 自动启动；
+- diagnostics 与 startup benchmark capture；
 - Tauri command surface；
 - desktop/process cleanup。
 
@@ -71,6 +78,7 @@ Bash analyzer/runtime
 Audit / Activity
 Diagnostics
 MCP Service
+Evidence Store（History / Metrics / Trace）
 ```
 
 ### Runtime MCP
@@ -97,6 +105,17 @@ Tunnel 不执行：
 - tool implementation；
 - Activity authorization decision。
 
+### Desktop integration
+
+`ui/src-tauri/src/desktop/**` 负责桌面生命周期与系统集成：
+
+- 托盘菜单展示 Harness 状态、pending approval 数，并提供 Show / Start / Stop / Quit；
+- 关闭主窗口默认隐藏到托盘，首次关闭先显示后台运行说明；
+- 审批通知与连接状态通知可分别关闭，默认启用；
+- `autoStartHarnessOnAppLaunch` 在应用启动后最多触发一次 Harness Start，默认关闭；
+- Windows 单实例插件避免重复进程；
+- 诊断与启动阶段耗时只读取当前 Host/Runtime 状态，不代替 Runtime 授权。
+
 ## 3. Desktop Control Plane
 
 ```text
@@ -121,7 +140,7 @@ Runtime Control Server
 - control_read；
 - `mcp.endpoint.get`。
 
-Config 持久化 schema 当前为 **2**；这与产品版本号、Milestone 编号相互独立。
+Config 持久化 schema 当前为 **3**；这与产品版本号、Wire Protocol v1 和 Milestone 编号相互独立。
 
 ## 4. MCP Data Plane
 
@@ -158,6 +177,7 @@ Runtime 的 declared tool catalog 固定为：
 ```text
 read_file
 glob
+grep
 write
 edit
 bash
@@ -182,7 +202,7 @@ bash
 
 Workspace 是 Runtime 的安全边界，不由 UI 或 Tunnel 代替。
 
-文件工具都必须经过 WorkspaceGuard。写入类工具还会在 mutation path 中进行目标校验/再校验，避免路径逃逸和 TOCTOU 类型的目标变化问题。
+文件工具都必须经过 WorkspaceGuard。`grep` 只读扫描 Workspace，结果受匹配数、输出字节和 cancellation 限制。写入类工具还会在 mutation path 中进行目标校验/再校验，避免路径逃逸和 TOCTOU 类型的目标变化问题。
 
 当前文件 mutation：
 
@@ -220,6 +240,7 @@ Runtime 启动一个 generation 时编译 immutable Policy snapshot。Runtime �
 ```text
 read_file = ALLOW
 glob      = ALLOW
+grep      = ALLOW
 write     = ALLOW
 edit      = ALLOW
 bash      = ASK
@@ -288,7 +309,7 @@ Bash capability = `DeveloperShell`。
 
 Bash cwd 固定为 active Workspace，但 Bash 不是 OS 级 filesystem sandbox。
 
-## 9. Audit / Activity
+## 9. Audit / Activity / History
 
 Audit event 是 Runtime-owned 的非 secret 事件模型；Activity 是其面向 UI 的安全投影。
 
@@ -298,7 +319,10 @@ Audit event 是 Runtime-owned 的非 secret 事件模型；Activity 是其面向
 - 不持久化凭据、环境变量、原始物理路径、raw process output；
 - Bash 只暴露 sanitized/bounded evidence；
 - Activity capacity 当前为 256；
-- Activity 是 Runtime lifetime 内的 bounded observation，不是 durable audit database。
+- Activity 是 Runtime lifetime 内的 bounded observation，不是 durable audit database；
+- History 通过 `runtime/evidence-store/` 写入本地 SQLite，默认启用，默认保留 30 天 / 256 MiB；
+- Metrics / Trace 是 History 的只读投影，History 停用时不可用；
+- Trace 使用 `(runtime_id, request_id)` 精确关联，不做时间戳回退。
 
 ## 10. Config 与 Secret
 
@@ -312,9 +336,13 @@ ui
 tools
 bash
 policies
+desktop
+history
 ```
 
 Runtime 启动时得到 non-secret、immutable `RuntimeConfigSnapshot`。
+
+当前持久化 config schema 为 **3**；History evidence schema 为 **1**，两者相互独立。`desktop` 与 `history` 是 Host-only 配置，不进入 Runtime authorization snapshot。
 
 原始 Tunnel API Key 由 SecretStore 管理；AppConfig 只保存 opaque `SecretReference`。Secret 不应进入 Runtime snapshot、IPC response、Activity、diagnostics 或普通日志。
 
@@ -352,6 +380,8 @@ mark stopping
 - callback 带 generation/session/instance identity；
 - stale callback 不得改变新 session。
 
+若配置启用 `autoStartHarnessOnAppLaunch`，Host 会在桌面初始化后尝试一次 Harness Start；冲突或失败不会自动重试。
+
 ## 12. Source-of-Truth Locations
 
 | 问题 | 代码位置 |
@@ -369,6 +399,9 @@ mark stopping
 | Runtime supervision | `ui/src-tauri/src/runtime/**` |
 | Tunnel | `ui/src-tauri/src/tunnel/**` |
 | Harness orchestration | `ui/src-tauri/src/harness.rs` |
+| Desktop lifecycle / tray / notifications | `ui/src-tauri/src/desktop/**` |
+| Diagnostics / startup benchmark | `ui/src-tauri/src/diagnostics.rs`, `ui/src-tauri/src/startup_benchmark.rs` |
+| History / Metrics / Trace | `runtime/evidence-store/**`, `ui/src-tauri/src/history.rs` |
 | Config / Secret | `ui/src-tauri/src/config/**`, `ui/src-tauri/src/secrets/**` |
 | React pages | `ui/src/pages/**` |
 | Theme | `ui/src/theme/**` |

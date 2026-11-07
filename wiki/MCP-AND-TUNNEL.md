@@ -1,6 +1,6 @@
 # MCP and Tunnel Integration
 
-> 本文描述当前 main / HEAD（0.1.3）的 MCP、Approval 与 Tunnel 集成。旧 V2 “read-only tools only” 描述已经不适用于当前源码。
+> 本文描述当前 main / HEAD（0.1.3）的 MCP、Approval、History 与 Tunnel 集成。旧 V2 “read-only tools only” 描述已经不适用于当前源码。MCP protocol revision 固定为 `2025-03-26`。
 
 ## 1. 当前真实链路
 
@@ -21,7 +21,7 @@ PolicyEngine
    ↓
 Approval / SessionGrant（按需）
    ↓
-read_file / glob / write / edit / bash
+read_file / glob / grep / write / edit / bash
    ↓
 Audit / Activity
 ```
@@ -36,7 +36,7 @@ Runtime 初始化后在：
 127.0.0.1:<ephemeral>/mcp
 ```
 
-启动 Streamable HTTP MCP endpoint。
+启动 Streamable HTTP MCP endpoint。Runtime 使用 `rmcp 3.2.0`，MCP protocol revision 固定为 `2025-03-26`；兼容性身份清单位于 `fixtures/v4/m10-mcp/compatibility-v1.json`。
 
 Tauri 通过：
 
@@ -55,6 +55,7 @@ Runtime declared catalog：
 ```text
 read_file
 glob
+grep
 write
 edit
 bash
@@ -97,6 +98,7 @@ MCP arguments
 | --- | --- | --- |
 | read_file | WorkspaceRead | bounded workspace file read |
 | glob | WorkspaceRead | workspace path matching |
+| grep | WorkspaceRead | bounded workspace text / regex search |
 | write | WorkspaceWrite | atomic UTF-8 create/overwrite |
 | edit | WorkspaceWrite | unique exact replacement + atomic mutation |
 | bash | DeveloperShell | controlled Git Bash async execution |
@@ -225,7 +227,7 @@ Harness stopping
 - Tunnel crash/readiness loss：Harness 离开 Ready；
 - stale generation/session watcher callback 被忽略。
 
-## 10. Activity Evidence
+## 10. Activity / History / Trace Evidence
 
 工具调用会产生 Runtime-owned audit lifecycle，再投影成 Activity。
 
@@ -242,6 +244,14 @@ Harness stopping
 - Bash sanitized evidence。
 
 Activity 不包含原始 Secret，也不应保存 raw Bash output/argv 作为授权证据。
+
+History 与 Activity 的边界：
+
+- Activity 是 Runtime lifetime 内的实时有界视图（容量 256）；
+- History 写入本地 SQLite，默认启用，默认保留 30 天 / 256 MiB；
+- Metrics 与 Trace 是 History 的只读投影，History 停用时不可用；
+- Trace 只用 `(runtime_id, request_id)` 精确关联，不做时间戳回退；
+- History 保存脱敏后的参数、生命周期、Policy/Approval 结果和有界执行证据。
 
 ## 11. Troubleshooting 模型
 
@@ -277,17 +287,28 @@ Tool enabled?
 - Policy；
 - Runtime restart/convergence。
 
+### History / Metrics / Trace 不可用
+
+检查：
+
+- History 是否在 Settings 中启用；
+- History 数据库是否处于 healthy / busy / incompatible / corrupt 状态；
+- 当前查询是否超出保留期；
+- Metrics/Trace 是否需要先完成 evidence store migration。
+
 ## 12. Source-of-Truth
 
 | 问题 | 代码 |
 | --- | --- |
 | MCP service | `runtime/src/mcp/service.rs` |
 | MCP HTTP/lifecycle | `runtime/src/mcp/http.rs`, `runtime/src/mcp/runtime.rs` |
+| MCP compatibility | `runtime/src/mcp/compatibility.rs`, `fixtures/v4/m10-mcp/compatibility-v1.json` |
 | Tool registry/effective | `runtime/src/tools/registry.rs`, `effective.rs` |
 | Policy | `runtime/src/policy/engine.rs` |
 | Approval | `runtime/src/approval.rs` |
 | Session Grant | `runtime/src/session_grant.rs` |
 | Bash | `runtime/src/bash/**` |
+| History / Metrics / Trace | `runtime/evidence-store/**`, `ui/src-tauri/src/history.rs` |
 | Control methods | `protocol/src/v1/methods.rs` |
 | Tauri Runtime | `ui/src-tauri/src/runtime/**` |
 | Tunnel | `ui/src-tauri/src/tunnel/**` |
