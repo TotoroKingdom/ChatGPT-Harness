@@ -15,7 +15,11 @@ $repositoryRoot = (Resolve-Path (Join-Path $uiDirectory "..")).Path
 if ($AllowM09DevelopmentIncomplete) {
     & (Join-Path $scriptDirectory "check-milestone-layout.ps1") -Milestone "M09-file-tool-admission-qualified-expansion" -AllowM09DevelopmentIncomplete
 } elseif ([string]::IsNullOrWhiteSpace($Milestone)) {
-    & (Join-Path $scriptDirectory "check-milestone-layout.ps1")
+    # A plain Portable build is a packaging operation, not a formal milestone
+    # delivery. Historical archived milestones may intentionally lack formal
+    # validation plans, so only the repository layout is mandatory here.
+    # Milestone-scoped delivery still validates the requested milestone below.
+    & (Join-Path $scriptDirectory "check-repository-layout.ps1")
 } else {
     & (Join-Path $scriptDirectory "check-milestone-layout.ps1") -Milestone $Milestone
 }
