@@ -1,0 +1,52 @@
+{
+  "caseId": "copy-n2",
+  "caseVersion": 1,
+  "candidate": "copy",
+  "kind": "negative_sentinel",
+  "prompt": "Find the file named seed.txt.",
+  "fixtureRef": "copy/copy-n2",
+  "fixtureHash": "0c0a13d1068b5b0a27a30aa119ad59323dd715d7f0f27da9b5319ed8c4446835",
+  "expectedAllowedTools": [
+    "glob"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "pattern",
+      "allowedValues": [
+        "seed.txt"
+      ],
+      "pathMustBeWorkspaceRelative": false
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "746a619ba0b696b9f7599cc43cd201b9124101d897545bdabc62bb673c52a4c5"
+    }
+  ],
+  "policyApproval": {
+    "tool": "glob",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": null,
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "negative_sentinel",
+    "copy",
+    "glob"
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "caseId": "list_directory-p1",
+  "caseVersion": 1,
+  "candidate": "list_directory",
+  "kind": "positive",
+  "prompt": "List the direct entries in the workspace root with their kinds.",
+  "fixtureRef": "list_directory/list_directory-p1",
+  "fixtureHash": "e5a73a77c0925970678f83548eab3dc5b7ede0bc8205a2a8cdf08efc18c2fe27",
+  "expectedAllowedTools": [
+    "list_directory"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "path",
+      "allowedValues": [
+        "."
+      ],
+      "pathMustBeWorkspaceRelative": true
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "5479ec93a3497dda3f3de6e65fbcb0c9247180467472e8e413d6b5d28c427158"
+    },
+    {
+      "path": "reports",
+      "state": "directory"
+    }
+  ],
+  "policyApproval": {
+    "tool": "list_directory",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "list_directory",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": {
+    "entryNames": [
+      "reports",
+      "seed.txt"
+    ],
+    "entryKinds": {
+      "reports": "directory",
+      "seed.txt": "file"
+    },
+    "truncated": false
+  },
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "positive",
+    "list_directory",
+    "direct_children"
+  ]
+}

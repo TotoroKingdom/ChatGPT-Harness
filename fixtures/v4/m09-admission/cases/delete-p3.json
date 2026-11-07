@@ -1,0 +1,57 @@
+{
+  "caseId": "delete-p3",
+  "caseVersion": 1,
+  "candidate": "delete",
+  "kind": "positive",
+  "prompt": "Attempt to delete reports while it is non-empty.",
+  "fixtureRef": "delete/delete-p3",
+  "fixtureHash": "9f2135bfb97c28bc750896a7512017d0c689f9cb888673fbfb7695fdb3dca5c3",
+  "expectedAllowedTools": [
+    "delete"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "path",
+      "allowedValues": [
+        "reports"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "reports",
+      "state": "directory"
+    },
+    {
+      "path": "reports/note.txt",
+      "state": "file",
+      "sha256": "8380447bee5c036e17124bc91077daac28678e327f279b1c59ad5f4cc428201c"
+    }
+  ],
+  "policyApproval": {
+    "tool": "delete",
+    "default": "ask",
+    "approval": "allow_once"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "delete",
+      "outcome": "error",
+      "code": "DIRECTORY_NOT_EMPTY"
+    }
+  ],
+  "resultGroundTruth": null,
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "positive",
+    "delete",
+    "non_empty_directory"
+  ]
+}

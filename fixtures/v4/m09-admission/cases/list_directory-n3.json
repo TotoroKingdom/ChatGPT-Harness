@@ -1,0 +1,52 @@
+{
+  "caseId": "list_directory-n3",
+  "caseVersion": 1,
+  "candidate": "list_directory",
+  "kind": "negative_sentinel",
+  "prompt": "Search all files for the word directory.",
+  "fixtureRef": "list_directory/list_directory-n3",
+  "fixtureHash": "eb55804c1d1c49b392d7830a73a3c138a2da56cb3ca3814847f43ece4483eb77",
+  "expectedAllowedTools": [
+    "grep"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "query",
+      "allowedValues": [
+        "directory"
+      ],
+      "pathMustBeWorkspaceRelative": false
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "d034b7d8cf6c54cdf6c1fb21b014e4d57c2da00e9e387f46fc28a2bf7c720b27"
+    }
+  ],
+  "policyApproval": {
+    "tool": "grep",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "grep",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": null,
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "negative_sentinel",
+    "list_directory",
+    "grep"
+  ]
+}

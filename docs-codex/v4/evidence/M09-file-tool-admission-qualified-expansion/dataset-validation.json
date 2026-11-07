@@ -1,0 +1,63 @@
+{
+  "candidates": [
+    {
+      "candidate": "mkdir",
+      "candidateSchemaHash": "3b73b1a387ab8ad163ac30967f3cd44c9028759c43d2fc4e6371b50da97c8167",
+      "caseCount": 6,
+      "negativeCount": 3,
+      "positiveCount": 3,
+      "profileId": "m09-mkdir-candidate-v1"
+    },
+    {
+      "candidate": "list_directory",
+      "candidateSchemaHash": "9c49d1a96adfae315dbc97c55b8accf873b26503001a9e608691a5e037d14923",
+      "caseCount": 6,
+      "negativeCount": 3,
+      "positiveCount": 3,
+      "profileId": "m09-list-directory-candidate-v1"
+    },
+    {
+      "candidate": "copy",
+      "candidateSchemaHash": "382b68b77a8753a15219b928226fac9b60030dbdbba803dd286118cc4b6c6e94",
+      "caseCount": 6,
+      "negativeCount": 3,
+      "positiveCount": 3,
+      "profileId": "m09-copy-candidate-v1"
+    },
+    {
+      "candidate": "move",
+      "candidateSchemaHash": "b014db4af8af184efa449761e7c695328f3b2b48f138446a16f2c5fb39789aa1",
+      "caseCount": 6,
+      "negativeCount": 3,
+      "positiveCount": 3,
+      "profileId": "m09-move-candidate-v1"
+    },
+    {
+      "candidate": "rename",
+      "candidateSchemaHash": "263dd427e48a1ddc6d3fb4ce0ddbeefcfa8bd5b80975a7b334c68bff1514c017",
+      "caseCount": 6,
+      "negativeCount": 3,
+      "positiveCount": 3,
+      "profileId": "m09-rename-candidate-v1"
+    },
+    {
+      "candidate": "delete",
+      "candidateSchemaHash": "9403571c7265fa99fdfb668e137211f7d746322c3597fdb6f3ea25c65ce9de1e",
+      "caseCount": 6,
+      "negativeCount": 3,
+      "positiveCount": 3,
+      "profileId": "m09-delete-candidate-v1"
+    }
+  ],
+  "caseCount": 36,
+  "datasetHash": "dd81c84f8753adcb8eb69622dc414a840e80f213772e64de12a77b2c8fcafc50",
+  "datasetId": "m09-file-tool-admission-v1",
+  "datasetVersion": 1,
+  "finalDecisionSetProduced": false,
+  "formalAdmissionEligible": false,
+  "logicalRuns": 108,
+  "modelCallsExecuted": false,
+  "repetitions": 3,
+  "status": "MECHANICS_ONLY",
+  "systemPromptHash": "2c448dd36cae46d6c112ec245c5b311ebeb9f49452d3881f97abac240f197357"
+}

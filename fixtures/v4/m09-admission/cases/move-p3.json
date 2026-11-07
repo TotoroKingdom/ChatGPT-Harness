@@ -1,0 +1,64 @@
+{
+  "caseId": "move-p3",
+  "caseVersion": 1,
+  "candidate": "move",
+  "kind": "positive",
+  "prompt": "Attempt to move reports into its own descendant reports/archive.",
+  "fixtureRef": "move/move-p3",
+  "fixtureHash": "0cbdad314aa1ff3ba568f08ed08cc18db408c11da7de25a1605db2b22457f653",
+  "expectedAllowedTools": [
+    "move"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "sourcePath",
+      "allowedValues": [
+        "reports"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    },
+    {
+      "field": "destinationPath",
+      "allowedValues": [
+        "reports/archive"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "reports",
+      "state": "directory"
+    },
+    {
+      "path": "reports/note.txt",
+      "state": "file",
+      "sha256": "b56fa16f653454312dbc01bf92af29f20edb9eb2a8a39637f86a8190e3987996"
+    }
+  ],
+  "policyApproval": {
+    "tool": "move",
+    "default": "ask",
+    "approval": "allow_once"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "move",
+      "outcome": "error",
+      "code": "WORKSPACE_VIOLATION"
+    }
+  ],
+  "resultGroundTruth": null,
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "positive",
+    "move",
+    "self_descendant"
+  ]
+}

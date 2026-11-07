@@ -1,0 +1,74 @@
+{
+  "caseId": "copy-p1",
+  "caseVersion": 1,
+  "candidate": "copy",
+  "kind": "positive",
+  "prompt": "Make a byte-for-byte duplicate of source.bin at backup/seed.bin.",
+  "fixtureRef": "copy/copy-p1",
+  "fixtureSetup": {
+    "directories": [
+      "backup"
+    ],
+    "reparseEntries": []
+  },
+  "fixtureHash": "4e50edd9c02d63d221853e31a61bbe2b34257ee9087dfa9c64f0a65183e72018",
+  "expectedAllowedTools": [
+    "copy"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "sourcePath",
+      "allowedValues": [
+        "source.bin"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    },
+    {
+      "field": "destinationPath",
+      "allowedValues": [
+        "backup/seed.bin"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "source.bin",
+      "state": "file",
+      "sha256": "165d3684b47bbcb7d78e30ac31782439fbaede7d319232af05cec4dc8e5be98c"
+    },
+    {
+      "path": "backup/seed.bin",
+      "state": "file",
+      "sha256": "165d3684b47bbcb7d78e30ac31782439fbaede7d319232af05cec4dc8e5be98c"
+    }
+  ],
+  "policyApproval": {
+    "tool": "copy",
+    "default": "ask",
+    "approval": "allow_once"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "copy",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": {
+    "atomicCommit": true,
+    "bytesCopied": 14
+  },
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "positive",
+    "copy",
+    "binary",
+    "destination_absent"
+  ]
+}

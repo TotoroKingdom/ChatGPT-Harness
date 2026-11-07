@@ -1,0 +1,50 @@
+{
+  "sourceBase": "7833e8ab37460124073a666c9a3b99bf32a40945",
+  "cargoFmt": "PASS",
+  "cargoCheck": "PASS",
+  "cargoTest": {
+    "status": "PASS",
+    "passed": 866,
+    "ignored": 27,
+    "suites": 17,
+    "ignoredReason": "Existing explicit formal QA, packaged E2E and controlled performance probes; not run by cargo test --workspace",
+    "logSha256": "9f5885dc459cf8c704d4e9e0ae1d1d36a87484a263255491171c159a277b06e1",
+    "logPath": "C:/Users/totoro/AppData/Local/Temp/harness-m09-workspace-b6646b7092ac4942b849036a88ee23af.log"
+  },
+  "uiTypecheck": "PASS",
+  "uiTests": {
+    "status": "PASS",
+    "files": 41,
+    "passed": 385
+  },
+  "uiBuild": "PASS",
+  "protocolGeneratedArtifacts": "PASS via protocol/tests/contracts.rs generated_artifacts_are_current in workspace tests",
+  "repositoryLayout": "PASS",
+  "formalMilestoneLayout": "BLOCKED: first failure M08 missing three validation plans; M09/M10/M11 also incomplete",
+  "m09ScopedDevelopmentLayout": "PASS (does not validate global formal layout)",
+  "layoutGuardProbes": "5/5 PASS in isolated temporary directory",
+  "m09Dataset": {
+    "status": "MECHANICS_ONLY",
+    "cases": 36,
+    "logicalRuns": 108,
+    "datasetHash": "dd81c84f8753adcb8eb69622dc414a840e80f213772e64de12a77b2c8fcafc50"
+  },
+  "fixturePreparation": {
+    "status": "BLOCKED",
+    "prepared": 35,
+    "blocked": 1,
+    "blockedCase": "list_directory-p3",
+    "reason": "Windows environment cannot create native disposable reparse fixture"
+  },
+  "protectedHashes": {
+    "status": "PASS",
+    "files": 152,
+    "drift": 0
+  },
+  "realModelAdmission": "BLOCKED_NOT_EXECUTED",
+  "final72Regression": "BLOCKED_NOT_EXECUTED",
+  "formalIntegration": "NOT_EXECUTED",
+  "formalE2e": "NOT_EXECUTED",
+  "manual": "NOT_EXECUTED",
+  "acceptedFrozen": false
+}

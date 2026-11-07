@@ -1,0 +1,52 @@
+{
+  "caseId": "list_directory-n2",
+  "caseVersion": 1,
+  "candidate": "list_directory",
+  "kind": "negative_sentinel",
+  "prompt": "Find every file matching seed.txt.",
+  "fixtureRef": "list_directory/list_directory-n2",
+  "fixtureHash": "46e0debd51ce504da3ca9c1d8ef9a98a63227ee620f2ff883922df5c679ec4f0",
+  "expectedAllowedTools": [
+    "glob"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "pattern",
+      "allowedValues": [
+        "seed.txt"
+      ],
+      "pathMustBeWorkspaceRelative": false
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "11de4f92b6fbad47610d3e969cf0d8e64804dc4f0f717cba5f02bdff36350389"
+    }
+  ],
+  "policyApproval": {
+    "tool": "glob",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": null,
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "negative_sentinel",
+    "list_directory",
+    "glob"
+  ]
+}

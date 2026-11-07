@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "baselineCommit": "384905c24ea584782ebdb7c33df72ae2e298cff5",
+  "integratedHead": "7833e8ab37460124073a666c9a3b99bf32a40945",
+  "checkedFileCount": 152,
+  "snapshotSha256": "104b594494f0e01db8f2f05de40a3a2019f1af9c218467b9a53a7d89f941a28d",
+  "rawByteHashDrift": [],
+  "acceptedM05FiveToolSchemaComparison": "BLOCKED_NO_ACCEPTED_HANDOFF",
+  "externalCommittedM10Changes": [
+    "runtime/src/mcp/compatibility.rs",
+    "runtime/src/mcp/http.rs",
+    "runtime/src/mcp/mod.rs",
+    "runtime/src/mcp/service.rs"
+  ],
+  "m09UncommittedMcpDiffExit": 0,
+  "note": "Additional MCP-source comparison against initial HEAD detected external committed M10 changes, not changes to the protected 152-file snapshot. These external commits are retained. No M09 modification to MCP product sources."
+}

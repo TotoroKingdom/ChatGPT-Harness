@@ -1,0 +1,52 @@
+{
+  "caseId": "move-n1",
+  "caseVersion": 1,
+  "candidate": "move",
+  "kind": "negative_sentinel",
+  "prompt": "Read the contents of seed.txt.",
+  "fixtureRef": "move/move-n1",
+  "fixtureHash": "d5d13579b5fc2d4db5e71ac1fb3bf83b4af59c446edbe005fb6ecca77050aa1b",
+  "expectedAllowedTools": [
+    "read_file"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "path",
+      "allowedValues": [
+        "seed.txt"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "58c413cabbc213ba7057509a3ebca724be5ffa37a62073a304f4df9c2ffa027d"
+    }
+  ],
+  "policyApproval": {
+    "tool": "read_file",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "read_file",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": null,
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "negative_sentinel",
+    "move",
+    "read_file"
+  ]
+}

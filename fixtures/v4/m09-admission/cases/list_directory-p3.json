@@ -1,0 +1,83 @@
+{
+  "caseId": "list_directory-p3",
+  "caseVersion": 1,
+  "candidate": "list_directory",
+  "kind": "positive",
+  "prompt": "List only direct children and do not read files under nested.",
+  "fixtureRef": "list_directory/list_directory-p3",
+  "fixtureHash": "39c9ede89d04ee5fcffbb6703a98fdc30faaf4db8b0e4949bc7f5e37cb692b24",
+  "fixtureSetup": {
+    "directories": [],
+    "reparseEntries": [
+      {
+        "path": "alias",
+        "target": "nested",
+        "kind": "directory"
+      }
+    ]
+  },
+  "expectedAllowedTools": [
+    "list_directory"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "path",
+      "allowedValues": [
+        "."
+      ],
+      "pathMustBeWorkspaceRelative": true
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "4d12c2fb487e51345117fde04f20c107ab5fff580103cfeccc970ecfa5a1c3ae"
+    },
+    {
+      "path": "nested",
+      "state": "directory"
+    },
+    {
+      "path": "alias",
+      "state": "reparse"
+    }
+  ],
+  "policyApproval": {
+    "tool": "list_directory",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "list_directory",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": {
+      "entryNames": [
+        "alias",
+        "nested",
+        "seed.txt"
+      ],
+    "entryKinds": {
+        "alias": "reparse",
+      "nested": "directory",
+      "seed.txt": "file"
+    },
+    "truncated": false
+  },
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "positive",
+    "list_directory",
+    "non_recursive",
+    "reparse_not_followed"
+  ]
+}

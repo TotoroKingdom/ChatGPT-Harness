@@ -1,0 +1,83 @@
+{
+  "caseId": "list_directory-p2",
+  "caseVersion": 1,
+  "candidate": "list_directory",
+  "kind": "positive",
+  "prompt": "Return a bounded inventory of the root, capped at two entries.",
+  "fixtureRef": "list_directory/list_directory-p2",
+  "fixtureHash": "ad8cf48df2226337eb033a3c9e8fdef8858767e3a41dfaf1df942c11ce32546c",
+  "expectedAllowedTools": [
+    "list_directory"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "path",
+      "allowedValues": [
+        "."
+      ],
+      "pathMustBeWorkspaceRelative": true
+    },
+    {
+      "field": "maxEntries",
+      "allowedValues": [
+        "2"
+      ]
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "a.txt",
+      "state": "file",
+      "sha256": "a7da489976d0047490617adb4f7a1f27f7af8b52a5176fd002ffe471863520ab"
+    },
+    {
+      "path": "b.txt",
+      "state": "file",
+      "sha256": "bedcd5bfb50af622be56c4aec7ac5da64745686b362afc7e615ea89b0705b8f8"
+    },
+    {
+      "path": "c.txt",
+      "state": "file",
+      "sha256": "8f0ec1a9281617f1ce8164cc9b52af1abab5d21254b41dff1bc0278215eec5a3"
+    },
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "3ea4e0297f941afeeb305c9458193c85b12bb173b0aec46be2ef1a6f5e82c480"
+    }
+  ],
+  "policyApproval": {
+    "tool": "list_directory",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "list_directory",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": {
+    "entryNames": [
+      "a.txt",
+      "b.txt"
+    ],
+    "entryKinds": {
+      "a.txt": "file",
+      "b.txt": "file"
+    },
+    "truncated": true
+  },
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "positive",
+    "list_directory",
+    "bounded"
+  ]
+}

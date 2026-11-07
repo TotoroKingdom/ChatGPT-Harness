@@ -1,0 +1,188 @@
+{
+  "cases": [
+    {
+      "caseId": "copy-n1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "copy-n2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "copy-n3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "copy-p1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "copy-p2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "copy-p3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "delete-n1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "delete-n2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "delete-n3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "delete-p1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "delete-p2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "delete-p3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "list_directory-n1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "list_directory-n2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "list_directory-n3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "list_directory-p1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "list_directory-p2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "list_directory-p3",
+      "reason": "environment cannot create the required disposable reparse fixture",
+      "status": "BLOCKED"
+    },
+    {
+      "caseId": "mkdir-n1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "mkdir-n2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "mkdir-n3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "mkdir-p1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "mkdir-p2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "mkdir-p3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "move-n1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "move-n2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "move-n3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "move-p1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "move-p2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "move-p3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "rename-n1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "rename-n2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "rename-n3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "rename-p1",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "rename-p2",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    },
+    {
+      "caseId": "rename-p3",
+      "recipeBoundByFixtureHash": true,
+      "status": "PREPARED"
+    }
+  ],
+  "finalDecisionSetProduced": false,
+  "modelCallsExecuted": false,
+  "status": "BLOCKED",
+  "toolCallsExecuted": false
+}

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "milestone": "M09-file-tool-admission-qualified-expansion",
+  "status": "BLOCKED",
+  "finalDecisionSetProduced": false,
+  "modelCallsExecuted": false,
+  "blockers": [
+    "Accepted M05 machine-readable quality handoff was not supplied or found in tracked v4 evidence; acceptance status alone is not the waiver granted by the user.",
+    "No execution-time authorization for paid/networked controlled model calls."
+  ],
+  "candidates": [
+    {
+      "candidate": "mkdir",
+      "provisionalDisposition": "DEFER",
+      "finalVerdict": null,
+      "reasonCode": "REAL_ADMISSION_EVIDENCE_UNAVAILABLE",
+      "productionExposureAdded": false
+    },
+    {
+      "candidate": "list_directory",
+      "provisionalDisposition": "DEFER",
+      "finalVerdict": null,
+      "reasonCode": "REAL_ADMISSION_EVIDENCE_UNAVAILABLE",
+      "productionExposureAdded": false
+    },
+    {
+      "candidate": "copy",
+      "provisionalDisposition": "DEFER",
+      "finalVerdict": null,
+      "reasonCode": "REAL_ADMISSION_EVIDENCE_UNAVAILABLE",
+      "productionExposureAdded": false
+    },
+    {
+      "candidate": "move",
+      "provisionalDisposition": "DEFER",
+      "finalVerdict": null,
+      "reasonCode": "REAL_ADMISSION_EVIDENCE_UNAVAILABLE",
+      "productionExposureAdded": false
+    },
+    {
+      "candidate": "rename",
+      "provisionalDisposition": "DEFER",
+      "finalVerdict": null,
+      "reasonCode": "REAL_ADMISSION_EVIDENCE_UNAVAILABLE",
+      "productionExposureAdded": false
+    },
+    {
+      "candidate": "delete",
+      "provisionalDisposition": "DEFER",
+      "finalVerdict": null,
+      "reasonCode": "REAL_ADMISSION_EVIDENCE_UNAVAILABLE",
+      "productionExposureAdded": false
+    }
+  ],
+  "t3t4t5": "BLOCKED_PENDING_FINAL_ADMIT",
+  "cumulative72Regression": "NOT_EXECUTED_BLOCKED",
+  "providerDrift": "NOT_EVALUATED",
+  "realModelSecurityViolationCount": null,
+  "realModelOutsideWorkspaceMutationCount": null,
+  "formalIntegration": "NOT_EXECUTED",
+  "formalE2e": "NOT_EXECUTED",
+  "realExternalChatGPT": "NOT_EXECUTED",
+  "manual": "NOT_EXECUTED",
+  "acceptedFrozen": false
+}

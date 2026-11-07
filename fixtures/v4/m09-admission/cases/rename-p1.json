@@ -1,0 +1,65 @@
+{
+  "caseId": "rename-p1",
+  "caseVersion": 1,
+  "candidate": "rename",
+  "kind": "positive",
+  "prompt": "Change the entry name from draft.txt to final.txt in the same directory.",
+  "fixtureRef": "rename/rename-p1",
+  "fixtureHash": "23a3b669abcc818835d4f68b2cbb004f95d8e0d3a8f650effc39f9343f7f9686",
+  "expectedAllowedTools": [
+    "rename"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "path",
+      "allowedValues": [
+        "draft.txt"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    },
+    {
+      "field": "newName",
+      "allowedValues": [
+        "final.txt"
+      ]
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "draft.txt",
+      "state": "absent"
+    },
+    {
+      "path": "final.txt",
+      "state": "file",
+      "sha256": "2d3482d10aff650ad1921e6b6e0f80d218e9b2d8d050c25ea83a922b8d2238e3"
+    }
+  ],
+  "policyApproval": {
+    "tool": "rename",
+    "default": "ask",
+    "approval": "allow_once"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "rename",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": {
+    "atomic": true,
+    "entryKind": "file"
+  },
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "positive",
+    "rename",
+    "file"
+  ]
+}

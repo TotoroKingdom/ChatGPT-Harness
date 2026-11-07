@@ -1,0 +1,614 @@
+{
+  "sourceCommit": "384905c24ea584782ebdb7c33df72ae2e298cff5",
+  "phase": "before-development",
+  "files": [
+    {
+      "path": "docs-codex/v4/milestones/M09-file-tool-admission-qualified-expansion/PLAN.md",
+      "sha256": "f929666fde588fa4a5a9e89cee5b21c980920b17cc50f2bf7a19b78ab65c939a"
+    },
+    {
+      "path": "docs-codex/v4/milestones/M09-file-tool-admission-qualified-expansion/SPEC.md",
+      "sha256": "024a9f03210ba74d25866670f8128eba76bed5acc264fd7eb00b09ceab69031d"
+    },
+    {
+      "path": "docs-codex/v4/milestones/M09-file-tool-admission-qualified-expansion/TASKS.md",
+      "sha256": "7f418f3810f2162b44236288f0d37f020a7e3af32af51207ceefcf3d83379c85"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c1-01.json",
+      "sha256": "f33bc287b47102277a1ef0006d0bbb475eb1cacfa0564e224932af0e42896a85"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c1-02.json",
+      "sha256": "cd07b9944b716441c2c96906a2adf83941d26f3b0904b9ffebc6f8908e0602dc"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c1-03.json",
+      "sha256": "b8ce7b0f16294a6bcff3ab9b226fb7d582a75479ac3aa559f64a020a45ab1589"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c1-04.json",
+      "sha256": "cd1090cbe6ea5f503a2d461f8765bf833d643d300011615a3b384cfb1e1c33b9"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c2-01.json",
+      "sha256": "5372dfcea67fba07cde17e57db3e2de04ff2e72c0c7f31e9364d5718daa2f3aa"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c2-02.json",
+      "sha256": "7adb7541fa3d0b96cd7148581e2627e0f8e662bc0d887f246336e8176c45b366"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c2-03.json",
+      "sha256": "c3a9dc11d14ca4b8f92be4c9d2d4c834ba58ea6039c25f69e1cc6c8e1662b6a6"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c2-04.json",
+      "sha256": "005797daa913f2c21a5ed1cedc88121b9a02df303aa98719b9fbded802068ae2"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c3-01.json",
+      "sha256": "f616cb53ea705ef48d0e076941df436b77ac6312e7d996fe05f58f2424579366"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c3-02.json",
+      "sha256": "18bb4c1fa7dc3f3cd00bde45737ea77600981de29ed4c1919ac8b843cbfdb50d"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c3-03.json",
+      "sha256": "767dfa023325112a9d4ce76c904e20d88102bf9a90c27fe0121669c738d2e68f"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c3-04.json",
+      "sha256": "d3eecffb595baecc82e2f1fe5615aeb9434e1c3e87e5e3f9f4bf8deaf75ba313"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c4-01.json",
+      "sha256": "64723db86d7934a91b52b65a8f4b7fac746a9d0f41dd734d6cda3001365799ab"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c4-02.json",
+      "sha256": "a9bdfc378647d343f0ab6ccf18b8fba49c22feb1f377cfc9b2effaee7d68845e"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c4-03.json",
+      "sha256": "de2a8447cbe4d2677c56130f53151c58dd1e45e4da4356f6ca187c28063f1d2d"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c4-04.json",
+      "sha256": "02617a3ceb3c51b831d38cc851b027b2c9181e3f95ab317164e8db158ec935ef"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c5-01.json",
+      "sha256": "0adc4b00f640236be3e4f4cb3895148051eeff006b33e3c11736cf192b46aedf"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c5-02.json",
+      "sha256": "a2e44642533f1076c918b871b9135a0b09be3a949eb6e1e5725c9b2e3b7d3612"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c5-03.json",
+      "sha256": "2904390eb1cd3643c1abcf02bf08f339f006941d2839f654211c84d4cd224752"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c5-04.json",
+      "sha256": "968d4ca620236bc8fd7becece69a26c8f6f92b8527bc5622986bc5c92bdc0ba1"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c6-01.json",
+      "sha256": "4b973d5735dec210ac3fe3985400dff23825e5e2f0713c8de97bb159904a4dab"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c6-02.json",
+      "sha256": "efbbdc016f9eb779c7a66360fa95fa77057c3eb00c2bf0d9255fd311adfff395"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c6-03.json",
+      "sha256": "b67be156bb758fff994c7eb67b6c3d047c6b513baca59ffb1ce6d662aed76d7c"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/cases/m04-c6-04.json",
+      "sha256": "823f6243c8decae7f848d083c007316d80d677fd5ccf89bcee1f7b40a76086e1"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/dataset.json",
+      "sha256": "b5df4957390820ae4ad46582579f73fdeb5459f6992099d93c74162e89c0b360"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/system_prompt.txt",
+      "sha256": "2d53e5fbc9267b705f59136df47db4ae610564e949d64f6643447f3512df531c"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c1-01/config/service.txt",
+      "sha256": "cd38b4b28f4fb8bfaba82f084427cc3852ab4324d49c0919743d3eb8434117b4"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c1-01/sentinel.txt",
+      "sha256": "d259c49594e703cebf83baf6ac1d54026672d11e895de9ebb5a23bd4bbda315f"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c1-02/release/version.txt",
+      "sha256": "ce8e93946e548d64199dabd781827e9e4b939e341a7060b2b402a95e304df973"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c1-02/sentinel.txt",
+      "sha256": "0411a1e829a898ee7f1ab978ed2b4f89ff20a3c5c550876bab0011bb42e989d6"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c1-03/meta/owner.txt",
+      "sha256": "18a29b65e9240ec29245bf1914737561d897774d705159bd222e838d7a6e1e9b"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c1-03/sentinel.txt",
+      "sha256": "125e60bc88440ad0210a176d7cecf489f324b242d5df2ee46fe97d9617663842"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c1-04/docs/checksum.txt",
+      "sha256": "b5f69087e9be8843b986aeb303a805e49e37c70af3a5abc8a1a253cfb92bd7d1"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c1-04/sentinel.txt",
+      "sha256": "62105deef8a70c6fa5872d7d2c07079947a3cf640170655e741b9980ff74f8b0"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-01/archive/2024/invoice_q4.txt",
+      "sha256": "d3fffeb3093ad4899512c04e2709ba555d81472f3ec7f18122176b28e559f9cd"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-01/sentinel.txt",
+      "sha256": "20e6c6d97cdaee6e59a25d1e61f9970968e8cf56bef861d387b8ac400655a561"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-01/unrelated/readme.txt",
+      "sha256": "c7ae04ee6b74a9bc338751b34e4fd4a9479f37fe6389427dbf5785db1806dce2"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-02/data/exports/report_final.csv",
+      "sha256": "78c3af2abcc79ee7cd9598d07a75a16126c8ad282d87412e5dfe47786c0cbc0c"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-02/sentinel.txt",
+      "sha256": "1d57a7abdb1364443c7b1cfbb6cc34b6ed58ff2de245e5b9f9435610978c099f"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-02/unrelated/readme.txt",
+      "sha256": "c7ae04ee6b74a9bc338751b34e4fd4a9479f37fe6389427dbf5785db1806dce2"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-03/sentinel.txt",
+      "sha256": "82fe25b2f569797e52490a5038cbd4f69700976714a5146ff1dd057d0d3df2f4"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-03/teams/alpha/notes_alpha.md",
+      "sha256": "527d9809c5e207d46ed0fd342e95460a4bf150db7b06373f517b436307df4695"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-03/unrelated/readme.txt",
+      "sha256": "c7ae04ee6b74a9bc338751b34e4fd4a9479f37fe6389427dbf5785db1806dce2"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-04/legacy/2019/ledger_final.txt",
+      "sha256": "53aedc59b228dff7c2180c9690ce1664e86396c5862ddc51a99bd8156ea15bbd"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-04/sentinel.txt",
+      "sha256": "8c367d65227fedc21941fa44f39052f3a5c7a6796e2f30bf57c2fd893249c361"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c2-04/unrelated/readme.txt",
+      "sha256": "c7ae04ee6b74a9bc338751b34e4fd4a9479f37fe6389427dbf5785db1806dce2"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-01/notes/alpha.txt",
+      "sha256": "9bcc061fc482ecaacf7b6bdcd6e2390b214d46979436ad6b2313ffc76481ac00"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-01/notes/beta.txt",
+      "sha256": "85a08cd51025eec8a9f9945ab32d0a67d46d524b11a20158abc05a463385bc3b"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-01/notes/delta.txt",
+      "sha256": "5c4643f96633939687ecdad18de38293e06f06aec6cb12ef1d982fc17778519f"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-01/notes/epsilon.txt",
+      "sha256": "47c38478c4f7afff6ee80ab9059493b91ef730e446b4a7979a152c8907d5b6ad"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-01/notes/gamma.txt",
+      "sha256": "d2a2e8e90c4c8c1cd0750b5c50c263effa20d83d238cd3eac652651c3753d18b"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-01/sentinel.txt",
+      "sha256": "3351f8b75eea1e45218c4307f091943eae9099a100cde6a5a289c3b4725a264a"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-02/notes/alpha.txt",
+      "sha256": "9bcc061fc482ecaacf7b6bdcd6e2390b214d46979436ad6b2313ffc76481ac00"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-02/notes/beta.txt",
+      "sha256": "85a08cd51025eec8a9f9945ab32d0a67d46d524b11a20158abc05a463385bc3b"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-02/notes/delta.txt",
+      "sha256": "5c4643f96633939687ecdad18de38293e06f06aec6cb12ef1d982fc17778519f"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-02/notes/epsilon.txt",
+      "sha256": "47c38478c4f7afff6ee80ab9059493b91ef730e446b4a7979a152c8907d5b6ad"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-02/notes/gamma.txt",
+      "sha256": "64bc6b58e7197ca8b5562033207bf5c8910e6cbb5420a1431e86519cde251657"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-02/sentinel.txt",
+      "sha256": "c92623c01be7efd97ae86fa540717cdcdda6b18764e3285e723ef5a03f990dc9"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-03/notes/alpha.txt",
+      "sha256": "9bcc061fc482ecaacf7b6bdcd6e2390b214d46979436ad6b2313ffc76481ac00"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-03/notes/beta.txt",
+      "sha256": "85a08cd51025eec8a9f9945ab32d0a67d46d524b11a20158abc05a463385bc3b"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-03/notes/delta.txt",
+      "sha256": "5c4643f96633939687ecdad18de38293e06f06aec6cb12ef1d982fc17778519f"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-03/notes/epsilon.txt",
+      "sha256": "47c38478c4f7afff6ee80ab9059493b91ef730e446b4a7979a152c8907d5b6ad"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-03/notes/gamma.txt",
+      "sha256": "55c7fa9bb1b6601525ff597ac021c361f54c8d9465f4a3b508226a8d4e3fa448"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-03/sentinel.txt",
+      "sha256": "c1cc85f0520445174f44f7a6eb820c17a221f88a3fa39f6019e5f3f85250c846"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-04/notes/alpha.txt",
+      "sha256": "9bcc061fc482ecaacf7b6bdcd6e2390b214d46979436ad6b2313ffc76481ac00"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-04/notes/beta.txt",
+      "sha256": "85a08cd51025eec8a9f9945ab32d0a67d46d524b11a20158abc05a463385bc3b"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-04/notes/delta.txt",
+      "sha256": "5c4643f96633939687ecdad18de38293e06f06aec6cb12ef1d982fc17778519f"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-04/notes/epsilon.txt",
+      "sha256": "47c38478c4f7afff6ee80ab9059493b91ef730e446b4a7979a152c8907d5b6ad"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-04/notes/gamma.txt",
+      "sha256": "0ea4517aadbb012f8f103f34374c61f34edaffa5ed267552427ab455fb72a06b"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c3-04/sentinel.txt",
+      "sha256": "0d65be0517f5cf035d22960b15bd1509f32bd4ad572d205e992c64bdf9fd9159"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c4-01/sentinel.txt",
+      "sha256": "40fadf086a678b46f09779a7fa42d78a3fc71bcf3f8f5f45ef57b6adbf5e0fdb"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c4-02/sentinel.txt",
+      "sha256": "38ab4f703064f4531e95c7d512e11edffa221d0f06103d23c605a364d2ac8a58"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c4-02/state/counter.txt",
+      "sha256": "ae4d2fe108d5470f670c7997dfec3313c6378af85ced1bfa62a1acdf2cad6d9e"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c4-03/sentinel.txt",
+      "sha256": "2666266f44543d6de7710b9d1b490da946c3ed746e884a05d67ddfa3b05238e3"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c4-04/sentinel.txt",
+      "sha256": "041750d51a5826d8ded89176ebe8d35642d9f8555fe2f750540fdc587ea77273"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c5-01/sentinel.txt",
+      "sha256": "9990d8daba0d75e6334f582b7f919df44bdea27af3aa3dc459ec719a00c1c9c9"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c5-01/settings/app.txt",
+      "sha256": "71ff3d8eea404daff5a30750c0e3ee0f94b51baae8fc5d1a2cca1b878ba280ff"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c5-02/docs/readme.txt",
+      "sha256": "9dc92c0ae23331ca699117015ac364d8a7fc6b3f62cc4cddcc7b12f4c195898f"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c5-02/sentinel.txt",
+      "sha256": "9388a003d522c16c4488c08a3197b68e5a28690aaafcbc67cb305bd27e84e4ae"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c5-03/data/flag.txt",
+      "sha256": "a99b2a42761b196858a28a297c9dbcfbf2fabaf1d14f44b5d19b9da3f609f997"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c5-03/sentinel.txt",
+      "sha256": "cdc3662006dffb7c585d44e50e0ecc149fd71689aa35b9f3130e05dcd22b7562"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c5-04/notes/todo.txt",
+      "sha256": "e932f5e24aefbe48741bfb3e8fa472454fad68755ba7a9dc2a7f9ef33dd4c996"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c5-04/sentinel.txt",
+      "sha256": "20d41353f755c6d191a124660200d42debd92de15f3ad356ff66ac6974bbe9c1"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c6-01/sentinel.txt",
+      "sha256": "960f03abcc2ee57f03f6a04d3bb9e78926a02f762e6803bc9add3e69c6905ec0"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c6-02/protected.txt",
+      "sha256": "91750dab0bb33d7bd308546594606dc61714965dd696b034fad4576ae938ff67"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c6-02/sentinel.txt",
+      "sha256": "893f8ddd03714f482924b6677678fa983bc08f9e1ac8354abe930f0850dd87da"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c6-03/inside.txt",
+      "sha256": "6a567f3364fef27a3101f0da372424d736ef53ced018e342c51ea4b088a5ecbc"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c6-03/sentinel.txt",
+      "sha256": "91db3364232c32936170a1985ee1945737dc7d898a8e2b24ea0a685571e33e6a"
+    },
+    {
+      "path": "fixtures/v4/m04-eval/workspaces/m04-c6-04/sentinel.txt",
+      "sha256": "29415af71d959dfc96014ff6160d2e01343d42205cbe29c02d4931fa70a2a3cc"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/cases/m05-a1-literal.json",
+      "sha256": "2b191fc0360cca08077eafe0b0cd1b23b5e34aa8edaac541c43b7dee54547290"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/cases/m05-a2-regex.json",
+      "sha256": "e0f04119854d4e38c15e0284832a982c12313a78724cbc2faad242cc4a4afa87"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/cases/m05-a3-filter.json",
+      "sha256": "fb5833c487a1fdf9692a297b5cab70c82c4cdd6a70dcca79a0720f499be73744"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/cases/m05-a4-truncation.json",
+      "sha256": "32365f4a3a44d2fea91403d2a2f8b805a5bcefd5ec33380b381c646e23efd224"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/dataset.json",
+      "sha256": "2635ff5fd989ce8dfdb734faa69504dc0244bef04d7d868687181fb1fd63abcf"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/system_prompt.txt",
+      "sha256": "dcc7cfbd6c5033a33559f76f9b29e4b197039e6333a05c68e06302b433b3d8fa"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/filter/docs/b.rs",
+      "sha256": "13c94db783c5861911c2c3c3406e79439ecf15bb467539ddf42956de52cf7dab"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/filter/src/a.rs",
+      "sha256": "13c94db783c5861911c2c3c3406e79439ecf15bb467539ddf42956de52cf7dab"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/filter/src/nested/c.rs",
+      "sha256": "13c94db783c5861911c2c3c3406e79439ecf15bb467539ddf42956de52cf7dab"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/filter/src/skip.tmp",
+      "sha256": "13c94db783c5861911c2c3c3406e79439ecf15bb467539ddf42956de52cf7dab"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/literal/logs/app.log",
+      "sha256": "a07b50f557baaf4cc643d61d8eef6eb064492054151ca348627952999b3aec0a"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/literal/notes/readme.md",
+      "sha256": "e2b96adba3e65bbcb6e631d9ab5c96cffd697a0ab3e5d88f919ab61cafd948e6"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/literal/unrelated.txt",
+      "sha256": "05a4c0b35ccd03489a4e1fa2a3f0e81891e521f7b25a31ae77f6d79336aa82fb"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/regex/data/metrics.csv",
+      "sha256": "fbe98698e32507014c708ae62ad26ab4c02859e9597a750528066d830d8d56f4"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/regex/data/notes.txt",
+      "sha256": "a8e9473584e4c2d7906f25b457e86e99a45f140ad9a7da94385d7838a6cdd1d1"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/truncation/many/extra.txt",
+      "sha256": "45375bc60cf52a9786d5ccc6d01c163057acd2a080ba3b9c2a2ed3af04292741"
+    },
+    {
+      "path": "fixtures/v4/m05-eval/workspaces/truncation/many/lines.txt",
+      "sha256": "75a156d7f2d0e81ce1a803114ad3a60928c48a5f5782e2a06c65391af2144a05"
+    },
+    {
+      "path": "protocol/generated/json-schema/activity-entry.schema.json",
+      "sha256": "f541d490522d616114f4de6cd96b3a8098eb25c903b4be329379ece52aca422f"
+    },
+    {
+      "path": "protocol/generated/json-schema/activity-event.schema.json",
+      "sha256": "2dc49433f94f288037162c76880b435d44156a448dd5016d6c13ff4c8a61666f"
+    },
+    {
+      "path": "protocol/generated/json-schema/activity-list-result.schema.json",
+      "sha256": "1831aac1f19281ada1929dd314cbd34eb961b8ce4789a1c6a587d0e4dea218a6"
+    },
+    {
+      "path": "protocol/generated/json-schema/app-config.schema.json",
+      "sha256": "5bc6344e6eb517a4ff41b4ae34354805e6ef2efb3a30c883704645d85679d4f5"
+    },
+    {
+      "path": "protocol/generated/json-schema/approvals-list-result.schema.json",
+      "sha256": "fe6d02769c2bce8f07f9d4c4806767bd776ebb10c15b517e66e0ff52e78772c2"
+    },
+    {
+      "path": "protocol/generated/json-schema/approvals-resolve-params.schema.json",
+      "sha256": "a246c68f2bd1ed198be2298ef48edab55abb7f929405ef82530351ff1050eab7"
+    },
+    {
+      "path": "protocol/generated/json-schema/diagnostic-run.schema.json",
+      "sha256": "102a25b50a95e2b31acbeaa94430d5d1f2456e31fd53b34fe458029d9972ef97"
+    },
+    {
+      "path": "protocol/generated/json-schema/evidence-event-v1.schema.json",
+      "sha256": "e6c9225200619cc8b37e0520d005b4a316dbca78576d7f839548d841a954ae64"
+    },
+    {
+      "path": "protocol/generated/json-schema/evidence-store-status.schema.json",
+      "sha256": "a48ddc365b0a40fd244cb5cae5fbc99379b45a7b64849d98d88cf2922c709633"
+    },
+    {
+      "path": "protocol/generated/json-schema/history-clear-result.schema.json",
+      "sha256": "3097f89031b250996de8d89102059b30e127131125ab2a5395c42638d9256ff8"
+    },
+    {
+      "path": "protocol/generated/json-schema/history-get-result.schema.json",
+      "sha256": "8cac335b71df82d27be9618bd339a7205d27425cb640f02989cbdadb89d2cbc3"
+    },
+    {
+      "path": "protocol/generated/json-schema/history-query-params.schema.json",
+      "sha256": "3b1a1c935fa062d42f733bcda546e00013b9f2a65073d55d0650127e912548bc"
+    },
+    {
+      "path": "protocol/generated/json-schema/history-query-result.schema.json",
+      "sha256": "4f0fe860fab36a4151bcd1ec58818113fab66d3ade4d963ae11de0b35d96c94b"
+    },
+    {
+      "path": "protocol/generated/json-schema/initialize-params.schema.json",
+      "sha256": "48a7f2ad153b9e3a364604c0d640b209583af8a3c9f68f833837775e1342107d"
+    },
+    {
+      "path": "protocol/generated/json-schema/initialize-result.schema.json",
+      "sha256": "e05e8a0caf9a3c2a85acdc0f8250c9dcb8f2ecf74400021eca40315de9d3a81c"
+    },
+    {
+      "path": "protocol/generated/json-schema/initialized-params.schema.json",
+      "sha256": "1500ab763278f9a6c519cec08a870cf39a619039720eed07d0d6fdf7c9a4c889"
+    },
+    {
+      "path": "protocol/generated/json-schema/mcp-endpoint-result.schema.json",
+      "sha256": "a36cc041ccad066569652fd92fb6888b86814395e92db652894c498b84216748"
+    },
+    {
+      "path": "protocol/generated/json-schema/metrics-query-params.schema.json",
+      "sha256": "4629e2b10654d7fcb8ad61329b3f17f1a8a799e2f9899fd6ed4d7ad85e39b35c"
+    },
+    {
+      "path": "protocol/generated/json-schema/metrics-query-result.schema.json",
+      "sha256": "837d6cd350f0230e9b302a164eaf9b77971882c7b115ec4a46aae970484d25b5"
+    },
+    {
+      "path": "protocol/generated/json-schema/policies-list-result.schema.json",
+      "sha256": "74ebc545dc9e04b1a637a87e768262c485798e1259ec7494d7c423a698dea56c"
+    },
+    {
+      "path": "protocol/generated/json-schema/rpc-error-response.schema.json",
+      "sha256": "19634ce7e0a9bc159b1fc644a76ae68cee4e8f981d9518417cb252bd422ed411"
+    },
+    {
+      "path": "protocol/generated/json-schema/rpc-message.schema.json",
+      "sha256": "d9faa64e7543a390d687931ad6be94c4b2b31ab6a6176cbcfffcaa376509ee5f"
+    },
+    {
+      "path": "protocol/generated/json-schema/rpc-notification.schema.json",
+      "sha256": "e35fea3cab3cbd84e15013e5e83e9d896cf9f784364e681103c02f507792b510"
+    },
+    {
+      "path": "protocol/generated/json-schema/rpc-request.schema.json",
+      "sha256": "91e9ea44db39634958148e015176cb16b07126b81705bfa2c94e97c191bd69e7"
+    },
+    {
+      "path": "protocol/generated/json-schema/rpc-response.schema.json",
+      "sha256": "0bfc2a38454521f0176266f77ee8d82e15e77e3012ca9981ae24acc3199a6eaa"
+    },
+    {
+      "path": "protocol/generated/json-schema/runtime-config-snapshot.schema.json",
+      "sha256": "bdd630172999c884e93c037f49ee1fa0f708bf59b8cf59d2c457889a89282672"
+    },
+    {
+      "path": "protocol/generated/json-schema/runtime-state.schema.json",
+      "sha256": "82b57c8cfc47baa46c5f236952e4668ef51c998fa75972f48b57fd9a1491abca"
+    },
+    {
+      "path": "protocol/generated/json-schema/startup-attempt.schema.json",
+      "sha256": "28812f781cf7ac28d9926e978e8da89c32cad43b540019e15354d982b99b0e6c"
+    },
+    {
+      "path": "protocol/generated/json-schema/tools-list-result.schema.json",
+      "sha256": "8f61f7b823ff511c9e43f80895a7911217e4f3b9b61443ddb0e63338a02e64c4"
+    },
+    {
+      "path": "protocol/generated/json-schema/trace-get-params.schema.json",
+      "sha256": "b7f7a5a05135d7d12c81968d8530e940c9c1cd8cda60eb0652dbabdafbd54b28"
+    },
+    {
+      "path": "protocol/generated/json-schema/trace-get-result.schema.json",
+      "sha256": "ebcbfd64a856ef00f5efdd6843a73365a5436973c60527ffeca5e8352cab7373"
+    },
+    {
+      "path": "protocol/generated/typescript/v1.ts",
+      "sha256": "26fed40e8cfbd02c3b3cc07a05da64bc15da1923188b05f2ed58e7bf99d2330c"
+    },
+    {
+      "path": "runtime/src/evaluation/m05.rs",
+      "sha256": "74870ebef9a87310f881fd5ca198059ad8ac94162a65df6b1bfbbf21e0a08aa7"
+    },
+    {
+      "path": "runtime/src/evaluation/scoring.rs",
+      "sha256": "1df5f22c37f54cdebc65b388ea68bc7c0b1db733f724aca31d4ef2130a16dd7b"
+    },
+    {
+      "path": "runtime/src/tools/atomic_file.rs",
+      "sha256": "dffa84c82dc8732334a0fa52645d617a0f4a8a06e6b0edad06fd979d69a65a4b"
+    },
+    {
+      "path": "runtime/src/tools/edit.rs",
+      "sha256": "0a275ca0cefc0287788cbd423a312d92b496dbe88108f1cebfa23034b55dd67d"
+    },
+    {
+      "path": "runtime/src/tools/effective.rs",
+      "sha256": "76dc55396458bb793db501835dfc2d577b34c13b1d5eda9531cf5a21e33a22e9"
+    },
+    {
+      "path": "runtime/src/tools/glob.rs",
+      "sha256": "3bb668a5ebcc9bdc839d2beaff603ef0484a0e3d18759cdbd9637dacd7a6c203"
+    },
+    {
+      "path": "runtime/src/tools/grep.rs",
+      "sha256": "ab82757dbe431f0ac1f2a0ba8a66e130af1d4e21de4931fca1d8a36aa20303b8"
+    },
+    {
+      "path": "runtime/src/tools/mod.rs",
+      "sha256": "cddec788b6d2f86cb06a053f8501f8cacb48db4adff403e13816ddc782961874"
+    },
+    {
+      "path": "runtime/src/tools/read_file.rs",
+      "sha256": "36f0e0b505d411638d8ecff315627433c2ca18c01db793617be5696a6110857e"
+    },
+    {
+      "path": "runtime/src/tools/registry.rs",
+      "sha256": "5fa9e56318bcfc7e19c8abfcbad72770bffa01a2f023de16ee213b624e287cf0"
+    },
+    {
+      "path": "runtime/src/tools/write.rs",
+      "sha256": "79a47ce3b0384dd9f0de110ace0a1195f4fa9389dc94b792c931513ae193371b"
+    }
+  ]
+}

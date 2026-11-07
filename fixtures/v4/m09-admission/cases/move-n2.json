@@ -1,0 +1,52 @@
+{
+  "caseId": "move-n2",
+  "caseVersion": 1,
+  "candidate": "move",
+  "kind": "negative_sentinel",
+  "prompt": "Find the file named seed.txt.",
+  "fixtureRef": "move/move-n2",
+  "fixtureHash": "9ec3ab93b4bb57e589965d7b8ea3e5b7508cb11fa08628c96bfcbbf189fbc4c0",
+  "expectedAllowedTools": [
+    "glob"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "pattern",
+      "allowedValues": [
+        "seed.txt"
+      ],
+      "pathMustBeWorkspaceRelative": false
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "76aa8d6943ff7aa1b724ef07ebbc1c54f19936a3fef0f01d63e131d17868f372"
+    }
+  ],
+  "policyApproval": {
+    "tool": "glob",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": null,
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "negative_sentinel",
+    "move",
+    "glob"
+  ]
+}

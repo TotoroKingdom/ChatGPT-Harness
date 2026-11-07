@@ -1,0 +1,52 @@
+{
+  "caseId": "mkdir-n2",
+  "caseVersion": 1,
+  "candidate": "mkdir",
+  "kind": "negative_sentinel",
+  "prompt": "Find the file named seed.txt.",
+  "fixtureRef": "mkdir/mkdir-n2",
+  "fixtureHash": "c7b118d2fd3cd16ef59b65aeb054a9889b5826d56132149daae05e9c88993678",
+  "expectedAllowedTools": [
+    "glob"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "pattern",
+      "allowedValues": [
+        "seed.txt"
+      ],
+      "pathMustBeWorkspaceRelative": false
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "seed.txt",
+      "state": "file",
+      "sha256": "f50676681955cfd6510b08b2c2532acef21f949fed595f70affb72afa8a3dc97"
+    }
+  ],
+  "policyApproval": {
+    "tool": "glob",
+    "default": "allow",
+    "approval": "none"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "glob",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": null,
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "negative_sentinel",
+    "mkdir",
+    "glob"
+  ]
+}

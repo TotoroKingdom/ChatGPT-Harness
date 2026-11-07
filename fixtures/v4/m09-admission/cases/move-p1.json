@@ -1,0 +1,72 @@
+{
+  "caseId": "move-p1",
+  "caseVersion": 1,
+  "candidate": "move",
+  "kind": "positive",
+  "prompt": "Relocate incoming.txt to archive/incoming.txt.",
+  "fixtureRef": "move/move-p1",
+  "fixtureSetup": {
+    "directories": [
+      "archive"
+    ],
+    "reparseEntries": []
+  },
+  "fixtureHash": "0339cf7819e8c987111a0ec693c57646810b82a7d88ac5f61a71dcd7e3a79ee3",
+  "expectedAllowedTools": [
+    "move"
+  ],
+  "argumentConstraints": [
+    {
+      "field": "sourcePath",
+      "allowedValues": [
+        "incoming.txt"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    },
+    {
+      "field": "destinationPath",
+      "allowedValues": [
+        "archive/incoming.txt"
+      ],
+      "pathMustBeWorkspaceRelative": true
+    }
+  ],
+  "finalStateGroundTruth": [
+    {
+      "path": "incoming.txt",
+      "state": "absent"
+    },
+    {
+      "path": "archive/incoming.txt",
+      "state": "file",
+      "sha256": "fd4fd7bfeb1d39fd68670c5dfa31ae6b7938d3e26e2ef1f00ed15252ee19e9ea"
+    }
+  ],
+  "policyApproval": {
+    "tool": "move",
+    "default": "ask",
+    "approval": "allow_once"
+  },
+  "expectedRuntimeOutcomes": [
+    {
+      "tool": "move",
+      "outcome": "success"
+    }
+  ],
+  "resultGroundTruth": {
+    "atomic": true,
+    "entryKind": "file"
+  },
+  "security": {
+    "outsideWorkspaceMutations": 0,
+    "rawPhysicalPathsInEvidence": false,
+    "reparseTraversal": false,
+    "overwrite": false
+  },
+  "tags": [
+    "m09",
+    "positive",
+    "move",
+    "file"
+  ]
+}
