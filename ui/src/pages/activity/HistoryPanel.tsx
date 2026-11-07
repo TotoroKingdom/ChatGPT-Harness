@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   EvidenceCoverage,
@@ -18,6 +18,7 @@ import {
   Disclosure,
   InlineFeedback,
   Inspector,
+  ObservedTime,
   Row,
   SectionHeading,
   Select,
@@ -101,10 +102,12 @@ export function HistoryPanel() {
   const [selected, setSelected] = useState<HistoryGetResult | null>(null);
   const [trace, setTrace] = useState<TraceGetResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const requestGeneration = useRef(0);
 
   const query = useMemo(() => queryFor(filters), [filters]);
 
   const load = useCallback(async (append: boolean) => {
+    const generation = ++requestGeneration.current;
     setLoading(true);
     setError(null);
     try {
@@ -112,15 +115,16 @@ export function HistoryPanel() {
         ...query,
         ...(append && nextCursor ? { cursor: nextCursor } : {}),
       });
+      if (generation !== requestGeneration.current) return;
       setStatus(result.storeStatus);
       setItems((current) => append ? [...current, ...result.items] : result.items);
       setNextCursor(result.nextCursor);
     } catch (failure) {
-      setError(typeof failure === "object" && failure !== null && "code" in failure
+      if (generation === requestGeneration.current) setError(typeof failure === "object" && failure !== null && "code" in failure
         ? String(failure.code)
         : "EVIDENCE_IO");
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) setLoading(false);
     }
   }, [client, nextCursor, query]);
 
@@ -154,7 +158,7 @@ export function HistoryPanel() {
 
   return <>
     <Card className="activity-card">
-      <div className="activity-filter">
+      <div className="filter-toolbar" role="toolbar" aria-label={t("m03History.list")}>
         <Select label={t("m03History.timeRange")} value={filters.range} onChange={(event) => setFilters({ ...filters, range: event.target.value as TimeRange })}>
           <option value="24h">{t("m03History.range.24h")}</option>
           <option value="7d">{t("m03History.range.7d")}</option>
@@ -165,7 +169,7 @@ export function HistoryPanel() {
           <option value="">{t("m03History.all")}</option>
           {tools.map((tool) => <option key={tool} value={tool}>{tool}</option>)}
         </Select>
-        <Select label={t("m03History.outcome")} value={filters.outcome} onChange={(event) => setFilters({ ...filters, outcome: event.target.value as Filters["outcome"] })}>
+        <Select label={t("m03History.outcomeLabel")} value={filters.outcome} onChange={(event) => setFilters({ ...filters, outcome: event.target.value as Filters["outcome"] })}>
           <option value="">{t("m03History.all")}</option>
           {outcomes.map((outcome) => <option key={outcome} value={outcome}>{t(`m03History.outcome.${outcome}`)}</option>)}
         </Select>
@@ -190,18 +194,16 @@ export function HistoryPanel() {
       {error && <div className="notice notice-warning" role="alert"><strong>{t("m03History.error")}</strong><code>{error}</code></div>}
       {loading && items.length === 0 && <InlineFeedback>{t("m03History.loading")}</InlineFeedback>}
       {!loading && !error && items.length === 0 && <div className="empty-inline"><strong>{t("m03History.empty")}</strong><p>{t("m03History.emptyHelp")}</p></div>}
-      {items.length > 0 && <div aria-label={t("m03History.list")}>
+      {items.length > 0 && <div className="activity-grid" aria-label={t("m03History.list")}>
+        <div className="activity-grid-head history-grid" aria-hidden="true"><span>{t("m03History.firstSeen")}</span><span>{t("m03History.tool")}</span><span>{t("m03History.outcomeLabel")}</span><span>{t("m03History.policy")} / {t("m03History.approval")}</span><span>{t("m03History.coverage")}</span></div>
         {items.map((item) => <article className="activity-row" data-testid={`history-row-${item.runtimeId}-${item.requestId}`} key={`${item.runtimeId}:${item.requestId}`}>
-          <Row
-            onInspect={() => void inspect(item)}
-            title={<><time dateTime={item.firstSeenAtUtc}>{item.firstSeenAtUtc}</time> <strong>{item.toolName}</strong></>}
-            summary={t("m03History.summary", {
-              outcome: item.outcome ? t(`m03History.outcome.${item.outcome}`) : t(`m03History.terminal.${item.terminalState}`),
-              policy: item.policyDecision?.toUpperCase() ?? t("m03History.notRecorded"),
-              approval: t(`m03History.approvalState.${item.approvalState}`),
-            })}
-            controls={<StatusBadge tone={coverageTone(item.evidenceCoverage)}>{item.evidenceCoverage}</StatusBadge>}
-          />
+          <button type="button" className="activity-row-button history-grid" onClick={() => void inspect(item)}>
+            <ObservedTime className="cell-time" value={item.firstSeenAtUtc} fallback={item.firstSeenAtUtc} />
+            <strong className="cell-tool">{item.toolName}</strong>
+            <span className="cell-outcome">{item.outcome ? t(`m03History.outcome.${item.outcome}`) : t(`m03History.terminal.${item.terminalState}`)}</span>
+            <span className="cell-target">{item.policyDecision?.toUpperCase() ?? t("m03History.notRecorded")} · {t(`m03History.approvalState.${item.approvalState}`)}</span>
+            <span className="cell-coverage"><StatusBadge tone={coverageTone(item.evidenceCoverage)} visual={item.evidenceCoverage === "COMPLETE" ? "success" : item.evidenceCoverage === "INCOMPLETE" ? "warning" : "danger"}>{item.evidenceCoverage}</StatusBadge></span>
+          </button>
         </article>)}
       </div>}
       {nextCursor && <div className="settings-actions"><Button variant="secondary" onClick={() => void load(true)} disabled={loading}>{loading ? t("m03History.loading") : t("m03History.loadMore")}</Button></div>}
@@ -229,9 +231,9 @@ function HistoryInspector({ result, onClose, onTrace }: { result: HistoryGetResu
         <Fact label={t("m03History.tool")}>{item.toolName}</Fact>
         <Fact label={t("m03History.requestId")}><code>{item.requestId}</code></Fact>
         <Fact label={t("m03History.runtimeId")}><code>{item.runtimeId}</code></Fact>
-        <Fact label={t("m03History.firstSeen")}>{item.firstSeenAtUtc}</Fact>
-        <Fact label={t("m03History.lastSeen")}>{item.lastSeenAtUtc}</Fact>
-        <Fact label={t("m03History.outcome")}>{item.outcome ? t(`m03History.outcome.${item.outcome}`) : t(`m03History.terminal.${item.terminalState}`)}</Fact>
+        <Fact label={t("m03History.firstSeen")}><ObservedTime value={item.firstSeenAtUtc} fallback={item.firstSeenAtUtc} /></Fact>
+        <Fact label={t("m03History.lastSeen")}><ObservedTime value={item.lastSeenAtUtc} fallback={item.lastSeenAtUtc} /></Fact>
+        <Fact label={t("m03History.outcomeLabel")}>{item.outcome ? t(`m03History.outcome.${item.outcome}`) : t(`m03History.terminal.${item.terminalState}`)}</Fact>
         <Fact label={t("m03History.policy")}>{item.policyDecision?.toUpperCase() ?? t("m03History.notRecorded")}</Fact>
         <Fact label={t("m03History.duration")}>{item.durationMs === undefined ? t("m03History.notRecorded") : `${item.durationMs} ms`}</Fact>
         <Fact label={t("m03History.coverage")}><StatusBadge tone={coverageTone(item.evidenceCoverage)}>{item.evidenceCoverage}</StatusBadge></Fact>
@@ -247,7 +249,7 @@ function HistoryInspector({ result, onClose, onTrace }: { result: HistoryGetResu
       <ol className="history-timeline">
         {result.events.map((event) => <li key={event.eventId}>
           <strong>{t(`m03History.stage.${event.stage}`)}</strong>
-          <span>{event.occurredAtUtc}</span>
+          <ObservedTime value={event.occurredAtUtc} fallback={event.occurredAtUtc} />
           <span>{t(`m03History.outcome.${event.outcome}`)}</span>
         </li>)}
       </ol>

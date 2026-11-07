@@ -14,6 +14,7 @@ import { ActivityPage } from "./pages/activity/ActivityPage";
 import { ApprovalsPage } from "./pages/approvals/ApprovalsPage";
 import { SettingsPage, FirstRunWizard } from "./pages/settings/SettingsPage";
 import type { DesktopNavigationIntent } from "./services/harness/client";
+import { DiagnosticsHost } from "./components/status/DiagnosticsHost";
 import "./styles/global.css";
 
 function RoutedContent() {
@@ -64,7 +65,7 @@ function RoutedContent() {
   }
   const content = page === "overview" ? <OverviewPage onNavigate={navigate} /> : page === "tools" ? <ToolsPage /> : page === "policies" ? <PoliciesPage initialDraft={policyDraft} initialRuleId={context.objectId} onNavigate={navigate} /> : page === "activity" ? <ActivityPage onNavigate={navigate} /> : page === "approvals" ? <ApprovalsPage onNavigate={navigate} initialRequestId={context.objectId} /> : <SettingsPage initialSection={context.settingsSection} onNavigate={navigate} />;
   return <>
-    <AppShell page={page} onNavigate={navigate}>{configBlocked && page !== "settings" && <RecoveryInWorkspace />}{content}</AppShell>
+    <AppShell page={page} onNavigate={navigate}>{configBlocked && page !== "settings" && <RecoveryInWorkspace />}{content}<DiagnosticsHost onNavigate={navigate} /></AppShell>
     <BackgroundContinuityDialog open={backgroundNoticeOpen} onClose={() => setBackgroundNoticeOpen(false)} />
   </>;
 }

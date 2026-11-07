@@ -241,56 +241,75 @@ export function ToolsPage() {
   };
 
   return <div className="page-stack">
-    <SectionHeading title={t("tools.title")} description={t("m8Tools.description")} action={<Button variant="secondary" onClick={refresh} disabled={state.status === "loading"}>{t("tools.refresh")}</Button>} />
+    <h2 className="sr-only">{t("tools.title")}</h2>
+    <div className="page-summary-strip">
+      <div className="page-summary-main">
+        <div><strong>{t("tools.summaryTitle")}</strong><p>{t("m8Tools.description")}</p></div>
+        <span className="summary-fact"><b>{metadata.filter((tool) => enabledFor(tool)).length}</b>{t("tools.summaryEnabled")}</span>
+        <span className="summary-fact"><b>{metadata.length}</b>{t("tools.summaryTotal")}</span>
+      </div>
+      <Button variant="secondary" onClick={refresh} disabled={state.status === "loading"}>{t("tools.refresh")}</Button>
+    </div>
 
     {data.restartRequired && <InlineFeedback>{t("tools.restartRequired")}: {t("tools.restartDescription")}</InlineFeedback>}
-    <Disclosure title={t("m8.advanced")}><ConfigRevisionStatus descriptionKey="tools.restartDescription" /></Disclosure>
 
     {(state.status === "error" || components.runtime === "error" || data.runtime.status === "error") && <InlineFeedback error>{t("m8Tools.runtimeReadError")} {state.status === "error" && <>{t(errorCodeKey(state.error.code))}</>}</InlineFeedback>}
     {!config && <InlineFeedback error>{t("m8Tools.configUnavailable")}</InlineFeedback>}
 
     <Section title={t("m8Tools.savedConfiguration")} action={<span className="muted">{t("m8Tools.savedConfigurationHint")}</span>}>
-      {metadata.length === 0 ? <InlineFeedback>{t("tools.empty.description")}</InlineFeedback> : metadata.map((tool) => {
-        const effective = effectiveByName.get(tool.name);
-        const enabledFeedback = feedback[`tool:${tool.key}:enabled`];
-        const defaultFeedback = feedback[`tool:${tool.key}:default`];
-        return <div key={tool.key}>
-          <Row
-            title={<><span className="mono">{tool.name}</span><span className="row-summary">{description(tool)}</span></>}
-            summary={<><span>{t("m8.configured")}: {enabledFor(tool) ? t("tools.on") : t("tools.off")}</span><span>{t("m8.running")}: <RuntimeEvidence state={state} component={components.runtime} tool={effective} t={t} /></span></>}
-            controls={<>
-              <span className="muted">{t("m8Tools.enabled")}</span>
+      {metadata.length === 0 ? <InlineFeedback>{t("tools.empty.description")}</InlineFeedback> : <div className="data-table">
+        <div className="data-table-head tool-table-head" aria-hidden="true">
+          <span>{t("tools.table.toolName")} / {t("tools.table.purpose")}</span>
+          <span>{t("m8Tools.enabled")}</span>
+          <span>{t("m8Tools.currentRuntime")}</span>
+          <span>{t("m8Tools.defaultPolicy")}</span>
+        </div>
+        {metadata.map((tool) => {
+          const effective = effectiveByName.get(tool.name);
+          const enabledFeedback = feedback[`tool:${tool.key}:enabled`];
+          const defaultFeedback = feedback[`tool:${tool.key}:default`];
+          return <div className="data-row tool-table-row" key={tool.key}>
+            <button type="button" className="tool-identity data-cell" onClick={() => setSelectedKey(tool.key)}>
+              <strong>{tool.name}</strong>
+              <span className="tool-purpose">{description(tool)}</span>
+              {detailFor(tool, effective) && <span className="tool-detail-note">{detailFor(tool, effective)}</span>}
+            </button>
+            <div className="data-cell">
+              <span className="tool-column-label">{t("m8Tools.enabled")}</span>
               <Switch checked={enabledFor(tool)} onChange={() => void saveToolEnabled(tool)} disabled={!config || enabledFeedback?.status === "saving"} label={t("m8Tools.enabledFor", { tool: tool.name })} />
+            </div>
+            <div className="data-cell">
+              <span className="tool-column-label">{t("m8Tools.currentRuntime")}</span>
+              <RuntimeEvidence state={state} component={components.runtime} tool={effective} t={t} />
+            </div>
+            <div className="data-cell data-cell-actions">
+              <span className="tool-column-label">{t("m8Tools.defaultPolicy")}</span>
               <Segmented
                 value={policyFor(tool) ?? "ask"}
                 options={policyChoices.map((choice) => ({ value: choice.value, label: t(choice.labelKey) }))}
                 onChange={(value) => void saveToolDefault(tool, value)}
-                disabled={!config || feedback[`tool:${tool.key}:default`]?.status === "saving"}
+                disabled={!config || defaultFeedback?.status === "saving"}
                 label={t("m8Tools.defaultFor", { tool: tool.name })}
               />
-            </>}
-            selected={selectedKey === tool.key}
-            onInspect={() => setSelectedKey(tool.key)}
-          />
-          {detailFor(tool, effective)}
-          <FeedbackView feedback={enabledFeedback} t={t} />
-          <FeedbackView feedback={defaultFeedback} t={t} />
-        </div>;
-      })}
+            </div>
+            {(enabledFeedback || defaultFeedback) && <div className="tool-feedback">{enabledFeedback && <FeedbackView feedback={enabledFeedback} t={t} />}{defaultFeedback && <FeedbackView feedback={defaultFeedback} t={t} />}</div>}
+          </div>;
+        })}
+      </div>}
     </Section>
+
+    <Disclosure title={t("m8.advanced")}><ConfigRevisionStatus descriptionKey="tools.restartDescription" /></Disclosure>
 
     {selectedTool && config && <Inspector title={`${selectedTool.name} · ${t("m8Tools.inspector")}`} onClose={() => setSelectedKey(null)}>
       {(() => {
         const effective = effectiveByName.get(selectedTool.name);
-        const enabledFeedback = feedback[`tool:${selectedTool.key}:enabled`];
-        const defaultFeedback = feedback[`tool:${selectedTool.key}:default`];
         return <>
           <p className="muted">{description(selectedTool)}</p>
           <Section title={t("m8Tools.savedConfiguration")}>
-            <div className="workspace-row"><span className="row-identity">{t("m8Tools.enabled")}</span><div className="row-controls"><Switch checked={enabledFor(selectedTool)} onChange={() => void saveToolEnabled(selectedTool)} disabled={enabledFeedback?.status === "saving"} label={t("m8Tools.enabledFor", { tool: selectedTool.name })} /></div></div>
-            <div className="workspace-row"><span className="row-identity">{t("m8Tools.defaultPolicy")}</span><div className="row-controls"><Segmented value={policyFor(selectedTool) ?? "ask"} options={policyChoices.map((choice) => ({ value: choice.value, label: t(choice.labelKey) }))} onChange={(value) => void saveToolDefault(selectedTool, value)} disabled={defaultFeedback?.status === "saving"} label={t("m8Tools.defaultFor", { tool: selectedTool.name })} /></div></div>
-            <FeedbackView feedback={enabledFeedback} t={t} />
-            <FeedbackView feedback={defaultFeedback} t={t} />
+            <dl className="detail-list">
+              <div><dt>{t("m8Tools.enabled")}</dt><dd>{enabledFor(selectedTool) ? t("tools.on") : t("tools.off")}</dd></div>
+              <div><dt>{t("m8Tools.defaultPolicy")}</dt><dd>{t(`enum.policyDecision.${policyFor(selectedTool) ?? "ask"}`)}</dd></div>
+            </dl>
           </Section>
 
           <Section title={t("m8Tools.runtimeObservation")}>

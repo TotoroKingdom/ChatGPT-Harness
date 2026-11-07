@@ -293,6 +293,7 @@ export function RuleEditor({
       <span className="mono">{parsedPreview}</span>
       <span>{tx(t, "m8Policies.guardrailReminder", "This explains matcher scope only; Allow does not override system guardrails, approval, or risk constraints.")}</span>
     </div>}
+    {preview.error && !naturalUnsupported && <InlineFeedback error>{editorError(t, preview.error)}</InlineFeedback>}
     {error && <InlineFeedback error>{editorError(t, error)}</InlineFeedback>}
 
     <Disclosure title={tx(t, "m8Policies.advanced", "Advanced")}>
@@ -324,7 +325,7 @@ function LiteralMatcherEditor({ value, onChange }: { value: RuleEditorValue; onC
         <TextField label={t("m8Policies.argvToken", { defaultValue: "Argument token {{index}}", index: index + 1 })} value={token} onChange={(event) => updateToken(index, event.target.value)} />
         <Button variant="quiet" className="danger-text" onClick={() => removeToken(index)}>{t("m8Policies.removeToken", { defaultValue: "Remove" })}</Button>
       </div>)}
-      <Button variant="quiet" onClick={addToken}>{t("m8Policies.addToken", { defaultValue: "Add token" })}</Button>
+      <Button variant="quiet" onClick={addToken} disabled={value.argvPrefix.length >= 64}>{t("m8Policies.addToken", { defaultValue: "Add token" })}</Button>
       <small className="muted">{t("m8Policies.argvHelp", { defaultValue: "Empty and whitespace tokens are preserved exactly. Up to 64 tokens, 1024 UTF-8 bytes each." })}</small>
     </div>
   </div>;

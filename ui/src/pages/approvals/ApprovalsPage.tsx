@@ -15,6 +15,7 @@ import {
   Disclosure,
   InlineFeedback,
   Inspector,
+  ObservedTime,
   Row,
   Section,
   SectionHeading,
@@ -201,17 +202,17 @@ function ApprovalActions({
   </div>;
 }
 
-function FrontEvidence({ request, expired, soon, runtimeIdentityKnown = true, evidenceId, expiryValid = true }: { request: ApprovalRequest; expired: boolean; soon: boolean; runtimeIdentityKnown?: boolean; evidenceId?: string; expiryValid?: boolean }) {
+function FrontEvidence({ request, expired, soon, runtimeIdentityKnown = true, evidenceId, expiryValid = true, compact = false }: { request: ApprovalRequest; expired: boolean; soon: boolean; runtimeIdentityKnown?: boolean; evidenceId?: string; expiryValid?: boolean; compact?: boolean }) {
   const { t } = useTranslation();
   const details = request.bashDetails;
   const preview = scopeLabel(request);
   const sessionEligible = request.tool !== "bash" || request.allowForSessionEligible === true;
-  return <div id={evidenceId} className="approval-front-evidence">
+  return <div id={evidenceId} className={`approval-front-evidence ${compact ? "compact" : ""}`}>
     <div className="approval-facts">
-      <span><small>{tx(t, "target")}</small><b className="mono">{preview}</b></span>
+      {!compact && <span><small>{tx(t, "target")}</small><b className="mono">{preview}</b></span>}
       <span><small>{tx(t, "why")}</small><b>{request.policyReason ? t(policyReasonKey(request.policyReason)) : tx(t, "notReported")}</b></span>
       <span><small>{tx(t, "risk")}</small><b>{riskExplanation(t, request)}</b></span>
-      <span><small>{tx(t, "expires", { time: request.expiresAt || tx(t, "notReported") })}</small>{expiryValid && request.expiresAt ? <time dateTime={request.expiresAt}>{request.expiresAt}</time> : <span>{request.expiresAt || tx(t, "notReported")}</span>}</span>
+      {!compact && <span><small>{tx(t, "expiryLabel")}</small>{expiryValid && request.expiresAt ? <ObservedTime value={request.expiresAt} fallback={request.expiresAt} /> : <span>{request.expiresAt || tx(t, "notReported")}</span>}</span>}
     </div>
     <p className="muted">{previewState(t, request)}</p>
     {details && <p className="muted"><strong>{tx(t, "classification")}: </strong>{details.classification ? t(bashClassificationKey(details.classification)) : tx(t, "notReported")}</p>}
@@ -331,23 +332,31 @@ function PendingRow({
 }) {
   const { t } = useTranslation();
   const evidenceId = useId();
-  return <>
-    <Row
-      selected={selected}
-      onInspect={onInspect}
-      title={<><strong className="mono">{request.tool}</strong><StatusBadge tone={statusTone(request.status)}>{t(approvalStatusKey(request.status))}</StatusBadge></>}
-      summary={<><span className="mono">{scopeLabel(request)}</span><span>{tx(t, "risk")}: {request.riskLevel ? t(riskLevelKey(request.riskLevel)) : tx(t, "notReported")}</span></>}
-    />
-    <div className="approval-decision-block">
-      <FrontEvidence request={request} expired={expired} soon={soon} runtimeIdentityKnown={runtimeIdentityKnown} evidenceId={evidenceId} expiryValid={expiryValid} />
-      <ApprovalActions request={request} disabled={disabled} resolving={resolving} sessionEligible={sessionEligible} decisionEvidenceId={evidenceId} onResolve={onResolve} onCreateRule={onCreateRule} />
+  return <article className={`approval-card ${selected ? "selected" : ""}`}>
+    <div className="approval-card-head">
+      <div>
+        <div className="approval-card-title">
+          <button type="button" onClick={onInspect}><strong>{request.tool}</strong><StatusBadge tone={statusTone(request.status)} visual={request.status === "pending" ? "warning" : "unknown"}>{t(approvalStatusKey(request.status))}</StatusBadge><span className="details-affordance">{t("common.details")}</span></button>
+        </div>
+        <div className="approval-target mono">{scopeLabel(request)}</div>
+      </div>
+      <div className="approval-card-meta">
+        <span className={`approval-risk ${request.riskLevel === "high" ? "risk-high" : ""}`}>{tx(t, "risk")}: {request.riskLevel ? t(riskLevelKey(request.riskLevel)) : tx(t, "notReported")}</span>
+        <span className="approval-expiry">{tx(t, "expiryLabel")}: <ObservedTime value={request.expiresAt} fallback={request.expiresAt || tx(t, "notReported")} /></span>
+      </div>
     </div>
-    {(feedback || expired || stale) && <div className="approval-row-feedback">
-      {feedback && <InlineFeedback error={feedback.tone === "error"}>{feedbackText(t, feedback)}{feedback.detail && <span> {feedback.detail}</span>}{feedback.code && <span className="mono"> {feedback.code}</span>}{feedback.tone === "error" && <span> {tx(t, "refreshHint")}</span>}</InlineFeedback>}
-      {expired && <InlineFeedback error>{tx(t, "staleDecision")}</InlineFeedback>}
-      {stale && !feedback && <InlineFeedback error>{tx(t, "requestStale")}</InlineFeedback>}
-    </div>}
-  </>;
+    <div className="approval-card-body">
+      <FrontEvidence request={request} expired={expired} soon={soon} runtimeIdentityKnown={runtimeIdentityKnown} evidenceId={evidenceId} expiryValid={expiryValid} compact />
+    </div>
+    <div className="approval-card-actions">
+      <ApprovalActions request={request} disabled={disabled} resolving={resolving} sessionEligible={sessionEligible} decisionEvidenceId={evidenceId} onResolve={onResolve} onCreateRule={onCreateRule} />
+      {(feedback || expired || stale) && <div className="approval-row-feedback">
+        {feedback && <InlineFeedback error={feedback.tone === "error"}>{feedbackText(t, feedback)}{feedback.detail && <span> {feedback.detail}</span>}{feedback.code && <span className="mono"> {feedback.code}</span>}{feedback.tone === "error" && <span> {tx(t, "refreshHint")}</span>}</InlineFeedback>}
+        {expired && <InlineFeedback error>{tx(t, "staleDecision")}</InlineFeedback>}
+        {stale && !feedback && <InlineFeedback error>{tx(t, "requestStale")}</InlineFeedback>}
+      </div>}
+    </div>
+  </article>;
 }
 
 function HistoryRow({ request, selected, feedback, onInspect }: { request: ApprovalRequest; selected: boolean; feedback?: ApprovalFeedback; onInspect: () => void }) {
@@ -357,7 +366,7 @@ function HistoryRow({ request, selected, feedback, onInspect }: { request: Appro
     selected={selected}
     onInspect={onInspect}
     title={<><strong className="mono">{request.tool}</strong><StatusBadge tone={statusTone(request.status)}>{t(approvalStatusKey(request.status))}</StatusBadge></>}
-    summary={<><span className="mono">{scopeLabel(request)}</span><span>{request.resolvedAt ?? request.expiresAt}</span></>}
+    summary={<><span className="mono">{scopeLabel(request)}</span><ObservedTime value={request.resolvedAt ?? request.expiresAt} fallback={request.resolvedAt ?? request.expiresAt} /></>}
     controls={<span className="muted">{tx(t, "terminalReadOnly")}</span>}
     />
     {feedback && <InlineFeedback error={feedback.tone === "error"}>{feedbackText(t, feedback)}{feedback.detail && <span> {feedback.detail}</span>}{feedback.code && <span className="mono"> {feedback.code}</span>}</InlineFeedback>}
@@ -374,6 +383,7 @@ export function ApprovalsPage({ onNavigate, initialRequestId }: { onNavigate?: A
   const [resolvingIds, setResolvingIds] = useState<Set<string>>(() => new Set());
   const [feedback, setFeedback] = useState<Record<string, ApprovalFeedback | undefined>>({});
   const [expiryHints, setExpiryHints] = useState<Set<string>>(() => new Set());
+  const [, setExpiryTick] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [sessionChanged, setSessionChanged] = useState(false);
   const sessionRef = useRef<string | null | undefined>(undefined);
@@ -467,7 +477,12 @@ export function ApprovalsPage({ onNavigate, initialRequestId }: { onNavigate?: A
           void data.refreshApprovals().catch(() => undefined);
         }
       } else {
-        const delay = Date.parse(request.expiresAt) - Date.now();
+        const expiryAt = Date.parse(request.expiresAt);
+        const soonDelay = expiryAt - 60_000 - Date.now();
+        if (Number.isFinite(soonDelay) && soonDelay > 0) {
+          timers.push(window.setTimeout(() => setExpiryTick((value) => value + 1), soonDelay));
+        }
+        const delay = expiryAt - Date.now();
         if (Number.isFinite(delay) && delay > 0) {
           timers.push(window.setTimeout(() => {
             setExpiryHints((current) => {
@@ -597,27 +612,31 @@ export function ApprovalsPage({ onNavigate, initialRequestId }: { onNavigate?: A
   const selected = selectedId ? items.find((item) => item.requestId === selectedId) : undefined;
   const requestDisabled = (request: ApprovalRequest) => stalePage || !runtimeReady || !runtimeIdentityKnown || !expiryInfo(request).valid || requestIsStale(request, currentRuntime, sessionChanged) || expiryHints.has(request.requestId);
   const hasKnownQueue = hasRetainedContent || authoritativeEmpty;
-  const pendingAction = hasKnownQueue ? <span className="muted">{tx(t, "pendingCount", { count: pendingItems.length })}</span> : undefined;
   const historyTitle = hasKnownQueue ? `${tx(t, "history")} · ${tx(t, "historyCount", { count: historyItems.length })}` : tx(t, "history");
 
   return <div className="page-stack">
-    <SectionHeading
-      eyebrow={t("approvals.eyebrow")}
-      title={t("approvals.title")}
-      description={tx(t, "pendingDescription")}
-      action={<div className="settings-actions"><StatusBadge tone={runtimeReady ? "success" : "danger"}>{t("approvals.runtimeStatus", { status: t(componentStatusKey(data.components.runtime)) })}</StatusBadge><Button variant="quiet" onClick={() => void manualRefresh()} disabled={refreshing}>{refreshing ? tx(t, "refreshing") : tx(t, "refresh")}</Button></div>}
-    />
+    <h2 className="sr-only">{t("approvals.title")}</h2>
+    <div className="approval-summary-strip">
+      <div className="approval-summary-main">
+        <div><strong className="approval-count-large">{hasKnownQueue ? pendingItems.length : "—"}</strong><span className="muted">{tx(t, "pendingCount", { count: pendingItems.length })}</span></div>
+        <p>{tx(t, "pendingDescription")}</p>
+      </div>
+      <div className="row-wrap">
+        <StatusBadge tone={runtimeReady ? "success" : "danger"} visual={runtimeReady ? "ready" : "error"}>{t("approvals.runtimeStatus", { status: t(componentStatusKey(data.components.runtime)) })}</StatusBadge>
+        <Button variant="quiet" onClick={() => void manualRefresh()} disabled={refreshing}>{refreshing ? tx(t, "refreshing") : tx(t, "refresh")}</Button>
+      </div>
+    </div>
     {stalePage && <div className="notice notice-warning" role="status"><strong>{tx(t, sessionChanged ? "sessionChanged" : runtimeMismatch ? "runtimeChanged" : "stale")}</strong><span>{tx(t, "staleDecision")}</span></div>}
     {(data.approvals.status === "error" || data.approvals.status === "disconnected") && !hasRetainedContent && <div className="notice notice-danger" role="alert">{tx(t, "unavailable")}</div>}
     {data.approvals.status === "loading" && !hasRetainedContent && <InlineFeedback>{tx(t, "loading")}</InlineFeedback>}
-    <Section title={tx(t, "pending")} action={pendingAction}>
+    <Section title={tx(t, "pending")}>
       {pendingItems.length === 0 && authoritativeEmpty && <InlineFeedback>{tx(t, "noPending")}</InlineFeedback>}
       {pendingItems.length === 0 && !authoritativeEmpty && !hasRetainedContent && <InlineFeedback>{tx(t, "loading")}</InlineFeedback>}
-      {pendingItems.map((request) => {
+      {pendingItems.length > 0 && <div className="approval-list">{pendingItems.map((request) => {
         const expiry = expiryInfo(request);
         const expired = expiryHints.has(request.requestId) || expiry.expired;
         return <PendingRow key={request.requestId} request={request} selected={selectedId === request.requestId} disabled={requestDisabled(request)} resolving={resolvingIds.has(request.requestId)} sessionEligible={request.tool !== "bash" || request.allowForSessionEligible === true} expired={expired} soon={expiry.soon} expiryValid={expiry.valid} feedback={feedback[request.requestId]} stale={requestIsStale(request, currentRuntime, sessionChanged)} runtimeIdentityKnown={runtimeIdentityKnown} onInspect={() => setSelectedId(request.requestId)} onResolve={(decision) => void resolve(request, decision)} onCreateRule={() => createRule(request)} />;
-      })}
+      })}</div>}
     </Section>
     <Disclosure title={historyTitle}>
       {historyItems.length === 0 ? <InlineFeedback>{tx(t, "historyEmpty")}</InlineFeedback> : historyItems.map((request) => <HistoryRow key={request.requestId} request={request} feedback={feedback[request.requestId]} selected={selectedId === request.requestId} onInspect={() => setSelectedId(request.requestId)} />)}

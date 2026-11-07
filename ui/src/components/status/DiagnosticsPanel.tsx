@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { DiagnosticCheck, DiagnosticRun, DiagnosticScope, StartupAttempt } from "@protocol/v1";
 import { useTranslation } from "react-i18next";
-import { Button, InlineFeedback, Row, Section, StatusBadge } from "@/components/common/primitives";
+import { Button, InlineFeedback, StatusBadge } from "@/components/common/primitives";
 import type { Navigate } from "@/app/router/routes";
 import {
   diagnosticScopeKey,
@@ -48,34 +48,50 @@ export function DiagnosticsPanel({ run, startup, running = false, onRun, onNavig
       setCopyFeedback("failed");
     }
   };
-  return <Section title={t("diagnostics.run")}>
-    <div className="settings-actions">
+  const tone = !run ? "neutral" : run.overallStatus === "pass" ? "success" : run.overallStatus === "fail" ? "danger" : "warning";
+  const visual = !run ? "unknown" : run.overallStatus === "pass" ? "success" : run.overallStatus === "fail" ? "danger" : "warning";
+  return <section className="diagnostics-summary" aria-label={t("diagnostics.title")}>
+    <div className="diagnostics-summary-copy">
+      <StatusBadge tone={tone} visual={visual}>{run ? t(diagnosticStatusKey(run.overallStatus)) : t("diagnostics.notRun")}</StatusBadge>
+      <p>{run ? t("diagnostics.lastRun", { time: run.finishedAt }) : t("diagnostics.noRun")}</p>
+    </div>
+    <div className="diagnostics-summary-actions">
       <Button variant="primary" onClick={() => void onRun()} disabled={running}>{running ? t("diagnostics.running") : t("diagnostics.run")}</Button>
       {run && <Button variant="secondary" onClick={() => void copy()}>{t("diagnostics.copy")}</Button>}
     </div>
     {copyFeedback === "copied" && <InlineFeedback>{t("diagnostics.copied")}</InlineFeedback>}
     {copyFeedback === "failed" && <InlineFeedback error>{t("diagnostics.copyFailed")}</InlineFeedback>}
-    {!run && <p className="muted">{t("diagnostics.noRun")}</p>}
-    {run && <>
-      <Row title={t("diagnostics.overall")} controls={<StatusBadge>{t(diagnosticStatusKey(run.overallStatus))}</StatusBadge>} />
-      <div className="detail-list">
-        {run.checks.map((check) => <div key={check.id}>
-          <div className="row-identity"><strong>{check.id}</strong><span className="muted">{t(diagnosticScopeKey((check.scope ?? "lifecycle") as DiagnosticScope))}</span></div>
-          <div className="settings-actions"><StatusBadge>{t(diagnosticStatusKey(check.status))}</StatusBadge><span>{check.summary}</span></div>
-          {check.evidence.length > 0 && <small className="muted">{t("diagnostics.evidence")}: {check.evidence.map((item) => `${item.key}=${item.value}`).join(", ")}</small>}
-          {remediationFor(check) && <div className="settings-actions"><span className="muted">{t("diagnostics.remediation")}: {remediationFor(check)!.summary}</span>{remediationFor(check)!.target && settingsTarget[remediationFor(check)!.target!] && onNavigate && <Button variant="quiet" onClick={() => onNavigate("settings", { settingsSection: settingsTarget[remediationFor(check)!.target!] })}>{t("m8.openSettings")}</Button>}</div>}
-        </div>)}
+    {run && <details className="diagnostics-disclosure">
+      <summary>
+        <span>{t("diagnostics.checks")} · {run.checks.length}</span>
+        <span className="muted">{t("diagnostics.expandDetails")}</span>
+      </summary>
+      <div className="diagnostic-check-list">
+        {run.checks.map((check) => {
+          const remediation = remediationFor(check);
+          return <div className="diagnostic-check" key={check.id}>
+            <div className="diagnostic-check-heading">
+              <div><strong>{check.id}</strong><span>{t(diagnosticScopeKey((check.scope ?? "lifecycle") as DiagnosticScope))}</span></div>
+              <StatusBadge tone={check.status === "pass" ? "success" : check.status === "fail" ? "danger" : "warning"} visual={check.status === "pass" ? "success" : check.status === "fail" ? "danger" : "warning"}>{t(diagnosticStatusKey(check.status))}</StatusBadge>
+            </div>
+            <p>{check.summary}</p>
+            {check.evidence.length > 0 && <small>{t("diagnostics.evidence")}: {check.evidence.map((item) => `${item.key}=${item.value}`).join(", ")}</small>}
+            {remediation && <div className="diagnostic-remediation"><span>{t("diagnostics.remediation")}: {remediation.summary}</span>{remediation.target && settingsTarget[remediation.target] && onNavigate && <Button variant="quiet" onClick={() => onNavigate("settings", { settingsSection: settingsTarget[remediation.target!] })}>{t("m8.openSettings")}</Button>}</div>}
+          </div>;
+        })}
       </div>
-    </>}
-    {startup && <div className="detail-list">
-      <strong>{t("diagnostics.startup")}</strong>
-      <div><span>{t("diagnostics.cohort")}</span><span>{startup.cohort}</span></div>
-      <div><span>{t("diagnostics.outcome")}</span><span>{t(startupOutcomeKey(startup.outcome))}</span></div>
-      <div><span>{t("diagnostics.duration")}</span><span>{startup.totalDurationMs ?? "—"} {t("diagnostics.milliseconds")}</span></div>
-      {slowestPhase(startup) && <div><span>{t("diagnostics.slowestPhase")}</span><span>{t(startupPhaseKey(slowestPhase(startup)!.phase))} · {slowestPhase(startup)!.durationMs} {t("diagnostics.milliseconds")}</span></div>}
-      <strong>{t("diagnostics.startupDetails")}</strong>
-      {startup.phases.map((phase) => <div key={phase.phase}><span>{t(startupPhaseKey(phase.phase))}</span><span>{t(startupPhaseStatusKey(phase.status))} · {phase.durationMs} {t("diagnostics.milliseconds")}</span></div>)}
-    </div>}
-  </Section>;
+    </details>}
+    {startup && <details className="diagnostics-disclosure">
+      <summary><span>{t("diagnostics.startup")}</span><span className="muted">{t("diagnostics.expandDetails")}</span></summary>
+      <div className="detail-list">
+        <div><span>{t("diagnostics.cohort")}</span><span>{startup.cohort}</span></div>
+        <div><span>{t("diagnostics.outcome")}</span><span>{t(startupOutcomeKey(startup.outcome))}</span></div>
+        <div><span>{t("diagnostics.duration")}</span><span>{startup.totalDurationMs ?? "—"} {t("diagnostics.milliseconds")}</span></div>
+        {slowestPhase(startup) && <div><span>{t("diagnostics.slowestPhase")}</span><span>{t(startupPhaseKey(slowestPhase(startup)!.phase))} · {slowestPhase(startup)!.durationMs} {t("diagnostics.milliseconds")}</span></div>}
+        <strong className="detail-list-heading">{t("diagnostics.startupDetails")}</strong>
+        {startup.phases.map((phase) => <div key={phase.phase}><span>{t(startupPhaseKey(phase.phase))}</span><span>{t(startupPhaseStatusKey(phase.status))} · {phase.durationMs} {t("diagnostics.milliseconds")}</span></div>)}
+      </div>
+    </details>}
+  </section>;
 }
 

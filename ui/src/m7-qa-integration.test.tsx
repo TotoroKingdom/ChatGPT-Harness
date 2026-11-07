@@ -113,7 +113,7 @@ describe("M7 Integration — typed remediation and invalid Policy UX", () => {
       expect(await screen.findByText(reason)).toBeInTheDocument();
       // The reason can already be present in the compact row while the
       // inspector is still loading its remediation. Await the actual detail.
-      expect(await screen.findByText(remediation, { exact: false })).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(remediation, { exact: false })).toBeInTheDocument());
       fireEvent.click(screen.getByRole("button", { name: "Close" }));
     };
     await inspect("write", "Tool disabled", "Enable the tool, save, and restart Harness.");

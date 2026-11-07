@@ -1,5 +1,5 @@
 import { ConfigRecovery } from "@/components/status/ConfigRecovery";
-import { DiagnosticsPanel } from "@/components/status/DiagnosticsPanel";
+import { DiagnosticsTrigger } from "@/components/status/DiagnosticsHost";
 import { ConfigRevisionStatus } from "@/components/status/ConfigRevisionStatus";
 import { useEffect, useState, type ReactNode } from "react";
 import type { SecurityMode, TunnelConfig, UiLanguage } from "@protocol/v1";
@@ -108,9 +108,12 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
 
   useEffect(() => {
     if (!initialSection) return;
-    const node = document.getElementById(`settings-section-${initialSection}`);
-    node?.scrollIntoView({ block: "start", behavior: "auto" });
-    node?.focus();
+    const timer = window.setTimeout(() => {
+      const node = document.getElementById(`settings-section-${initialSection}`);
+      node?.scrollIntoView({ block: "start", behavior: "auto" });
+      node?.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [initialSection]);
 
   const currentConfig = data.config;
@@ -385,15 +388,25 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
   };
 
   const section = (name: NavigationOptions["settingsSection"], content: ReactNode) => (
-    <div id={`settings-section-${name}`} tabIndex={-1}>{content}</div>
+    <div id={`settings-section-${name}`} className="settings-section" tabIndex={-1}>{content}</div>
   );
 
   return (
     <div className="settings-page page-stack">
-      <p>{t("settings.banner.description")}</p>
-
       {data.configError && <ConfigRecovery onReset={requestReset} disabled={resetting || connectionSaving} />}
 
+      <div className="settings-layout">
+        <nav className="settings-index" aria-label={t("settings.index")}>
+          <span className="settings-index-title">{t("settings.index")}</span>
+          <button type="button" onClick={() => document.getElementById("settings-section-general")?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("settings.groups.preferences")}</button>
+          <button type="button" onClick={() => document.getElementById("settings-section-workspace")?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("settings.groups.workspaceConnection")}</button>
+          <button type="button" onClick={() => document.getElementById("settings-section-security")?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("settings.groups.securityData")}</button>
+          <button type="button" onClick={() => document.getElementById("settings-section-advanced")?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("settings.groups.diagnostics")}</button>
+          <button type="button" onClick={() => document.getElementById("settings-section-danger")?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("settings.groups.danger")}</button>
+        </nav>
+        <div className="settings-main">
+          <section className="settings-group">
+            <div className="settings-group-heading"><h2>{t("settings.groups.preferences")}</h2><p>{t("settings.groups.preferencesHelp")}</p></div>
       {section("general", <Section title={t("m8Settings.general")}>
         <Row title={t("settings.language")} summary={t("settings.languageHelp")} controls={<Select label={t("settings.language")} value={languageSelection} onChange={(event) => void changeLanguage(event.target.value as UiLanguage | "")} disabled={languageSaving || resetting}>
           <option value="">{t("settings.followSystem")}</option><option value="en">{t("settings.languages.en")}</option><option value="zh-CN">{t("settings.languages.zhCN")}</option>
@@ -457,10 +470,13 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
         {notificationFeedback && <FeedbackNotice feedback={notificationFeedback} />}
       </Section>)}
 
-      {section("history", <HistorySettingsSection />)}
+          </section>
+
+          <section className="settings-group">
+            <div className="settings-group-heading"><h2>{t("settings.groups.workspaceConnection")}</h2><p>{t("settings.groups.workspaceConnectionHelp")}</p></div>
 
       {section("workspace", <Section title={t("m8Settings.workspace")}>
-        <Row title={t("settings.workspace.root")} summary={<code className="mono">{currentConfig?.workspace.rootPath || t("m8.unknown")}</code>} controls={<Button variant="secondary" onClick={() => void chooseFolder()} disabled={workspaceSaving || resetting || !data.config}>{workspaceSaving ? t("settings.languageSaving") : t("settings.workspace.choose")}</Button>} />
+        <Row title={t("settings.workspace.root")} summary={<code className="mono">{currentConfig?.workspace.rootPath || t("m8.unknown")}</code>} controls={<Button variant="secondary" onClick={() => void chooseFolder()} disabled={workspaceSaving || resetting || !data.config}>{workspaceSaving ? t("common.saving") : t("settings.workspace.choose")}</Button>} />
         <Row title={t("m8.running")} summary={<code className="mono">{observedRuntime?.activeWorkspace || t("m8.unknown")}</code>} />
         <InlineFeedback>{t("settings.workspace.help")}</InlineFeedback>
         {running && data.restartRequired && <ConfigRevisionStatus titleKey="settings.restart.title" descriptionKey="settings.restart.description" onRestart={() => void restartHarness()} />}
@@ -474,11 +490,23 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
         {connectionFeedback && <FeedbackNotice feedback={connectionFeedback} />}
       </Section>)}
 
+          </section>
+
+          <section className="settings-group">
+            <div className="settings-group-heading"><h2>{t("settings.groups.securityData")}</h2><p>{t("settings.groups.securityDataHelp")}</p></div>
+
       {section("security", <Section title={t("m8Settings.security")}>
         <Row title={t("settings.security.title")} summary={<span>{savedMode ? `${t("m8.configured")}: ${t(securityModeKey(savedMode))}` : t("m8.unknown")}</span>} controls={savedMode ? <SegmentedSecurity value={savedMode} onChange={chooseSecurityMode} disabled={securitySaving || resetting} /> : <span className="muted">{t("m8.unknown")}</span>} />
         <InlineFeedback>{observedRuntime ? `${t("m8.running")}: ${t(securityModeKey(observedRuntime.securityMode))}` : `${t("m8.running")}: ${t("m8.unknown")}`}</InlineFeedback>
         {securityFeedback && <FeedbackNotice feedback={securityFeedback} />}
       </Section>)}
+
+      {section("history", <HistorySettingsSection />)}
+
+          </section>
+
+          <section className="settings-group">
+            <div className="settings-group-heading"><h2>{t("settings.groups.diagnostics")}</h2><p>{t("settings.groups.diagnosticsHelp")}</p></div>
 
       {section("advanced", <Section title={t("m8Settings.advanced")}>
         <Disclosure title={t("settings.localData.title")} open={initialSection === "advanced"}>
@@ -489,13 +517,26 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
             <div><dt>{t("m7.revision.title")}</dt><dd><code>{currentConfig?.configRevision ?? t("m8.unknown")}</code></dd></div>
           </dl>
         </Disclosure>
-        <DiagnosticsPanel run={data.lastDiagnostics} startup={data.latestStartupAttempt ?? null} onRun={data.runDiagnostics} onNavigate={onNavigate} />
+        <div className="settings-note">
+          <strong>{t("diagnostics.title")}</strong>
+          <p>{t("overview.diagnosticsPrompt")}</p>
+          <DiagnosticsTrigger variant="secondary" />
+        </div>
       </Section>)}
 
-      {section("danger", <Section title={t("m8Settings.dangerZone")}>
+          </section>
+
+          <section className="settings-group">
+            <div className="settings-group-heading"><h2>{t("settings.groups.danger")}</h2><p>{t("settings.groups.dangerHelp")}</p></div>
+
+      {section("danger", <Section title={t("settings.groups.dangerSection")}>
         <InlineFeedback>{t("m8FirstRun.resetLoss")}</InlineFeedback>
         <Button variant="danger" onClick={requestReset} disabled={resetting || connectionSaving}>{resetting ? t("settings.actions.resetting") : t("settings.actions.reset")}</Button>
       </Section>)}
+
+          </section>
+        </div>
+      </div>
 
       {connectionOpen && connectionObserved && <ConnectionEditor
         observed={connectionObserved}

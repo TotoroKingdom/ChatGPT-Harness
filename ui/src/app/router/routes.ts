@@ -23,11 +23,11 @@ export type NavigationOptions = {
 };
 export type Navigate = (page: PageKey, options?: NavigationOptions) => void;
 
-export const pages: Array<{ key: PageKey; label: string; eyebrow: string }> = [
-  { key: "overview", label: "nav.overview", eyebrow: "nav.eyebrows.overview" },
-  { key: "tools", label: "nav.tools", eyebrow: "nav.eyebrows.tools" },
-  { key: "policies", label: "nav.policies", eyebrow: "nav.eyebrows.policies" },
-  { key: "approvals", label: "nav.approvals", eyebrow: "nav.eyebrows.approvals" },
-  { key: "activity", label: "nav.activity", eyebrow: "nav.eyebrows.activity" },
-  { key: "settings", label: "nav.settings", eyebrow: "nav.eyebrows.settings" },
+export const pages: Array<{ key: PageKey; label: string; eyebrow: string; description: string }> = [
+  { key: "overview", label: "nav.overview", eyebrow: "nav.eyebrows.overview", description: "nav.descriptions.overview" },
+  { key: "tools", label: "nav.tools", eyebrow: "nav.eyebrows.tools", description: "nav.descriptions.tools" },
+  { key: "policies", label: "nav.policies", eyebrow: "nav.eyebrows.policies", description: "nav.descriptions.policies" },
+  { key: "approvals", label: "nav.approvals", eyebrow: "nav.eyebrows.approvals", description: "nav.descriptions.approvals" },
+  { key: "activity", label: "nav.activity", eyebrow: "nav.eyebrows.activity", description: "nav.descriptions.activity" },
+  { key: "settings", label: "nav.settings", eyebrow: "nav.eyebrows.settings", description: "nav.descriptions.settings" },
 ];

@@ -34,7 +34,7 @@ const safeConfig = (): AppConfig => {
   tunnel: { ...config.tunnel, tunnelId: "", tunnelClientPath: undefined, apiKeyRef: undefined },
  };
 };
-function event(sequence: string, eventType: ActivityEventType, summary: string, metadata: Record<string,string>, requestId?: string): ActivityEvent { return { eventId: `event_mock_${sequence}`, runtimeId: "runtime_mock_01", sequence, eventType, requestId, timestamp: `2026-09-02T00:0${sequence}:00Z`, summary, metadata }; }
+function event(sequence: string, eventType: ActivityEventType, summary: string, metadata: Record<string,string>, requestId?: string): ActivityEvent { return { eventId: `event_mock_${sequence}`, runtimeId: "runtime_mock_01", sequence, eventType, requestId, timestamp: new Date(Date.now() - (4 - Number(sequence)) * 60_000).toISOString(), summary, metadata }; }
 const tools: ToolDescriptor[] = [{name:"read_file",description:"Read a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"glob",description:"Find workspace paths.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"grep",description:"Search text content inside the active Workspace.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"low"},{name:"write",description:"Write a workspace file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"edit",description:"Edit a workspace text file.",implemented:true,enabled:true,exposed:true,effectivePolicy:"allow",scope:"active_workspace",readiness:"ready",riskLevel:"medium"},{name:"bash",description:"Run a controlled Git Bash command from the active Workspace. The cwd is an initial working directory, not a filesystem sandbox.",implemented:true,enabled:false,exposed:false,effectivePolicy:"ask",scope:"active_workspace",readiness:"unavailable",riskLevel:"high"}];
 const policies: PolicyRule[] = [{id:"system-read-workspace",name:"Allow workspace reads",decision:"allow",scope:"active_workspace",reason:"Read-only default capability.",source:"system",editable:false,enabled:true},{id:"user-review-sensitive",name:"Review sensitive requests",decision:"ask",scope:"developer_test_capabilities",reason:"Requires explicit approval before a high-risk request.",source:"user",editable:false,enabled:true},{id:"system-deny-outside",name:"Deny outside workspace",decision:"deny",scope:"outside_active_workspace",reason:"Workspace boundary.",source:"system",editable:false,enabled:true}];
 function restartSemantics(config: AppConfig | null) {
@@ -54,7 +54,9 @@ function effectivePolicy(config: AppConfig["policies"]): PolicyEffectiveSnapshot
   });
   return { valid: true, status: "valid", systemRules, userRules, toolDefaults: config.toolDefaults, perTool };
 }
-const approvals: ApprovalRequest[] = [{requestId:"approval_mock_01",runtimeId:"runtime_mock_01",generationId:"generation_mock_01",tool:"write",sanitizedArguments:{path:"notes.txt",content:"<redacted content>"},scopeSummary:"notes.txt",matchedRuleIds:["review-writes"],policyReason:"matched_user_rules",riskLevel:"medium",createdAt:"2026-09-02T00:03:00Z",expiresAt:"2026-09-02T00:08:00Z",status:"pending"}];
+const approvalCreatedAt = new Date(Date.now() - 60_000).toISOString();
+const approvalExpiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+const approvals: ApprovalRequest[] = [{requestId:"approval_mock_01",runtimeId:"runtime_mock_01",generationId:"generation_mock_01",tool:"write",sanitizedArguments:{path:"notes.txt",content:"<redacted content>"},scopeSummary:"notes.txt",matchedRuleIds:["review-writes"],policyReason:"matched_user_rules",riskLevel:"medium",createdAt:approvalCreatedAt,expiresAt:approvalExpiresAt,status:"pending"}];
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 const historyItems: HistoryRequestSummary[] = [
   { runtimeId: "runtime_mock_01", requestId: "history-read-1", toolName: "read_file", firstSeenAtUtc: hoursAgo(1), lastSeenAtUtc: hoursAgo(1), terminalState: "succeeded", outcome: "success", policyDecision: "allow", approvalState: "none", durationMs: 12, evidenceCoverage: "COMPLETE" },
@@ -75,7 +77,15 @@ export class MockHarnessControlClient implements HarnessControlClient {
  private async respond<T>(value:T):Promise<T>{await delay(); if(this.scenario==="disconnected") throw new HarnessClientError("disconnected","The local Runtime is not connected."); if(this.scenario==="error") throw new HarnessClientError("error","The mock Runtime returned an example error."); return value;}
  // Legacy mock lifecycle data is not evidence for M8-C observations.
  runtimeGetDiagnostics(): Promise<RuntimeDiagnostics> { return Promise.reject({code:"RUNTIME_UNAVAILABLE"}); }
- runtimeGetActivitySnapshot(_limit: number): Promise<ActivityEntry[]> { return this.scenario === "empty" ? Promise.resolve([]) : Promise.reject({code:"RUNTIME_UNAVAILABLE"}); }
+  runtimeGetActivitySnapshot(limit: number): Promise<ActivityEntry[]> {
+    if (this.scenario === "empty") return Promise.resolve([]);
+    const items: ActivityEntry[] = [
+      { eventId: "activity_mock_read", requestId: "request_mock_01", category: "execution", lifecycleState: "completed", timestamp: new Date(Date.now() - 3 * 60_000).toISOString(), eventType: "execution_completed", toolName: "read_file", decisionSummary: "allow", matchedRuleIds: [], policyReason: "tool_default", outcomeSummary: "success", durationMs: 12, sanitizedArguments: { tool: "read_file", logicalPath: "src/App.tsx" }, resultEvidence: { tool: "read_file", bytesRead: 1840 } },
+      { eventId: "activity_mock_approval", requestId: "request_mock_02", category: "approval", lifecycleState: "awaiting_approval", timestamp: new Date(Date.now() - 2 * 60_000).toISOString(), eventType: "approval_required", toolName: "write", decisionSummary: "ask", matchedRuleIds: ["review-writes"], policyReason: "matched_user_rules", outcomeSummary: "approval_required", approvalId: "approval_mock_01", sanitizedArguments: { tool: "write", logicalPath: "notes.txt" } },
+      { eventId: "activity_mock_denied", requestId: "request_mock_03", category: "policy", lifecycleState: "denied", timestamp: new Date(Date.now() - 60_000).toISOString(), eventType: "request_denied", toolName: "bash", decisionSummary: "deny", matchedRuleIds: ["system-deny-outside"], policyReason: "system_guardrail", outcomeSummary: "denied" },
+    ];
+    return this.respond(items.slice(-Math.min(Math.max(limit, 1), 100)));
+  }
  private toolCatalog(): ToolDescriptor[] { return tools.map((tool) => { const key = tool.name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()) as keyof AppConfig["tools"]; const configured = (this.activeTools ?? this.config?.tools)?.[key]?.enabled ?? tool.enabled; return { ...tool, enabled: configured, exposed: tool.name === "bash" ? configured && this.config?.security.mode === "developer_test" : configured }; }); }
  private effectiveTools(): ToolDiagnostic[] {
   const config = this.config ?? completeConfig();

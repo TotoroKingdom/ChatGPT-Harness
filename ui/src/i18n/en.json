@@ -8,6 +8,8 @@
     "dataSource": "Runtime data source",
     "realSource": "Tauri Runtime",
     "mockSource": "Mock Runtime · test",
+    "desktopWorkspace": "Local workspace",
+    "desktopRuntime": "Desktop runtime",
     "runtimeStatus": "Runtime {{status}}",
     "mockStatus": "Mock Runtime {{status}}"
   },
@@ -24,6 +26,7 @@
     "readingSnapshot": "Reading Runtime snapshot",
     "noSnapshot": "No current snapshot is available. This is not an empty result.",
     "close": "Close",
+    "details": "Details",
     "saving": "Saving…",
     "cancel": "Cancel"
   },
@@ -48,13 +51,21 @@
     "activity": "Activity",
     "approvals": "Approvals",
     "settings": "Settings",
+    "descriptions": {
+      "overview": "See system health, connection status and recent events.",
+      "tools": "Manage the tools ChatGPT can use and their default permissions.",
+      "policies": "Define when tool actions are allowed, asked about or denied.",
+      "approvals": "Review high-risk actions that need your confirmation.",
+      "activity": "Inspect recorded requests, outcomes and runtime metrics.",
+      "settings": "Adjust app, connection, local data and security options."
+    },
     "eyebrows": {
-      "overview": "Control plane",
-      "tools": "Capability catalog",
-      "policies": "Security posture",
+      "overview": "System status",
+      "tools": "Tool catalog",
+      "policies": "Policy posture",
       "activity": "Audit trail",
       "approvals": "Human approval",
-      "settings": "Configuration"
+      "settings": "Preferences"
     }
   },
   "status": {
@@ -227,6 +238,16 @@
     }
   },
   "overview": {
+    "summaryReady": "Core services are healthy. No action is needed.",
+    "summaryUnknown": "System status has not been read yet. Try again or check configuration in Settings.",
+    "summaryFailed": "The system needs attention. Review the issue before restarting or changing settings.",
+    "summaryStopped": "Harness is stopped. Start it when you are ready.",
+    "summaryStarting": "Services are starting. Status will update automatically.",
+    "serviceRuntime": "Local execution engine",
+    "serviceTunnel": "Secure connection to ChatGPT",
+    "serviceMcp": "Tool endpoint",
+    "recentActivityHint": "Most recently received activity",
+    "diagnosticsPrompt": "Need to investigate? Run connection diagnostics to review checks and startup timing.",
     "tunnelRecovery": "Tunnel recovery",
     "cooldownUntil": "Cooldown ends",
     "nextRecoveryAttempt": "Next attempt",
@@ -285,6 +306,11 @@
     }
   },
   "diagnostics": {
+    "title": "Connection diagnostics",
+    "open": "System status",
+    "notRun": "Not checked",
+    "lastRun": "Last completed {{time}}",
+    "expandDetails": "Show details",
     "run": "Run connection diagnostics",
     "running": "Running connection diagnostics…",
     "overall": "Overall result",
@@ -345,6 +371,9 @@
   },
   "tools": {
     "title": "Tools",
+    "summaryTitle": "Tool overview",
+    "summaryEnabled": "enabled",
+    "summaryTotal": "tools",
     "eyebrow": "M5 controlled Bash",
     "description": "Set the next Runtime generation's desired tool state. Current effective state stays immutable until restart.",
     "descriptionLegacy": "Availability and decisions are reported by Runtime, never inferred by this UI.",
@@ -370,6 +399,7 @@
       "runningCaption": "Desired state is persistent; effective state belongs to the current Runtime generation.",
       "stoppedCaption": "No active Runtime generation. These toggles will apply on the next start.",
       "toolName": "Tool name",
+      "purpose": "Purpose",
       "availability": "Availability",
       "desired": "Desired",
       "effective": "Effective",
@@ -444,6 +474,7 @@
     "saving": "Saving…",
     "saveChanges": "Save Policy Changes",
     "userRules": "User Rules",
+    "rulesHelp": "How rules match",
     "userRulesDescription": "Rules are persisted as typed matchers. Bash Command prefixes match exact normalized tokens; they are not regular expressions or substrings.",
     "userRulesHelp": "Dynamic or unclassified Bash expressions stay at least ASK. A Tool-level Bash ALLOW is not a filesystem sandbox and does not bypass Runtime approval or risk floors.",
     "noDesiredUserRules": "No desired User Rules configured.",
@@ -520,7 +551,7 @@
     "empty": "No retained activity",
     "emptyHelp": "An empty snapshot does not establish readiness or mean no requests have ever occurred.",
     "caption": "Latest activity · reception order",
-    "timestamp": "Timestamp (UTC)",
+    "timestamp": "Time",
     "tool": "Tool",
     "decision": "Decision",
     "outcome": "Outcome",
@@ -582,6 +613,20 @@
   },
   "settings": {
     "appearance": "Appearance",
+    "index": "Settings navigation",
+    "groups": {
+      "preferences": "Preferences & notifications",
+      "preferencesHelp": "Language, appearance and desktop reminders.",
+      "workspaceConnection": "Workspace & connection",
+      "workspaceConnectionHelp": "Workspace path, Tunnel and credentials.",
+      "securityData": "Security & data",
+      "securityDataHelp": "Security mode, Runtime generation and History storage.",
+      "diagnostics": "Diagnostics & advanced",
+      "diagnosticsHelp": "Connection diagnostics, local paths and technical evidence.",
+      "danger": "Danger zone",
+      "dangerHelp": "Reset local configuration and stored credentials.",
+      "dangerSection": "Reset application data"
+    },
     "autoStart": {
       "title": "Auto Start Harness on app launch",
       "help": "Automatically starts Harness after you open ChatGPT-Harness. This does not open the app when you sign in to Windows. Changes take effect the next time you launch the app.",
@@ -1063,6 +1108,7 @@
   },
   "m8Approvals": {
     "pending": "Pending",
+    "expiryLabel": "Expires",
     "pendingCount": "{{count}} pending request(s)",
     "pendingDescription": "Review the Runtime facts that matter before choosing a decision.",
     "history": "History",
@@ -1294,6 +1340,7 @@
     "live": "Live",
     "history": "History",
     "timeRange": "Time range",
+    "outcomeLabel": "Outcome",
     "range": {
       "24h": "Last 24 hours",
       "7d": "Last 7 days",

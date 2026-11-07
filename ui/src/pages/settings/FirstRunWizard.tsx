@@ -97,29 +97,36 @@ export function FirstRunWizard({ onDone }: { onDone: () => void }) {
   const hasWorkspace = Boolean(data.config?.workspace.rootPath);
   const prepared = hasWorkspace && Boolean(data.config?.tunnel.tunnelId) && data.apiKeyObserved && data.apiKeyConfigured;
   const steps: Step[] = ["workspace", "connection", "readiness", "start"];
-  return <div className="onboarding-shell"><div className="wizard-content page-stack">
-    <header className="page-header"><div><h1>ChatGPT Harness</h1><p>{t("m8FirstRun.title")}</p></div></header>
-    {data.configError ? <ConfigRecovery onReset={() => leave(() => setResetOpen(true))} disabled={busy} /> : <>
-      <nav className="setup-progress" aria-label={t("m8FirstRun.steps")}>{steps.map((item, index) => <span key={item} aria-current={step === item ? "step" : undefined}>{index + 1}. {t(`m8FirstRun.${item}`)}</span>)}</nav>
-      {step === "workspace" && <Section title={t("m8FirstRun.workspace")}><p>{t("m8FirstRun.workspaceHelp")}</p><TextField label={t("settings.workspace.root")} value={data.config?.workspace.rootPath ?? ""} readOnly />
-        <div className="settings-actions"><Button onClick={() => void chooseWorkspace()} disabled={busy}>{t("firstRun.chooseFolder")}</Button><Button variant="primary" disabled={busy || !hasWorkspace} onClick={() => go("connection")}>{t("m8FirstRun.continue")}</Button></div>
-      </Section>}
-      {step === "connection" && <Section title={t("m8FirstRun.connection")}><p>{t("m8FirstRun.connectionHelp")}</p>
-        <TextField label={t("firstRun.tunnelId")} value={draft.tunnelId} disabled={busy} onChange={(event) => setDraft((current) => ({ ...current, tunnelId: event.target.value }))} />
-        <TextField label={t("firstRun.apiKey")} type="password" value={key} autoComplete="off" disabled={busy} onChange={(event) => setKey(event.target.value)} helper={t(!data.apiKeyObserved ? "m8.unknown" : data.apiKeyConfigured ? "m8FirstRun.keyConfigured" : "m8FirstRun.keyRequired")} />
-        {conflict && <InlineFeedback error>{t("m8.conflict")} <Button disabled={busy} variant="quiet" onClick={() => leave(discard)}>{t("m8.reload")}</Button></InlineFeedback>}
-        <div className="settings-actions"><Button disabled={busy} onClick={() => go("workspace")}>{t("m8FirstRun.back")}</Button><Button variant="primary" disabled={busy || Boolean(conflict) || !hasWorkspace} onClick={() => void applyConnection()}>{busy ? t("common.saving") : t("m8FirstRun.applyContinue")}</Button></div>
-      </Section>}
-      {step === "readiness" && <Section title={t("m8FirstRun.readiness")}><p>{t(prepared ? "m8FirstRun.prepared" : "m8FirstRun.notPrepared")}</p><p>{data.eligibility ? t(startEligibilityKey(data.eligibility.status)) : t("m8.unknown")}</p>
-        <div className="settings-actions"><Button disabled={busy} onClick={() => go("connection")}>{t("m8FirstRun.reviewConnection")}</Button><Button disabled={busy} onClick={() => void data.refreshConfig()}>{t("common.refresh")}</Button><Button variant="primary" disabled={busy || !prepared} onClick={() => go("start")}>{t("m8FirstRun.continue")}</Button></div>
-      </Section>}
-      {step === "start" && <Section title={t("m8FirstRun.start")}><p>{t("m8FirstRun.startHelp")}</p><p>{data.harnessObserved ? t(`status.${data.overall}`) : t("m8.unknown")}</p>
-        {data.eligibility && !data.eligibility.canStart && <InlineFeedback error>{t(startEligibilityKey(data.eligibility.status))}</InlineFeedback>}
-        <div className="settings-actions"><Button disabled={busy} onClick={() => go("connection")}>{t("m8FirstRun.reviewConnection")}</Button>{data.harness.activeSessionId && <Button disabled={busy} onClick={() => void stop()}>{t("overview.stop")}</Button>}<Button variant="primary" disabled={busy || !data.eligibility?.canStart} onClick={() => void start()}>{busy ? t("status.starting") : t("firstRun.start")}</Button></div>
-      </Section>}
-      <Disclosure title={t("m8.advanced")}><p>{t("m8FirstRun.existingSession")}</p><code>{data.harness.activeSessionId ?? t("activity.notRecorded")}</code></Disclosure>
-    </>}
-    {feedback && <InlineFeedback error={feedback.error}>{t(feedback.key)}{feedback.detail}</InlineFeedback>}
+  return <div className="onboarding-shell">
+    <div className="wizard-content">
+      <aside className="onboarding-aside">
+        <div className="onboarding-brand"><div className="brand-mark" aria-hidden="true"><span>H</span></div><span>{t("app.desktopWorkspace")}</span></div>
+        <div><h1>ChatGPT Harness</h1><p>{t("m8FirstRun.title")}</p></div>
+        <nav className="setup-progress" aria-label={t("m8FirstRun.steps")}>{steps.map((item, index) => <span key={item} aria-current={step === item ? "step" : undefined}>{index + 1}. {t(`m8FirstRun.${item}`)}</span>)}</nav>
+      </aside>
+      <main className="onboarding-main">
+        {data.configError ? <ConfigRecovery onReset={() => leave(() => setResetOpen(true))} disabled={busy} /> : <div className="wizard-step">
+          {step === "workspace" && <Section title={t("m8FirstRun.workspace")}><p>{t("m8FirstRun.workspaceHelp")}</p><TextField label={t("settings.workspace.root")} value={data.config?.workspace.rootPath ?? ""} readOnly />
+            <div className="wizard-actions"><Button variant={hasWorkspace ? "secondary" : "primary"} onClick={() => void chooseWorkspace()} disabled={busy}>{t("firstRun.chooseFolder")}</Button><Button variant="primary" disabled={busy || !hasWorkspace} onClick={() => go("connection")}>{t("m8FirstRun.continue")}</Button></div>
+          </Section>}
+          {step === "connection" && <Section title={t("m8FirstRun.connection")}><p>{t("m8FirstRun.connectionHelp")}</p>
+            <TextField label={t("firstRun.tunnelId")} value={draft.tunnelId} disabled={busy} onChange={(event) => setDraft((current) => ({ ...current, tunnelId: event.target.value }))} />
+            <TextField label={t("firstRun.apiKey")} type="password" value={key} autoComplete="off" disabled={busy} onChange={(event) => setKey(event.target.value)} helper={t(!data.apiKeyObserved ? "m8.unknown" : data.apiKeyConfigured ? "m8FirstRun.keyConfigured" : "m8FirstRun.keyRequired")} />
+            {conflict && <InlineFeedback error>{t("m8.conflict")} <Button disabled={busy} variant="quiet" onClick={() => leave(discard)}>{t("m8.reload")}</Button></InlineFeedback>}
+            <div className="wizard-actions"><Button disabled={busy} onClick={() => go("workspace")}>{t("m8FirstRun.back")}</Button><Button variant="primary" disabled={busy || Boolean(conflict) || !hasWorkspace} onClick={() => void applyConnection()}>{busy ? t("common.saving") : t("m8FirstRun.applyContinue")}</Button></div>
+          </Section>}
+          {step === "readiness" && <Section title={t("m8FirstRun.readiness")}><p>{t(prepared ? "m8FirstRun.prepared" : "m8FirstRun.notPrepared")}</p><p>{data.eligibility ? t(startEligibilityKey(data.eligibility.status)) : t("m8.unknown")}</p>
+            <div className="wizard-actions"><Button disabled={busy} onClick={() => go("connection")}>{t("m8FirstRun.reviewConnection")}</Button><Button disabled={busy} onClick={() => void data.refreshConfig()}>{t("common.refresh")}</Button><Button variant="primary" disabled={busy || !prepared} onClick={() => go("start")}>{t("m8FirstRun.continue")}</Button></div>
+          </Section>}
+          {step === "start" && <Section title={t("m8FirstRun.start")}><p>{t("m8FirstRun.startHelp")}</p><p>{data.harnessObserved ? t(`status.${data.overall}`) : t("m8.unknown")}</p>
+            {data.eligibility && !data.eligibility.canStart && <InlineFeedback error>{t(startEligibilityKey(data.eligibility.status))}</InlineFeedback>}
+            <div className="wizard-actions"><Button disabled={busy} onClick={() => go("connection")}>{t("m8FirstRun.reviewConnection")}</Button>{data.harness.activeSessionId && <Button disabled={busy} onClick={() => void stop()}>{t("overview.stop")}</Button>}<Button variant="primary" disabled={busy || !data.eligibility?.canStart} onClick={() => void start()}>{busy ? t("status.starting") : t("firstRun.start")}</Button></div>
+          </Section>}
+          <Disclosure title={t("m8.advanced")}><p>{t("m8FirstRun.existingSession")}</p><code>{data.harness.activeSessionId ?? t("activity.notRecorded")}</code></Disclosure>
+        </div>}
+        {feedback && <InlineFeedback error={feedback.error}>{t(feedback.key)}{feedback.detail}</InlineFeedback>}
+      </main>
+    </div>
     {resetOpen && <Dialog title={t("m8FirstRun.resetTitle")} onClose={() => { if (!busy) setResetOpen(false); }}><p>{t("m8FirstRun.resetLoss")}</p>{feedback?.error && <InlineFeedback error>{t(feedback.key)}</InlineFeedback>}<div className="settings-actions"><Button disabled={busy} onClick={() => setResetOpen(false)}>{t("common.cancel")}</Button><Button variant="danger" disabled={busy} onClick={() => void reset()}>{busy ? t("common.saving") : t("firstRun.reset")}</Button></div></Dialog>}
-  </div></div>;
+  </div>;
 }

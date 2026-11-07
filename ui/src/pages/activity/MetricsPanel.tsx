@@ -51,7 +51,7 @@ export function MetricsPanel() {
   useEffect(() => { void load(); }, [load]);
 
   return <Card className="activity-card" aria-label={t("m08Metrics.title")}>
-    <div className="activity-filter" role="toolbar" aria-label={t("m08Metrics.filters")}>
+    <div className="filter-toolbar" role="toolbar" aria-label={t("m08Metrics.filters")}>
       <Select label={t("m08Metrics.timeRange")} value={range} onChange={(event) => setRange(event.target.value as Range)}>
         <option value="24h">{t("m03History.range.24h")}</option>
         <option value="7d">{t("m03History.range.7d")}</option>
@@ -71,35 +71,50 @@ export function MetricsPanel() {
 
 function MetricsResult({ result, t }: { result: MetricsQueryResult; t: (key: string, options?: Record<string, unknown>) => string }) {
   const c = result.counts;
-  const cells: Array<[string, number]> = [
+  const volume: Array<[string, number]> = [
     [t("m08Metrics.received"), c.receivedCalls], [t("m08Metrics.executionAttempts"), c.executionAttempts],
+    [t("m08Metrics.incomplete"), c.incompleteCalls], [t("m08Metrics.unknown"), c.unknownCalls],
+  ];
+  const outcomes: Array<[string, number]> = [
     [t("m08Metrics.successful"), c.successfulCalls], [t("m08Metrics.failed"), c.failedCalls],
     [t("m08Metrics.denied"), c.deniedCalls], [t("m08Metrics.cancelled"), c.cancelledCalls],
     [t("m08Metrics.timedOut"), c.timedOutCalls], [t("m08Metrics.preExecutionFailed"), c.preExecutionFailedCalls],
     [t("m08Metrics.approvalExpired"), c.approvalExpiredCalls], [t("m08Metrics.approvalCancelled"), c.approvalCancelledCalls],
-    [t("m08Metrics.incomplete"), c.incompleteCalls], [t("m08Metrics.unknown"), c.unknownCalls],
   ];
+  const primaryDuration = result.execution.averageMs === undefined ? t("m08Metrics.unavailable") : `${Math.round(result.execution.averageMs)} ms`;
   return <>
-    <dl className="detail-list metrics-counts">{cells.map(([label, value]) => <div key={label}><dt>{label}</dt><dd><strong>{value}</strong></dd></div>)}</dl>
-    <section className="workspace-section">
-      <h3>{t("m08Metrics.successRate")}</h3>
-      <p><strong>{c.executionSuccessRate === undefined ? t("m08Metrics.unavailable") : `${(c.executionSuccessRate * 100).toFixed(1)}%`}</strong> {t("m08Metrics.denominator", { numerator: c.executionSuccessNumerator, denominator: c.completedExecutionDenominator })}</p>
-      <StatusBadge tone={c.executionSuccessSampleStatus === "SUFFICIENT" ? "success" : c.executionSuccessSampleStatus === "NO_DATA" ? "neutral" : "warning"}>{metricStatus(c.executionSuccessSampleStatus, t)}</StatusBadge>
-    </section>
-    <dl className="detail-list metrics-durations">
-      <Duration label={t("m08Metrics.executionDuration")} metric={result.execution} t={t} />
-      <Duration label={t("m08Metrics.approvalWait")} metric={result.approvalWait} t={t} />
-      <Duration label={t("m08Metrics.requestWall")} metric={result.requestWall} t={t} />
-    </dl>
-    <section className="workspace-section">
-      <h3>{t("m08Metrics.coverage")}</h3>
-      <p>{t("m08Metrics.coverageSummary", { complete: result.coverage.completeRequestCount, incomplete: result.coverage.incompleteRequestCount, unknown: result.coverage.unknownRequestCount, legacy: result.coverage.legacyUntracedRequestCount })}</p>
-      {(result.coverage.storeStatus.state !== "healthy" || result.coverage.dropCount > 0 || result.coverage.coverageUnknownSinceUtc) && <div className="notice notice-warning" role="status">
-        <strong>{t("m08Metrics.coverageWarning")}</strong>
-        <span>{t(`m03History.storeState.${result.coverage.storeStatus.state}`)} · {t("m08Metrics.dropped", { count: result.coverage.dropCount })}</span>
-      </div>}
-      {result.coverage.storeStatus.state === "healthy" && result.coverage.dropCount === 0 && !result.coverage.coverageUnknownSinceUtc && <p className="muted">{t("m03History.storeState.healthy")}</p>}
-    </section>
+    <div className="metrics-summary">
+      <div className="metric-card"><span>{t("m08Metrics.received")}</span><strong>{c.receivedCalls}</strong><span>{t("m08Metrics.executionAttempts")}: {c.executionAttempts}</span></div>
+      <div className="metric-card"><span>{t("m08Metrics.successRate")}</span><strong>{c.executionSuccessRate === undefined ? "—" : `${(c.executionSuccessRate * 100).toFixed(1)}%`}</strong><span>{t("m08Metrics.denominator", { numerator: c.executionSuccessNumerator, denominator: c.completedExecutionDenominator })}</span></div>
+      <div className="metric-card"><span>{t("m08Metrics.executionDuration")}</span><strong>{primaryDuration}</strong><span>{t("m08Metrics.samples", { count: result.execution.sampleCount })}</span></div>
+    </div>
+    <div className="metrics-content page-stack">
+      <section className="workspace-section">
+        <h3>{t("m08Metrics.received")} / {t("m08Metrics.executionAttempts")}</h3>
+        <dl className="detail-list metrics-counts">{volume.map(([label, value]) => <div key={label}><dt>{label}</dt><dd><strong>{value}</strong></dd></div>)}</dl>
+      </section>
+      <section className="workspace-section">
+        <div className="section-heading"><div className="section-heading-copy"><h3>{t("m08Metrics.successRate")}</h3></div><StatusBadge tone={c.executionSuccessSampleStatus === "SUFFICIENT" ? "success" : c.executionSuccessSampleStatus === "NO_DATA" ? "neutral" : "warning"} visual={c.executionSuccessSampleStatus === "SUFFICIENT" ? "success" : c.executionSuccessSampleStatus === "NO_DATA" ? "unknown" : "warning"}>{metricStatus(c.executionSuccessSampleStatus, t)}</StatusBadge></div>
+        <dl className="detail-list metrics-counts">{outcomes.map(([label, value]) => <div key={label}><dt>{label}</dt><dd><strong>{value}</strong></dd></div>)}</dl>
+      </section>
+      <section className="workspace-section">
+        <h3>{t("m08Metrics.p95")}</h3>
+        <dl className="detail-list metrics-durations">
+          <Duration label={t("m08Metrics.executionDuration")} metric={result.execution} t={t} />
+          <Duration label={t("m08Metrics.approvalWait")} metric={result.approvalWait} t={t} />
+          <Duration label={t("m08Metrics.requestWall")} metric={result.requestWall} t={t} />
+        </dl>
+      </section>
+      <section className="workspace-section">
+        <h3>{t("m08Metrics.coverage")}</h3>
+        <p>{t("m08Metrics.coverageSummary", { complete: result.coverage.completeRequestCount, incomplete: result.coverage.incompleteRequestCount, unknown: result.coverage.unknownRequestCount, legacy: result.coverage.legacyUntracedRequestCount })}</p>
+        {(result.coverage.storeStatus.state !== "healthy" || result.coverage.dropCount > 0 || result.coverage.coverageUnknownSinceUtc) && <div className="notice notice-warning" role="status">
+          <strong>{t("m08Metrics.coverageWarning")}</strong>
+          <span>{t(`m03History.storeState.${result.coverage.storeStatus.state}`)} · {t("m08Metrics.dropped", { count: result.coverage.dropCount })}</span>
+        </div>}
+        {result.coverage.storeStatus.state === "healthy" && result.coverage.dropCount === 0 && !result.coverage.coverageUnknownSinceUtc && <p className="muted">{t("m03History.storeState.healthy")}</p>}
+      </section>
+    </div>
   </>;
 }
 

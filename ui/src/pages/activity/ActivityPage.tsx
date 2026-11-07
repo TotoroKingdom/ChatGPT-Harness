@@ -10,6 +10,7 @@ import {
   Disclosure,
   InlineFeedback,
   Inspector,
+  ObservedTime,
   Row,
   Segmented,
   Select,
@@ -94,20 +95,23 @@ export function ActivityPage({ onNavigate }: { onNavigate?: Navigate } = {}) {
   };
 
   return <div className="page-stack">
+    <h2 className="sr-only">{t("activity.title")}</h2>
     <SectionHeading
       title={t("activity.feed")}
       description={t("activity.help")}
-      action={tab === "live" ? <Button variant="secondary" onClick={onRefresh} disabled={refreshing}>{t("activity.refresh")}</Button> : undefined}
-    />
-    <Segmented
-      value={tab}
-      label={t("m03History.view")}
-      options={[
-        { value: "live", label: t("m03History.live") },
-        { value: "history", label: t("m03History.history") },
-        { value: "metrics", label: t("m08Metrics.tab") },
-      ]}
-      onChange={setTab}
+      action={<div className="activity-toolbar-actions">
+        <Segmented
+          value={tab}
+          label={t("m03History.view")}
+          options={[
+            { value: "live", label: t("m03History.live") },
+            { value: "history", label: t("m03History.history") },
+            { value: "metrics", label: t("m08Metrics.tab") },
+          ]}
+          onChange={setTab}
+        />
+        {tab === "live" && <Button variant="secondary" onClick={onRefresh} disabled={refreshing}>{t("activity.refresh")}</Button>}
+      </div>}
     />
     {tab === "history"
       ? <HistoryPanel />
@@ -161,8 +165,8 @@ type ActivityFeedProps = {
 function ActivityFeed({ rows, visibleRows, tools, outcomeFilter, onOutcomeFilter, toolFilter, onToolFilter, onInspect, selectedRow, onClose, onNavigate, config, approvals, t }: ActivityFeedProps) {
   return <>
     <Card className="activity-card">
-      <div className="activity-filter" role="toolbar" aria-label={t("m8Activity.toolFilter")}>
-        <span className="muted">{t("m8Activity.scope")}</span>
+      <div className="filter-toolbar" role="toolbar" aria-label={t("m8Activity.toolFilter")}>
+        <div className="filter-toolbar-copy"><span>{t("m8Activity.scope")}</span></div>
         <Segmented
           value={outcomeFilter}
           options={[
@@ -181,13 +185,16 @@ function ActivityFeed({ rows, visibleRows, tools, outcomeFilter, onOutcomeFilter
           <option value="">{t("m8Activity.all")}</option>
           {tools.map((tool) => <option key={tool} value={tool}>{tool}</option>)}
         </Select>}
-        <span className="catalog-count">{visibleRows.length}/{rows.length}</span>
+        <span className="catalog-count" aria-label={`${visibleRows.length}/${rows.length}`}>{visibleRows.length}/{rows.length}</span>
       </div>
       {rows.length === 0
         ? <div className="empty-inline"><strong>{t("m8Activity.empty")}</strong><p>{t("m8Activity.emptyHelp")}</p></div>
         : visibleRows.length === 0
           ? <div className="empty-inline"><p>{t("m8Activity.noMatches")}</p></div>
-          : <div aria-label={t("activity.feed")}>{[...visibleRows].reverse().map((row) => <ActivityRowView key={row.rowKey} row={row} selected={selectedRow?.rowKey === row.rowKey} onInspect={() => onInspect(row)} t={t} />)}</div>}
+          : <div className="activity-grid" aria-label={t("activity.feed")}>
+            <div className="activity-grid-head activity-live-grid" aria-hidden="true"><span>{t("activity.timestamp")}</span><span>{t("activity.tool")}</span><span>{t("m8Activity.target")}</span><span>{t("m8Activity.event")}</span><span>{t("activity.outcome")}</span></div>
+            {[...visibleRows].reverse().map((row) => <ActivityRowView key={row.rowKey} row={row} selected={selectedRow?.rowKey === row.rowKey} onInspect={() => onInspect(row)} t={t} />)}
+          </div>}
     </Card>
     {selectedRow && <ActivityInspector row={selectedRow} onClose={onClose} onNavigate={onNavigate} config={config} approvals={approvals} t={t} />}
   </>;
@@ -202,18 +209,16 @@ function ActivityRowView({ row, selected, onInspect, t }: { row: ActivityRow; se
   const tool = entry.toolName === null ? t("m8Activity.noTool") : entry.toolName ?? t("m8Activity.notRecorded");
   const duration = activityDuration(entry);
   const targetText = target
-    ? <><span>{t(target.kind === "command" ? "m8Activity.command" : "m8Activity.target")}: </span><code>{target.value}</code></>
+    ? <><span className="cell-muted">{t(target.kind === "command" ? "m8Activity.command" : "m8Activity.target")}: </span><code>{target.value}</code></>
     : entry.toolName === null ? t("m8Activity.noTool") : t("m8Activity.notRecorded");
   return <article className="activity-row" data-testid={`activity-row-${row.rowKey}`}>
-    <Row selected={selected} onInspect={onInspect} title={<>
-      <span className="activity-type">
-        <span className={`event-marker ${activityOutcomeTone(kind)}`} aria-hidden="true" />
-        {entry.timestamp ? <time dateTime={entry.timestamp}>{timestamp}</time> : <span>{timestamp}</span>}
-        <strong>{tool}</strong>
-      </span>
-      <span className="row-summary">{targetText}</span>
-      <span className="row-summary"><span>{event}</span> · <StatusBadge tone={activityOutcomeTone(kind)}>{t(activityOutcomeKey(kind))}</StatusBadge>{duration !== undefined && <> · {duration}</>}</span>
-    </>} />
+    <button type="button" className={`activity-row-button activity-live-grid ${selected ? "selected" : ""}`} onClick={onInspect}>
+      <span className="cell-time"><ObservedTime value={entry.timestamp} fallback={timestamp} /></span>
+      <strong className="cell-tool">{tool}</strong>
+      <span className="cell-target">{targetText}</span>
+      <span className="cell-event">{event}{duration !== undefined && <span className="cell-muted"> · {duration} {t("diagnostics.milliseconds")}</span>}</span>
+      <span className="cell-outcome"><StatusBadge tone={activityOutcomeTone(kind)} visual={activityOutcomeTone(kind)}>{t(activityOutcomeKey(kind))}</StatusBadge></span>
+    </button>
   </article>;
 }
 
@@ -247,7 +252,7 @@ function ActivityInspector({ row, onClose, onNavigate, config, approvals, t }: {
     </InspectorSection>
     <InspectorSection title={t("m8Activity.result")}>
       <p><StatusBadge tone={activityOutcomeTone(kind)}>{outcome}</StatusBadge></p>
-      {duration !== undefined && <p>{t("m7.evidence.duration")}: <code>{duration}</code></p>}
+      {duration !== undefined && <p>{t("m7.evidence.duration")}: <code>{duration}</code> <span>{t("diagnostics.milliseconds")}</span></p>}
       {entry.resultEvidence && <pre>{JSON.stringify(entry.resultEvidence, null, 2)}</pre>}
       {!entry.resultEvidence && duration === undefined && <p className="muted">{t("m8Activity.notRecorded")}</p>}
     </InspectorSection>

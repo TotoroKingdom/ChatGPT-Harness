@@ -31,6 +31,7 @@ export function HistorySettingsSection() {
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedbackError, setFeedbackError] = useState(false);
   const [clearFeedback, setClearFeedback] = useState<HistoryClearResult | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
 
@@ -52,16 +53,25 @@ export function HistorySettingsSection() {
     if (!draft || !valid(draft) || saving) return;
     setSaving(true);
     setFeedback(null);
-    const result = await data.mutateConfig((latest) => ({ ...latest, history: draft }));
-    setSaving(false);
-    setFeedback(result.ok ? t("m03History.settings.saved") : t("m03History.settings.saveFailed"));
-    await refreshStatus();
+    setFeedbackError(false);
+    try {
+      const result = await data.mutateConfig((latest) => ({ ...latest, history: draft }));
+      setFeedback(result.ok ? t("m03History.settings.saved") : t("m03History.settings.saveFailed"));
+      setFeedbackError(!result.ok);
+      await refreshStatus();
+    } catch {
+      setFeedback(t("m03History.settings.saveFailed"));
+      setFeedbackError(true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const clear = async () => {
     if (clearing) return;
     setClearing(true);
     setFeedback(null);
+    setFeedbackError(false);
     try {
       const result = await data.client.historyClear();
       setClearFeedback(result);
@@ -71,6 +81,7 @@ export function HistorySettingsSection() {
       setFeedback(typeof error === "object" && error !== null && "code" in error
         ? String(error.code)
         : t("m03History.settings.clearFailed"));
+      setFeedbackError(true);
     } finally {
       setClearing(false);
     }
@@ -120,7 +131,7 @@ export function HistorySettingsSection() {
     />
     {data.restartRequired && <InlineFeedback>{t("m03History.settings.restartRequired")}</InlineFeedback>}
     <InlineFeedback>{t("m03History.settings.privacy")}</InlineFeedback>
-    {feedback && <InlineFeedback error={feedback.startsWith("EVIDENCE_")}>{feedback}</InlineFeedback>}
+    {feedback && <InlineFeedback error={feedbackError}>{feedback}</InlineFeedback>}
     {clearFeedback && <div className="notice notice-success" role="status">{t("m03History.settings.cleared", {
       requests: clearFeedback.deletedRequestCount,
       events: clearFeedback.deletedEventCount,

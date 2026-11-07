@@ -274,7 +274,10 @@ export function PoliciesPage({
 
   const openCreate = () => {
     requestLeave(() => {
-      const nextEditor = newRuleEditor(desired.userRules.map((rule) => rule.id));
+      const nextEditor = newRuleEditor(desired.userRules.map((rule) => rule.id), {
+        name: t("m8Policies.ruleNamePlaceholder"),
+        reason: t("m8Policies.ruleReasonPlaceholder"),
+      });
       setEditor(nextEditor);
       setEditorInitial(nextEditor);
       setEditorBaseline(null);
@@ -417,16 +420,26 @@ export function PoliciesPage({
   const runtimeRestartRequired = configurationConfirmed && data.restartRequired;
 
   return <div className="page-stack">
-    <SectionHeading eyebrow={t("policies.eyebrow")} title={t("policies.title")} description={t("policies.description")} action={<StatusBadge tone={statusTone}>{statusText}</StatusBadge>} />
+    <h2 className="sr-only">{t("policies.title")}</h2>
+    <div className="policy-status-strip">
+      <div className="policy-status-copy">
+        <StatusBadge tone={statusTone} visual={effective?.valid === false ? "danger" : effective?.valid ? "success" : "unknown"}>{statusText}</StatusBadge>
+      </div>
+      <div className="row-wrap">
+        {runtimeRestartRequired && <Button variant="secondary" onClick={() => void data.restartHarness()}>{t("overview.restart")}</Button>}
+      </div>
+    </div>
     {!configurationConfirmed && <div className="notice notice-warning" role="status"><strong>{tx(t, "m8Policies.configUnavailableTitle", "Saved configuration is not confirmed")}</strong><span>{tx(t, "m8Policies.configUnavailable", "Policy defaults and user rules remain unavailable until the saved configuration is loaded.")}</span></div>}
     {effective && !effective.valid && <div className="notice notice-danger" role="alert"><strong>{tx(t, "m8Policies.criticalInvalid", "Critical: invalid Policy snapshot")}</strong><span>{t("policies.invalidSnapshotDescription")}</span><span>{t("m7.remediation.invalid_policy_snapshot")}</span></div>}
-    {runtimeRestartRequired && <section aria-label={t("policies.restartRequired")}><div className="notice notice-warning" role="status"><strong>{t("policies.restartRequired")}</strong><span>{t("policies.restartRequiredDescription")}</span><Button variant="secondary" onClick={() => void data.restartHarness()}>{t("overview.restart")}</Button></div></section>}
+    {runtimeRestartRequired && <section aria-label={t("policies.restartRequired")}><div className="notice notice-warning" role="status"><strong>{t("policies.restartRequired")}</strong><span>{t("policies.restartRequiredDescription")}</span></div></section>}
     {error && <InlineFeedback error>{t(error.key, { ...error.values, defaultValue: error.key })}{error.detail ? ` ${error.detail}` : ""}{error.code ? ` (${error.code})` : ""}</InlineFeedback>}
     {isConflict(error) && editorBaseline && <div className="secondary-actions"><Button variant="secondary" onClick={reloadConflictedRule}>{t("m8.reload")}</Button><Button variant="quiet" onClick={closeEditor}>{tx(t, "common.cancel", "Cancel")}</Button></div>}
     {message && <InlineFeedback>{renderMessage(t, message)}</InlineFeedback>}
 
     <Section title={tx(t, "m8Policies.defaults", "Tool defaults")} action={<span className="muted">{configurationConfirmed ? tx(t, "m8Policies.defaultsHint", "Saved configuration · changes apply to the next Runtime generation") : tx(t, "m8Policies.configUnavailable", "Saved configuration is not confirmed")}</span>}>
-      <div className="workspace-list">{defaultToolRows.map((tool) => {
+      <div className="data-table">
+        <div className="data-table-head policy-default-grid" aria-hidden="true"><span>{t("policies.tool")}</span><span>{tx(t, "m8Policies.savedValue", "Saved")} / {tx(t, "m8Policies.currentRuntime", "Current Runtime")}</span><span>{t("policies.desiredDefault")}</span></div>
+        {defaultToolRows.map((tool) => {
         const effectiveTool = effectiveByTool.get(tool.name);
         const value = desired.toolDefaults[tool.key];
         const isSaving = Boolean(pendingDefaults[String(tool.key)]);
@@ -434,14 +447,25 @@ export function PoliciesPage({
           ? <Segmented value={value} label={t("policies.desiredDefaultFor", { tool: tool.name })} disabled={isSaving} options={decisions.map((decision) => ({ value: decision, label: t(policyDecisionKey(decision)) }))} onChange={(decision) => void saveDefault(tool.key, decision)} />
           : <span className="muted">{tx(t, "m8Policies.configNotConfirmed", "Saved value not confirmed")}</span>;
         const feedback = defaultFeedback[String(tool.key)];
-        return <div key={tool.name}><Row title={<><strong className="mono">{tool.name}</strong>{tool.name === "bash" && <StatusBadge tone="warning">{t("policies.highRiskDeveloperTest")}</StatusBadge>}</>} summary={<>{configurationConfirmed ? <>{tx(t, "m8Policies.savedValue", "Saved")}: {t(policyDecisionKey(value))}</> : tx(t, "m8Policies.configNotConfirmed", "Saved value not confirmed")} · {tx(t, "m8Policies.currentRuntime", "Current Runtime")}: {effectiveTool ? t(policyDecisionKey(effectiveTool.decision)) : t("policies.notObserved")}</>} controls={control} />{feedback && <InlineFeedback error={feedback.error}>{t(feedback.message.key, { defaultValue: feedback.message.key })}</InlineFeedback>}</div>;
-      })}</div>
+        return <div className="data-row policy-default-grid" key={tool.name}>
+          <div className="data-cell"><strong className="mono">{tool.name}</strong>{tool.name === "bash" && <span className="policy-risk-note"><StatusBadge tone="warning" visual="warning">{t("policies.highRiskDeveloperTest")}</StatusBadge></span>}</div>
+          <div className="data-cell policy-default-facts">
+            <span><small>{tx(t, "m8Policies.savedValue", "Saved")}</small><strong>{configurationConfirmed ? t(policyDecisionKey(value)) : tx(t, "m8Policies.configNotConfirmed", "Saved value not confirmed")}</strong></span>
+            <span><small>{tx(t, "m8Policies.currentRuntime", "Current Runtime")}</small><strong>{effectiveTool ? t(policyDecisionKey(effectiveTool.decision)) : t("policies.notObserved")}</strong></span>
+          </div>
+          <div className="data-cell data-cell-actions">{control}</div>
+          {feedback && <div className="data-row-feedback"><InlineFeedback error={feedback.error}>{t(feedback.message.key, { defaultValue: feedback.message.key })}</InlineFeedback></div>}
+        </div>;
+      })}
+      </div>
     </Section>
 
     <Section title={tx(t, "m8Policies.userRules", "User rules")} action={<Button variant="primary" disabled={!configurationConfirmed} onClick={openCreate}>{tx(t, "m8Policies.addRule", "Add rule")}</Button>}>
-      <p className="settings-help muted">{t("policies.userRulesDescription")}</p>
-      <p className="settings-help muted">{t("policies.userRulesHelp")}</p>
-      {!configurationConfirmed ? <p className="empty-inline">{tx(t, "m8Policies.configUnavailable", "Saved configuration is not confirmed")}</p> : desired.userRules.length === 0 ? <p className="empty-inline">{t("policies.noDesiredUserRules")}</p> : <div className="workspace-list">{desired.userRules.map((item) => <RuleRow key={item.id} rule={item} t={t} editingId={editingId} saving={saving} pending={Boolean(pendingRuleIds[item.id])} feedback={ruleFeedback[item.id]} onInspect={() => openEdit(item)} onToggle={() => void toggleRule(item)} onDelete={() => requestDelete(item)} />)}</div>}
+      <Disclosure title={t("policies.rulesHelp")}>
+        <p className="settings-help muted">{t("policies.userRulesDescription")}</p>
+        <p className="settings-help muted">{t("policies.userRulesHelp")}</p>
+      </Disclosure>
+      {!configurationConfirmed ? <p className="empty-inline policy-empty">{tx(t, "m8Policies.configUnavailable", "Saved configuration is not confirmed")}</p> : desired.userRules.length === 0 ? <p className="empty-inline policy-empty">{t("policies.noDesiredUserRules")}</p> : <div className="workspace-list">{desired.userRules.map((item) => <RuleRow key={item.id} rule={item} t={t} editingId={editingId} saving={saving} pending={Boolean(pendingRuleIds[item.id])} feedback={ruleFeedback[item.id]} onInspect={() => openEdit(item)} onToggle={() => void toggleRule(item)} onDelete={() => requestDelete(item)} />)}</div>}
     </Section>
 
     <Section title={tx(t, "m8Policies.guardrails", "System guardrails")}>

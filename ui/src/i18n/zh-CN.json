@@ -8,6 +8,8 @@
     "dataSource": "Runtime 数据源",
     "realSource": "Tauri Runtime",
     "mockSource": "Mock Runtime · 测试",
+    "desktopWorkspace": "本地工作台",
+    "desktopRuntime": "本机桌面运行",
     "runtimeStatus": "Runtime {{status}}",
     "mockStatus": "Mock Runtime {{status}}"
   },
@@ -24,6 +26,7 @@
     "readingSnapshot": "正在读取 Runtime 快照",
     "noSnapshot": "当前没有可用的快照。这不是空结果。",
     "close": "关闭",
+    "details": "详情",
     "saving": "保存中…",
     "cancel": "取消"
   },
@@ -48,13 +51,21 @@
     "activity": "活动记录",
     "approvals": "审批",
     "settings": "设置",
+    "descriptions": {
+      "overview": "查看系统状态、连接情况和最近发生的事。",
+      "tools": "管理 ChatGPT 可以调用的工具和默认权限。",
+      "policies": "定义何时允许、询问或拒绝工具操作。",
+      "approvals": "处理需要你确认的高风险操作。",
+      "activity": "查看已记录的请求、结果和运行指标。",
+      "settings": "调整应用、连接、本地数据和安全选项。"
+    },
     "eyebrows": {
-      "overview": "Control plane",
-      "tools": "Capability catalog",
-      "policies": "Security posture",
+      "overview": "系统状态",
+      "tools": "工具目录",
+      "policies": "权限策略",
       "activity": "审计记录",
       "approvals": "人工审批",
-      "settings": "Configuration"
+      "settings": "偏好设置"
     }
   },
   "status": {
@@ -227,6 +238,16 @@
     }
   },
   "overview": {
+    "summaryReady": "核心服务运行正常，当前无需操作。",
+    "summaryUnknown": "尚未读取到系统状态，请重试或在设置中检查配置。",
+    "summaryFailed": "系统需要处理。先查看问题，再决定是否重启或修改设置。",
+    "summaryStopped": "Harness 当前已停止。准备好后可以启动。",
+    "summaryStarting": "服务正在启动，状态会自动更新。",
+    "serviceRuntime": "本地执行引擎",
+    "serviceTunnel": "与 ChatGPT 的安全连接",
+    "serviceMcp": "工具接入端点",
+    "recentActivityHint": "最新收到的操作记录",
+    "diagnosticsPrompt": "需要进一步排查？运行一次连接诊断，查看各项检查与启动耗时。",
     "tunnelRecovery": "Tunnel 自动恢复",
     "cooldownUntil": "冷却结束时间",
     "nextRecoveryAttempt": "下次恢复时间",
@@ -285,6 +306,11 @@
     }
   },
   "diagnostics": {
+    "title": "连接诊断",
+    "open": "查看系统状态",
+    "notRun": "尚未诊断",
+    "lastRun": "最近完成于 {{time}}",
+    "expandDetails": "展开详情",
     "run": "运行连接诊断",
     "running": "正在运行连接诊断…",
     "overall": "总体结果",
@@ -303,10 +329,10 @@
     "milliseconds": "毫秒",
     "slowestPhase": "最慢阶段",
     "status": {
-      "pass": "PASS",
-      "warning": "WARNING",
-      "fail": "FAIL",
-      "unknown": "UNKNOWN"
+      "pass": "通过",
+      "warning": "注意",
+      "fail": "失败",
+      "unknown": "未知"
     },
     "scope": {
       "config": "配置",
@@ -345,6 +371,9 @@
   },
   "tools": {
     "title": "工具",
+    "summaryTitle": "工具概览",
+    "summaryEnabled": "已启用",
+    "summaryTotal": "个工具",
     "eyebrow": "M5 受控 Bash",
     "description": "设置下一代 Runtime 的工具期望状态。当前有效状态在重启前保持不变。",
     "descriptionLegacy": "可用性和决策由 Runtime 报告，UI 不会自行推断。",
@@ -370,6 +399,7 @@
       "runningCaption": "期望状态会持久化；有效状态属于当前 Runtime 代次。",
       "stoppedCaption": "当前没有运行中的 Runtime。下面的开关将在下一次启动时生效。",
       "toolName": "工具名称",
+      "purpose": "用途",
       "availability": "可用性",
       "desired": "期望",
       "effective": "有效",
@@ -444,6 +474,7 @@
     "saving": "正在保存…",
     "saveChanges": "保存策略变更",
     "userRules": "用户策略",
+    "rulesHelp": "规则如何匹配",
     "userRulesDescription": "策略以类型化 matcher 持久化。Bash Command 前缀匹配规范化后的精确 token，不是正则表达式或子字符串。",
     "userRulesHelp": "动态或未分类的 Bash 表达式至少保持为询问。工具级 Bash 允许不是文件系统沙箱，也不会绕过 Runtime 审批或风险下限。",
     "noDesiredUserRules": "没有配置目标用户策略。",
@@ -520,7 +551,7 @@
     "empty": "没有保留的活动记录",
     "emptyHelp": "空快照不代表已就绪，也不代表从未发生请求。",
     "caption": "最近活动 · 接收顺序",
-    "timestamp": "时间戳（UTC）",
+    "timestamp": "时间",
     "tool": "工具",
     "decision": "决策",
     "outcome": "结果",
@@ -582,6 +613,20 @@
   },
   "settings": {
     "appearance": "外观",
+    "index": "设置导航",
+    "groups": {
+      "preferences": "偏好与通知",
+      "preferencesHelp": "语言、外观和桌面提醒。",
+      "workspaceConnection": "工作区与连接",
+      "workspaceConnectionHelp": "工作区路径、Tunnel 和凭据。",
+      "securityData": "安全与数据",
+      "securityDataHelp": "安全模式、运行代次和 History 存储。",
+      "diagnostics": "诊断与高级",
+      "diagnosticsHelp": "连接诊断、本地路径和技术证据。",
+      "danger": "危险操作",
+      "dangerHelp": "重置本地配置及已保存凭据。",
+      "dangerSection": "重置应用数据"
+    },
     "autoStart": {
       "title": "打开应用时自动启动 Harness",
       "help": "打开 ChatGPT-Harness 后自动启动 Harness。登录 Windows 时不会自动打开应用。更改将在下次启动应用时生效。",
@@ -1063,6 +1108,7 @@
   },
   "m8Approvals": {
     "pending": "待处理",
+    "expiryLabel": "过期时间",
     "pendingCount": "{{count}} 个待处理请求",
     "pendingDescription": "先查看决策所需的 Runtime 事实，再选择处理方式。",
     "history": "历史",
@@ -1294,6 +1340,7 @@
     "live": "实时",
     "history": "历史",
     "timeRange": "时间范围",
+    "outcomeLabel": "结果",
     "range": {
       "24h": "最近 24 小时",
       "7d": "最近 7 天",
@@ -1310,15 +1357,15 @@
     "footprint": "{{bytes}} 字节",
     "dropWarning": "已丢弃 {{count}} 个证据事件，请求覆盖状态可能不完整。",
     "storeState": {
-      "disabled": "下一代 Runtime 已禁用 History。",
-      "healthy": "History 存储正常。",
-      "degraded": "History 存储已降级，既有证据仍会保留。",
-      "busy": "History 存储繁忙，请稍后重试。",
-      "incompatible": "History schema 不兼容，原文件已保留。",
-      "corrupt": "History 数据库已损坏，原文件已保留。",
-      "unavailable": "History 存储不可用。"
+      "disabled": "下一代 Runtime 已禁用历史记录。",
+      "healthy": "历史记录存储正常。",
+      "degraded": "历史记录存储已降级，既有证据仍会保留。",
+      "busy": "历史记录存储繁忙，请稍后重试。",
+      "incompatible": "历史记录的数据结构不兼容，原文件已保留。",
+      "corrupt": "历史记录数据库已损坏，原文件已保留。",
+      "unavailable": "历史记录存储不可用。"
     },
-    "error": "无法加载 History",
+    "error": "无法加载历史记录",
     "loading": "正在加载 History…",
     "empty": "没有符合筛选条件的保留记录",
     "emptyHelp": "History 仅作观测；空结果不代表 Runtime 已就绪。",
@@ -1389,28 +1436,28 @@
       "request_denied": "请求已拒绝"
     },
     "settings": {
-      "title": "History 历史记录",
-      "enabled": "启用 History",
+      "title": "历史记录",
+      "enabled": "记录活动历史",
       "enabledHelp": "更改将在 Runtime 重启后生效。",
       "retentionDays": "保留天数",
       "retentionError": "请输入 1 到 3650 天。",
       "maxStorageMiB": "最大存储（MiB）",
       "storageError": "请输入 32 到 4096 MiB。",
-      "save": "保存 History 设置",
+      "save": "保存历史设置",
       "saving": "正在保存…",
-      "saved": "History 设置已保存；重启 Harness 后生效。",
-      "saveFailed": "无法保存 History 设置。",
-      "effective": "当前 History 存储",
+      "saved": "历史设置已保存；重启 Harness 后生效。",
+      "saveFailed": "无法保存历史设置。",
+      "effective": "当前存储状态",
       "footprint": "已使用 {{bytes}} 字节",
       "restartRequired": "已保存的 History 设置与当前运行的 Runtime 代次不同。",
-      "privacy": "History 使用有界、已清理的证据并存储在本地。ChatGPT-Harness 不声称 SQLite 具备静态加密。",
-      "clear": "清空 History",
-      "clearTitle": "清空本地 History？",
+      "privacy": "历史记录仅保存在本机，内容有界且经过清理。应用不声称数据库具备静态加密。",
+      "clear": "清空历史记录",
+      "clearTitle": "清空本地历史记录？",
       "clearBody": "这会永久删除已保留的历史证据；不会取消请求、处理审批或更改策略。",
-      "clearConfirm": "清空 History",
+      "clearConfirm": "清空历史记录",
       "clearing": "正在清空…",
       "cleared": "已清空 {{requests}} 个请求、{{events}} 个事件和 {{approvals}} 条审批。",
-      "clearFailed": "无法清空 History。"
+      "clearFailed": "无法清空历史记录。"
     }
   },
   "m8Settings": {
