@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActivityEvent, RuntimeState } from "@protocol/v1";
+import type { ActivityEvent, ApprovalsListResult, DiagnosticRun, RuntimeState, StartupAttempt } from "@protocol/v1";
 import type { ActivityEventListener, ComponentStatesListener } from "@/services/harness/client";
 import { HarnessClientError } from "@/services/harness/errors";
 import { MockHarnessControlClient } from "@/services/harness/mock-client";
@@ -60,6 +60,74 @@ function Probe() {
       <output data-testid="subscription-state">{subscriptionState}</output>
     </>
   );
+}
+
+function ApprovalsProbe() {
+  const { approvals, refreshApprovals, runtime } = useHarnessData();
+  const count = approvals.status === "success" || approvals.status === "empty"
+    ? approvals.data.items.filter((item) => item.status === "pending").length
+    : -1;
+  return <>
+    <output data-testid="approval-status">{approvals.status}</output>
+    <output data-testid="approval-count">{count}</output>
+    <output data-testid="approval-runtime">{runtime.status === "success" || runtime.status === "empty" ? runtime.data.runtimeId : runtime.status}</output>
+    <button type="button" onClick={() => void refreshApprovals()}>Refresh approvals</button>
+  </>;
+}
+
+function DiagnosticsProbe() {
+  const { lastDiagnostics, latestStartupAttempt, runDiagnostics } = useHarnessData();
+  const [result, setResult] = useState("");
+  return <>
+    <output data-testid="diagnostics-present">{lastDiagnostics ? "present" : "none"}</output>
+    <output data-testid="startup-present">{latestStartupAttempt ? "present" : "none"}</output>
+    <output data-testid="diagnostics-result">{result}</output>
+    <button type="button" onClick={() => {
+      void runDiagnostics()
+        .then(() => setResult("ok"))
+        .catch((error) => setResult(String((error as { code?: string })?.code ?? "failed")));
+    }}>Run diagnostics</button>
+  </>;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function approvalEvent(overrides: Partial<ActivityEvent> = {}): ActivityEvent {
+  return {
+    eventId: "approval-event-1",
+    runtimeId: "runtime_mock_01",
+    sequence: "4",
+    eventType: "approval_requested",
+    timestamp: "2026-09-02T00:00:00Z",
+    summary: "Approval requested.",
+    metadata: {},
+    ...overrides,
+  };
+}
+
+function approvalItem(requestId: string) {
+  return {
+    requestId,
+    runtimeId: "runtime_mock_01",
+    generationId: "generation-mock",
+    tool: "write" as const,
+    sanitizedArguments: { tool: "write" as const, logicalPath: `${requestId}.txt` },
+    scopeSummary: `${requestId}.txt`,
+    matchedRuleIds: [],
+    policyReason: "tool_default" as const,
+    riskLevel: "low" as const,
+    createdAt: "2026-09-02T00:00:00Z",
+    expiresAt: "2026-09-02T01:00:00Z",
+    status: "pending" as const,
+  };
 }
 
 function LanguageProbe() {
@@ -214,6 +282,126 @@ describe("HarnessDataProvider activity subscription", () => {
 
     if (originalMatchMedia) Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: originalMatchMedia });
     else Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("reconciles the pending count from Runtime after an approval activity event", async () => {
+    render(<HarnessDataProvider><Probe /><ApprovalsProbe /></HarnessDataProvider>);
+    await waitFor(() => {
+      expect(screen.getByTestId("subscription-state")).toHaveTextContent("subscribed");
+      expect(screen.getByTestId("approval-runtime")).toHaveTextContent("runtime_mock_01");
+      expect(screen.getByTestId("approval-count")).toHaveTextContent(/^0$/);
+    });
+    const refresh = vi.spyOn(client, "approvalsList").mockResolvedValue({ items: [approvalItem("approval-new")] });
+    act(() => activityListener?.(approvalEvent()));
+    await waitFor(() => expect(refresh).toHaveBeenCalled(), { timeout: 1500 });
+    await waitFor(() => expect(screen.getByTestId("approval-count")).toHaveTextContent(/^1$/));
+  });
+
+  it("ignores approval signals from a previous Runtime identity", async () => {
+    render(<HarnessDataProvider><Probe /><ApprovalsProbe /></HarnessDataProvider>);
+    await waitFor(() => {
+      expect(screen.getByTestId("approval-runtime")).toHaveTextContent("runtime_mock_01");
+      expect(screen.getByTestId("approval-count")).toHaveTextContent(/^0$/);
+    });
+    const refresh = vi.spyOn(client, "approvalsList");
+    act(() => activityListener?.(approvalEvent({ eventId: "old-runtime", runtimeId: "runtime_old", sequence: "9" })));
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("keeps the newest authoritative approval read when responses arrive out of order", async () => {
+    render(<HarnessDataProvider><ApprovalsProbe /></HarnessDataProvider>);
+    await waitFor(() => expect(screen.getByTestId("approval-count")).toHaveTextContent(/^0$/));
+    const first = deferred<ApprovalsListResult>();
+    const second = deferred<ApprovalsListResult>();
+    const refresh = vi.spyOn(client, "approvalsList")
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh approvals" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh approvals" }));
+    expect(refresh).toHaveBeenCalledTimes(2);
+    await act(async () => second.resolve({
+      items: [
+        approvalItem("approval-a"),
+        approvalItem("approval-b"),
+      ],
+    }));
+    await waitFor(() => expect(screen.getByTestId("approval-count")).toHaveTextContent(/^2$/));
+    await act(async () => first.resolve({ items: Array.from({ length: 5 }, (_, index) => approvalItem(`stale-${index}`)) }));
+    expect(screen.getByTestId("approval-count")).toHaveTextContent(/^2$/);
+  });
+
+  it("removes the pending count when an authoritative approval read fails", async () => {
+    render(<HarnessDataProvider><ApprovalsProbe /></HarnessDataProvider>);
+    await waitFor(() => expect(screen.getByTestId("approval-count")).toHaveTextContent(/^0$/));
+    vi.spyOn(client, "approvalsList").mockRejectedValueOnce({ code: "RUNTIME_UNAVAILABLE" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh approvals" }));
+    await waitFor(() => expect(screen.getByTestId("approval-status")).toHaveTextContent("error"));
+    expect(screen.getByTestId("approval-count")).toHaveTextContent(/^-1$/);
+  });
+
+  it("reconciles approvals on the low-frequency fallback even without an activity event", async () => {
+    const setInterval = vi.spyOn(window, "setInterval");
+    render(<HarnessDataProvider><ApprovalsProbe /></HarnessDataProvider>);
+    await waitFor(() => expect(screen.getByTestId("approval-runtime")).toHaveTextContent("runtime_mock_01"));
+    const call = setInterval.mock.calls.find(([, delay]) => delay === 30_000);
+    expect(call).toBeDefined();
+    const refresh = vi.spyOn(client, "approvalsList").mockResolvedValue({ items: [approvalItem("fallback")] });
+    act(() => (call?.[0] as () => void)());
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("approval-count")).toHaveTextContent(/^1$/));
+  });
+
+  it("invalidates on disconnect and reconciles immediately after reconnect", async () => {
+    let listener: ComponentStatesListener | undefined;
+    vi.spyOn(client, "componentStatesSubscribe").mockImplementation(async (next) => {
+      listener = next;
+      return () => undefined;
+    });
+    render(<HarnessDataProvider><ApprovalsProbe /></HarnessDataProvider>);
+    await waitFor(() => {
+      expect(screen.getByTestId("approval-runtime")).toHaveTextContent("runtime_mock_01");
+      expect(screen.getByTestId("approval-count")).toHaveTextContent(/^0$/);
+    });
+
+    act(() => listener?.(
+      { runtime: "error", tunnel: "stopped", mcp: "error" },
+      undefined,
+      { phase: "crashed", error: { code: "RUNTIME_CRASHED", message: "Runtime crashed." } },
+    ));
+    await waitFor(() => expect(screen.getByTestId("approval-status")).toHaveTextContent("idle"));
+
+    const refresh = vi.spyOn(client, "approvalsList").mockResolvedValue({ items: [approvalItem("after-reconnect")] });
+    act(() => listener?.(
+      { runtime: "ready", tunnel: "ready", mcp: "ready" },
+      runtimeState({ runtimeId: "runtime-next" }),
+      { phase: "running" },
+    ));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("approval-count")).toHaveTextContent(/^1$/));
+    expect(screen.getByTestId("approval-runtime")).toHaveTextContent("runtime-next");
+  });
+
+  it("keeps a successful diagnostics result when the startup evidence read fails", async () => {
+    const run: DiagnosticRun = { runId: "run-1", startedAt: "2026-09-02T00:00:00Z", finishedAt: "2026-09-02T00:00:01Z", overallStatus: "pass", checks: [] };
+    vi.spyOn(client, "connectionDiagnosticsRun").mockResolvedValue(run);
+    vi.spyOn(client, "startupLatest").mockRejectedValue({ code: "RUNTIME_UNAVAILABLE" });
+    render(<HarnessDataProvider><DiagnosticsProbe /></HarnessDataProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Run diagnostics" }));
+    await waitFor(() => expect(screen.getByTestId("diagnostics-result")).toHaveTextContent("RUNTIME_UNAVAILABLE"));
+    expect(screen.getByTestId("diagnostics-present")).toHaveTextContent("present");
+    expect(screen.getByTestId("startup-present")).toHaveTextContent("none");
+  });
+
+  it("keeps successful startup evidence when diagnostics fails", async () => {
+    const startup: StartupAttempt = { attemptId: "attempt-1", harnessSessionId: "session-1", cohort: "cold", startedAt: "2026-09-02T00:00:00Z", outcome: "ready", phases: [], appVersion: "0.1.3" };
+    vi.spyOn(client, "connectionDiagnosticsRun").mockRejectedValue({ code: "RUNTIME_UNAVAILABLE" });
+    vi.spyOn(client, "startupLatest").mockResolvedValue(startup);
+    render(<HarnessDataProvider><DiagnosticsProbe /></HarnessDataProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Run diagnostics" }));
+    await waitFor(() => expect(screen.getByTestId("diagnostics-result")).toHaveTextContent("RUNTIME_UNAVAILABLE"));
+    expect(screen.getByTestId("diagnostics-present")).toHaveTextContent("none");
+    expect(screen.getByTestId("startup-present")).toHaveTextContent("present");
   });
 });
 

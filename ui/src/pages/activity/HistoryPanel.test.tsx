@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EvidenceStoreStatus,
@@ -109,6 +109,24 @@ function setup(result?: Partial<HistoryQueryResult>, status: EvidenceStoreStatus
   return { historyQuery, historyGet, traceGet };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function detailFor(requestId: string): HistoryGetResult {
+  return { ...detail(), summary: item({ requestId }) };
+}
+
+function traceFor(requestId: string, runtimeId = "runtime-a"): TraceGetResult {
+  return { ...trace(), requestId, runtimeId, traceId: `trace-${requestId}` };
+}
+
 beforeEach(async () => {
   await initializeLanguage("en");
 });
@@ -173,5 +191,89 @@ describe("M03 History panel", () => {
     await waitFor(() => expect(screen.getByText("History storage is degraded. Existing evidence is preserved.")).toBeInTheDocument());
     expect(screen.getByText("INCOMPLETE")).toBeInTheDocument();
     expect(screen.queryByText("No retained History matches these filters")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late detail response after the user selects a different request", async () => {
+    const first = deferred<HistoryGetResult>();
+    const second = deferred<HistoryGetResult>();
+    const historyQuery = vi.fn().mockResolvedValue({
+      items: [item({ requestId: "request-a" }), item({ requestId: "request-b" })],
+      storeStatus: healthy(),
+    });
+    const historyGet = vi.fn(({ requestId }: { requestId: string }) => requestId === "request-a" ? first.promise : second.promise);
+    harness.current = { client: { historyQuery, historyGet, traceGet: vi.fn() } };
+    render(<HistoryPanel />);
+
+    fireEvent.click(within(await screen.findByTestId("history-row-runtime-a-request-a")).getByRole("button"));
+    fireEvent.click(within(screen.getByTestId("history-row-runtime-a-request-b")).getByRole("button"));
+    await act(async () => second.resolve(detailFor("request-b")));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("request-b")).toBeInTheDocument();
+
+    await act(async () => first.resolve(detailFor("request-a")));
+    expect(within(dialog).getByText("request-b")).toBeInTheDocument();
+    expect(within(dialog).queryByText("request-a")).not.toBeInTheDocument();
+  });
+
+  it("does not reopen detail or trace after the inspector is closed", async () => {
+    const historyGet = deferred<HistoryGetResult>();
+    const traceGet = deferred<TraceGetResult>();
+    harness.current = {
+      client: {
+        historyQuery: vi.fn().mockResolvedValue({ items: [item()], storeStatus: healthy() }),
+        historyGet: vi.fn(() => historyGet.promise),
+        traceGet: vi.fn(() => traceGet.promise),
+      },
+    };
+    const view = render(<HistoryPanel />);
+    fireEvent.click(within(await screen.findByTestId("history-row-runtime-a-request-a")).getByRole("button"));
+    await act(async () => historyGet.resolve(detail()));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open request trace" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    view.rerender(<HistoryPanel />);
+    await act(async () => traceGet.resolve(trace()));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByText("trace-a")).not.toBeInTheDocument();
+  });
+
+  it("keeps Trace responses bound to the request that opened them", async () => {
+    const firstTrace = deferred<TraceGetResult>();
+    const secondTrace = deferred<TraceGetResult>();
+    harness.current = {
+      client: {
+        historyQuery: vi.fn().mockResolvedValue({
+          items: [item({ requestId: "request-a" }), item({ requestId: "request-b" })],
+          storeStatus: healthy(),
+        }),
+        historyGet: vi.fn(({ requestId }: { requestId: string }) => Promise.resolve(detailFor(requestId))),
+        traceGet: vi.fn(({ requestId }: { requestId: string }) => requestId === "request-a" ? firstTrace.promise : secondTrace.promise),
+      },
+    };
+    render(<HistoryPanel />);
+
+    fireEvent.click(within(await screen.findByTestId("history-row-runtime-a-request-a")).getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: "Open request trace" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Close" }));
+
+    fireEvent.click(within(screen.getByTestId("history-row-runtime-a-request-b")).getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: "Open request trace" }));
+    await act(async () => secondTrace.resolve(traceFor("request-b")));
+    const traceDialog = await screen.findByRole("dialog", { name: "Request trace" });
+    expect(within(traceDialog).getByText("request-b")).toBeInTheDocument();
+
+    await act(async () => firstTrace.resolve(traceFor("request-a")));
+    expect(within(traceDialog).getByText("request-b")).toBeInTheDocument();
+    expect(within(traceDialog).queryByText("request-a")).not.toBeInTheDocument();
+  });
+
+  it("rejects a Trace payload that describes a different request", async () => {
+    setup();
+    fireEvent.click(within(await screen.findByTestId("history-row-runtime-a-request-a")).getByRole("button"));
+    const view = harness.current.client;
+    view.traceGet.mockResolvedValueOnce(traceFor("request-other"));
+    fireEvent.click(await screen.findByRole("button", { name: "Open request trace" }));
+    expect(await screen.findByText("Unable to load request trace")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Request trace" })).not.toBeInTheDocument();
   });
 });

@@ -70,10 +70,10 @@ afterEach(() => {
 });
 
 describe("M8 T7 ActivityPage", () => {
-  it("keeps Live as the default and switches to the durable History tab", async () => {
+  it("labels the default view as a snapshot and switches to the durable History tab", async () => {
     const view = setup([entry({ eventId: "live-default" })]);
     await waitFor(() => expect(screen.getByTestId("activity-row-event:live-default")).toBeInTheDocument());
-    expect(screen.getByRole("radio", { name: "Live" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "Snapshot" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("radio", { name: "History" }));
     await waitFor(() => expect(view.historyQuery).toHaveBeenCalledOnce());
     expect(screen.getByText("No retained History matches these filters")).toBeInTheDocument();
@@ -159,5 +159,24 @@ describe("M8 T7 ActivityPage", () => {
     expect(screen.getByRole("radio", { name: /^全部$/ })).toBeInTheDocument();
     expect(screen.getByText("需要关注")).toBeInTheDocument();
     expect(screen.getByText("活动记录列表")).toBeInTheDocument();
+  });
+
+  it("exposes list semantics and supports keyboard inspection and dismissal", async () => {
+    setup([entry({ eventId: "keyboard-one" }), entry({ eventId: "keyboard-two", toolName: "glob" })]);
+    const row = await screen.findByTestId("activity-row-event:keyboard-one");
+    const list = screen.getByRole("list", { name: "Activity Feed" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+
+    const button = within(row).getByRole("button");
+    button.focus();
+    expect(button).toHaveFocus();
+    fireEvent.keyDown(button, { key: "Enter" });
+    const dialog = await screen.findByRole("dialog", { name: "Activity details" });
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(button).toHaveFocus();
+
+    fireEvent.keyDown(button, { key: " " });
+    expect(await screen.findByRole("dialog", { name: "Activity details" })).toBeInTheDocument();
   });
 });

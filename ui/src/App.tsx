@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { HarnessDataProvider, useHarnessData } from "./app/providers/HarnessDataProvider";
+import { useActivitySubscription } from "./app/providers/useActivitySubscription";
 import { useAppRouter } from "./app/router/useAppRouter";
 import { DraftNavigationProvider } from "./app/router/DraftNavigation";
 import { useDraftNavigation } from "./app/router/DraftNavigation";
@@ -115,7 +116,17 @@ function RecoveryInWorkspace() {
 }
 
 export default function App() {
-  return <HarnessDataProvider><DraftNavigationProvider><RoutedContent /></DraftNavigationProvider></HarnessDataProvider>;
+  return <HarnessDataProvider><DraftNavigationProvider><ActivityBridge /><RoutedContent /></DraftNavigationProvider></HarnessDataProvider>;
+}
+
+/**
+ * One bounded Runtime activity subscription for the whole shell. It keeps the
+ * Overview feed fresh and triggers authoritative approval reconciliation; it
+ * does not turn the Activity snapshot page into a live stream.
+ */
+function ActivityBridge() {
+  useActivitySubscription();
+  return null;
 }
 
 

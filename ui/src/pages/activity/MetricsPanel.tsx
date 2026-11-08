@@ -29,18 +29,23 @@ export function MetricsPanel() {
   const [range, setRange] = useState<Range>("24h");
   const [tool, setTool] = useState("");
   const [result, setResult] = useState<MetricsQueryResult | null>(null);
+  const [resultKey, setResultKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
 
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
+    const key = `${range}:${tool}`;
     const query = { ...dateRange(range), ...(tool ? { tool } : {}) };
     setLoading(true);
     setError(null);
     try {
       const next = await client.metricsQuery(query);
-      if (generation === requestGeneration.current) setResult(next);
+      if (generation === requestGeneration.current) {
+        setResult(next);
+        setResultKey(key);
+      }
     } catch (failure) {
       if (generation === requestGeneration.current) setError(typeof failure === "object" && failure !== null && "code" in failure ? String(failure.code) : "EVIDENCE_IO");
     } finally {
@@ -49,6 +54,12 @@ export function MetricsPanel() {
   }, [client, range, tool]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // A result belongs only to the exact range/Tool query that produced it.
+  // Filter changes and failed reads must never leave the previous result on
+  // screen as if it described the current query.
+  const currentKey = `${range}:${tool}`;
+  const visibleResult = !error && result && resultKey === currentKey ? result : null;
 
   return <Card className="activity-card" aria-label={t("m08Metrics.title")}>
     <div className="filter-toolbar" role="toolbar" aria-label={t("m08Metrics.filters")}>
@@ -64,8 +75,8 @@ export function MetricsPanel() {
       <Button variant="secondary" onClick={() => void load()} disabled={loading}>{loading ? t("m08Metrics.loading") : t("m08Metrics.refresh")}</Button>
     </div>
     {error && <div className="notice notice-warning" role="alert"><strong>{t("m08Metrics.error")}</strong> <span>{t(errorCodeKey(error))}</span></div>}
-    {loading && !result && <InlineFeedback>{t("m08Metrics.loading")}</InlineFeedback>}
-    {result && <MetricsResult result={result} t={t} />}
+    {loading && !visibleResult && <InlineFeedback>{t("m08Metrics.loading")}</InlineFeedback>}
+    {visibleResult && <MetricsResult result={visibleResult} t={t} />}
   </Card>;
 }
 

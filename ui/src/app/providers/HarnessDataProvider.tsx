@@ -101,6 +101,16 @@ const initial: ResourceState = {
 };
 const Context = createContext<ContextValue | null>(null);
 
+// Activity notifications only tell the UI that the authoritative approval
+// queue may have changed. The pending count is always read from Runtime.
+const approvalSignalEvents = new Set<ActivityEvent["eventType"]>([
+  "approval_requested",
+  "approval_resolved",
+  "approval_denied",
+  "approval_expired",
+  "approval_cancelled",
+]);
+
 function loaded<T>(data: T, empty: boolean): AsyncState<T> {
   return empty ? { status: "empty", data } : { status: "success", data };
 }
@@ -231,8 +241,12 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   const [latestStartupAttempt, setLatestStartupAttempt] = useState<StartupAttempt | null>(null);
   const activityCursorRef = useRef<string | undefined>(undefined);
   const observedSession = useRef<string | null | undefined>(undefined);
+  const observedRuntimeId = useRef<string | null>(null);
+  const observedRuntimeStatus = useRef<ComponentStates["runtime"] | undefined>(undefined);
   const resourceEpoch = useRef(0);
   const observedComponents = useRef<string | undefined>(undefined);
+  const approvalReadSequence = useRef(0);
+  const approvalRefreshTimer = useRef<number | null>(null);
   const mutations = useRef(new ConfigMutationQueue());
   const persistedVersion = useRef(0);
 
@@ -243,6 +257,56 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     setEffectiveTheme(effective);
     applyTheme(effective);
   }, []);
+
+  const refreshApprovals = useCallback(async () => {
+    const sequence = ++approvalReadSequence.current;
+    const epoch = resourceEpoch.current;
+    const runtimeId = observedRuntimeId.current;
+    const session = client.getHarnessStatus().activeSessionId ?? null;
+    const approvals = await load(() => client.approvalsList(), (data) => data.items.length === 0);
+    if (sequence !== approvalReadSequence.current || epoch !== resourceEpoch.current) return;
+    if (runtimeId !== null && observedRuntimeId.current !== runtimeId) return;
+    if ((client.getHarnessStatus().activeSessionId ?? null) !== session) return;
+    setResources((current) => ({ ...current, approvals }));
+  }, [client]);
+
+  const scheduleApprovalRefresh = useCallback((delayMs = 350) => {
+    if (typeof window === "undefined" || approvalRefreshTimer.current !== null) return;
+    approvalRefreshTimer.current = window.setTimeout(() => {
+      approvalRefreshTimer.current = null;
+      void refreshApprovals();
+    }, delayMs);
+  }, [refreshApprovals]);
+
+  useEffect(() => () => {
+    if (approvalRefreshTimer.current !== null) {
+      window.clearTimeout(approvalRefreshTimer.current);
+      approvalRefreshTimer.current = null;
+    }
+  }, []);
+
+  // Low-frequency reconciliation is the fallback when activity delivery is
+  // interrupted or an approval change produces no event we can observe.
+  useEffect(() => {
+    if (components.runtime !== "ready" && components.runtime !== "degraded") return;
+    const timer = window.setInterval(() => { void refreshApprovals(); }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [components.runtime, refreshApprovals]);
+
+  const previousRuntimeStatus = useRef(components.runtime);
+  useEffect(() => {
+    const previous = previousRuntimeStatus.current;
+    previousRuntimeStatus.current = components.runtime;
+    if ((components.runtime === "ready" || components.runtime === "degraded") && previous !== components.runtime) {
+      void refreshApprovals();
+    }
+  }, [components.runtime, refreshApprovals]);
+
+  useEffect(() => {
+    observedRuntimeId.current = resources.runtime.status === "success" || resources.runtime.status === "empty"
+      ? resources.runtime.data.runtimeId
+      : null;
+  }, [resources.runtime]);
 
   const refreshConfig = useCallback(async () => {
     const version = persistedVersion.current;
@@ -286,16 +350,24 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       setComponents(nextComponents);
       const harnessState = client.getHarnessStatus();
       const session = harnessState.activeSessionId ?? null;
+      const previousRuntime = observedRuntimeStatus.current;
+      observedRuntimeStatus.current = nextComponents.runtime;
       const signature = `${nextComponents.runtime}:${nextComponents.mcp}:${nextComponents.tunnel}:${session}`;
       if (observedComponents.current !== undefined && observedComponents.current !== signature) resourceEpoch.current += 1;
       observedComponents.current = signature;
-      if (observedSession.current !== undefined && observedSession.current !== session) {
+      const sessionChanged = observedSession.current !== undefined && observedSession.current !== session;
+      if (sessionChanged) {
         // Old policy/approval snapshots must not describe a new managed session.
+        approvalReadSequence.current += 1;
         setResources((current) => ({ ...current, policies: { status: "idle" }, approvals: { status: "idle" } }));
       }
       observedSession.current = session;
       if (nextComponents.runtime !== "ready" && nextComponents.runtime !== "degraded") {
+        approvalReadSequence.current += 1;
         setResources((current) => ({ ...current, policies: { status: "idle" }, approvals: { status: "idle" } }));
+      } else if (sessionChanged || (previousRuntime !== undefined && previousRuntime !== nextComponents.runtime)) {
+        // Reconnect or a new managed session: reconcile the queue immediately.
+        scheduleApprovalRefresh(0);
       }
       setHarness(harnessState);
       setHarnessObserved(true);
@@ -314,6 +386,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
         }));
       }
       if (process?.phase === "crashed") {
+        observedRuntimeId.current = null;
         setActiveRevision(null);
         setResources((current) => ({
           ...current,
@@ -328,12 +401,15 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
           },
         }));
       } else if (process?.phase === "stopped") {
+        observedRuntimeId.current = null;
         setActiveRevision(null);
         setResources((current) => ({ ...current, runtime: { status: "idle" }, policies: { status: "idle" }, approvals: { status: "idle" } }));
       } else if (runtime) {
+        observedRuntimeId.current = runtime.runtimeId || null;
         setActiveRevision(runtime.runtimeId ? runtime.configRevision : null);
         setResources((current) => ({ ...current, runtime: { status: "success", data: runtime } }));
       } else if (nextComponents.runtime === "stopped" || nextComponents.runtime === "error") {
+        observedRuntimeId.current = null;
         setActiveRevision(null);
       }
     }).then((cleanup) => {
@@ -344,7 +420,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       mounted = false;
       unsubscribe?.();
     };
-  }, [client]);
+  }, [client, scheduleApprovalRefresh]);
 
   useEffect(() => {
     let mounted = true;
@@ -381,6 +457,10 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       const nextComponents = { ...runtime.components, tunnel: confirmed ? harnessResource.data.tunnel : runtime.components.tunnel };
       client.setComponentStates(nextComponents); setComponents(nextComponents);
       setResources({ runtime: runtime.resource, tools, policies, activity, approvals });
+      observedRuntimeStatus.current = nextComponents.runtime;
+      observedRuntimeId.current = runtime.resource.status === "success" || runtime.resource.status === "empty"
+        ? runtime.resource.data.runtimeId
+        : null;
       setActiveRevision(runtime.activeRevision);
       if (activity.status === "success" || activity.status === "empty") activityCursorRef.current = activity.data.latestSequence;
     })();
@@ -496,6 +576,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
 
   const refreshRuntimeResources = useCallback(async () => {
     const epoch = resourceEpoch.current;
+    const approvalSequence = approvalReadSequence.current;
     const [runtime, tools, policies, activity, approvals] = await Promise.all([
       load(() => client.runtimeStatus(), () => false),
       load(() => client.toolsList(), (data) => data.items.length === 0),
@@ -508,13 +589,12 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
     if (activity.status === "success" || activity.status === "empty") {
       activityCursorRef.current = activity.data.latestSequence;
     }
-    setResources({ runtime, tools, policies, activity, approvals });
-  }, [client]);
-
-  const refreshApprovals = useCallback(async () => {
-    const epoch = resourceEpoch.current;
-    const approvals = await load(() => client.approvalsList(), (data) => data.items.length === 0);
-    if (epoch === resourceEpoch.current) setResources((current) => ({ ...current, approvals }));
+    observedRuntimeId.current = runtime.status === "success" || runtime.status === "empty" ? runtime.data.runtimeId : null;
+    setResources((current) => ({
+      runtime, tools, policies, activity,
+      // A dedicated approval refresh that started later is newer evidence.
+      approvals: approvalSequence === approvalReadSequence.current ? approvals : current.approvals,
+    }));
   }, [client]);
 
   const refreshHarness = useCallback(async () => {
@@ -524,6 +604,10 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       client.setComponentStates({ runtime: state.runtime, mcp: state.mcp, tunnel: state.tunnel });
       setComponents(client.getComponentStates());
       const runtime = await rehydrateRuntime(client);
+      observedRuntimeId.current = runtime.resource.status === "success" || runtime.resource.status === "empty"
+        ? runtime.resource.data.runtimeId
+        : null;
+      observedRuntimeStatus.current = state.runtime;
       setActiveRevision(runtime.activeRevision);
       setResources((current) => ({ ...current, runtime: runtime.resource }));
     } catch { setHarnessObserved(false); }
@@ -567,6 +651,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       setComponents(client.getComponentStates());
       setHarness(stopped);
       setHarnessObserved(true);
+      observedRuntimeId.current = null;
       setActiveRevision(null);
       setResources((current) => ({ ...current, runtime: { status: "idle" } }));
       refreshLifecycleActivity();
@@ -597,19 +682,25 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
   }, [client, refreshHarness, refreshRuntimeResources]);
 
   const runDiagnostics = useCallback(async () => {
-    const [result, startup] = await Promise.all([
+    const [diagnostics, startup] = await Promise.allSettled([
       client.connectionDiagnosticsRun(),
       client.startupLatest(),
     ]);
-    setLastDiagnostics(result);
-    setLatestStartupAttempt(startup);
-    return result;
+    // Diagnostics and startup evidence are independent observations. A
+    // failure in one must not discard a successful result from the other.
+    if (diagnostics.status === "fulfilled") setLastDiagnostics(diagnostics.value);
+    if (startup.status === "fulfilled") setLatestStartupAttempt(startup.value);
+    if (diagnostics.status === "rejected") throw diagnostics.reason;
+    if (startup.status === "rejected") throw startup.reason;
+    return diagnostics.value;
   }, [client]);
 
   const appendActivity = useCallback((event: ActivityEvent) => {
-    if (isNewerSequence(activityCursorRef.current, event.sequence)) {
-      activityCursorRef.current = event.sequence;
-    }
+    const cursor = activityCursorRef.current;
+    // Out-of-order or duplicate notifications must not reopen an older
+    // sequence or append an event the UI has already observed.
+    if (cursor !== undefined && !isNewerSequence(cursor, event.sequence)) return;
+    activityCursorRef.current = event.sequence;
     setResources((current) => {
       if (current.activity.status !== "success" && current.activity.status !== "empty") {
         return current;
@@ -628,7 +719,15 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
         ),
       };
     });
-  }, []);
+    // Events from a previous Runtime identity cannot describe the current
+    // session's approval queue.
+    if (
+      approvalSignalEvents.has(event.eventType)
+      && (observedRuntimeId.current === null || observedRuntimeId.current === event.runtimeId)
+    ) {
+      scheduleApprovalRefresh();
+    }
+  }, [scheduleApprovalRefresh]);
 
   const subscribeToActivity = useCallback(
     (listener: ActivityEventListener) =>
@@ -700,6 +799,7 @@ export function HarnessDataProvider({ children }: { children: ReactNode }) {
       configLoaded,
       eligibility,
       lastDiagnostics,
+      latestStartupAttempt,
       themePreference,
       effectiveTheme,
       metadata,

@@ -104,7 +104,7 @@ export function ActivityPage({ onNavigate }: { onNavigate?: Navigate } = {}) {
           value={tab}
           label={t("m03History.view")}
           options={[
-            { value: "live", label: t("m03History.live") },
+            { value: "live", label: t("m03History.snapshot") },
             { value: "history", label: t("m03History.history") },
             { value: "metrics", label: t("m08Metrics.tab") },
           ]}
@@ -191,7 +191,7 @@ function ActivityFeed({ rows, visibleRows, tools, outcomeFilter, onOutcomeFilter
         ? <div className="empty-inline"><strong>{t("m8Activity.empty")}</strong><p>{t("m8Activity.emptyHelp")}</p></div>
         : visibleRows.length === 0
           ? <div className="empty-inline"><p>{t("m8Activity.noMatches")}</p></div>
-          : <div className="activity-grid" aria-label={t("activity.feed")}>
+          : <div className="activity-grid" role="list" aria-label={t("activity.feed")}>
             <div className="activity-grid-head activity-live-grid" aria-hidden="true"><span>{t("activity.timestamp")}</span><span>{t("activity.tool")}</span><span>{t("m8Activity.target")}</span><span>{t("m8Activity.event")}</span><span>{t("activity.outcome")}</span></div>
             {[...visibleRows].reverse().map((row) => <ActivityRowView key={row.rowKey} row={row} selected={selectedRow?.rowKey === row.rowKey} onInspect={() => onInspect(row)} t={t} />)}
           </div>}
@@ -211,8 +211,13 @@ function ActivityRowView({ row, selected, onInspect, t }: { row: ActivityRow; se
   const targetText = target
     ? <><span className="cell-muted">{t(target.kind === "command" ? "m8Activity.command" : "m8Activity.target")}: </span><code>{target.value}</code></>
     : entry.toolName === null ? t("m8Activity.noTool") : t("m8Activity.notRecorded");
-  return <article className="activity-row" data-testid={`activity-row-${row.rowKey}`}>
-    <button type="button" className={`activity-row-button activity-live-grid ${selected ? "selected" : ""}`} onClick={onInspect}>
+  return <article className="activity-row" role="listitem" data-testid={`activity-row-${row.rowKey}`}>
+    <button type="button" className={`activity-row-button activity-live-grid ${selected ? "selected" : ""}`} onClick={onInspect}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onInspect();
+      }}>
       <span className="cell-time"><ObservedTime value={entry.timestamp} fallback={timestamp} /></span>
       <strong className="cell-tool">{tool}</strong>
       <span className="cell-target">{targetText}</span>

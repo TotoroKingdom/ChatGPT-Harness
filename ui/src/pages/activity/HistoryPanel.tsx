@@ -102,7 +102,12 @@ export function HistoryPanel() {
   const [selected, setSelected] = useState<HistoryGetResult | null>(null);
   const [trace, setTrace] = useState<TraceGetResult | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [traceError, setTraceError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
+  const detailGeneration = useRef(0);
+  const traceGeneration = useRef(0);
 
   const query = useMemo(() => queryFor(filters), [filters]);
 
@@ -135,19 +140,76 @@ export function HistoryPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, client]);
 
+  const clearInspection = () => {
+    detailGeneration.current += 1;
+    traceGeneration.current += 1;
+    setSelected(null);
+    setTrace(null);
+    setDetailLoading(false);
+    setTraceLoading(false);
+    setDetailError(null);
+    setTraceError(null);
+  };
+
   const inspect = async (item: HistoryRequestSummary) => {
+    const generation = ++detailGeneration.current;
+    // A new detail selection invalidates every detail/trace read that started
+    // before it, including a Trace opened from the previous request.
+    traceGeneration.current += 1;
+    setSelected(null);
+    setTrace(null);
+    setDetailError(null);
+    setTraceError(null);
     setDetailLoading(true);
-    setError(null);
     try {
-      setTrace(null);
-      setSelected(await client.historyGet({ runtimeId: item.runtimeId, requestId: item.requestId }));
+      const result = await client.historyGet({ runtimeId: item.runtimeId, requestId: item.requestId });
+      if (generation !== detailGeneration.current) return;
+      if (result.summary.runtimeId !== item.runtimeId || result.summary.requestId !== item.requestId) {
+        setDetailError("CONTROL_READ_FAILED");
+        return;
+      }
+      setSelected(result);
     } catch (failure) {
-      setError(typeof failure === "object" && failure !== null && "code" in failure
-        ? String(failure.code)
-        : "EVIDENCE_IO");
+      if (generation === detailGeneration.current) {
+        setDetailError(typeof failure === "object" && failure !== null && "code" in failure
+          ? String(failure.code)
+          : "EVIDENCE_IO");
+      }
     } finally {
-      setDetailLoading(false);
+      if (generation === detailGeneration.current) setDetailLoading(false);
     }
+  };
+
+  const openTrace = async (source: HistoryGetResult) => {
+    const target = source.summary;
+    const generation = ++traceGeneration.current;
+    setTrace(null);
+    setTraceError(null);
+    setTraceLoading(true);
+    try {
+      const result = await client.traceGet({ runtimeId: target.runtimeId, requestId: target.requestId });
+      if (generation !== traceGeneration.current) return;
+      if (result.runtimeId !== target.runtimeId || result.requestId !== target.requestId) {
+        setTraceError("CONTROL_READ_FAILED");
+        return;
+      }
+      setTrace(result);
+    } catch (failure) {
+      if (generation === traceGeneration.current) {
+        setTraceError(typeof failure === "object" && failure !== null && "code" in failure
+          ? String(failure.code)
+          : "EVIDENCE_IO");
+      }
+    } finally {
+      if (generation === traceGeneration.current) setTraceLoading(false);
+    }
+  };
+
+  const closeTrace = () => {
+    traceGeneration.current += 1;
+    setTrace(null);
+    setTraceLoading(false);
+    setTraceError(null);
   };
 
   const warning = status && (status.state !== "healthy"
@@ -192,6 +254,8 @@ export function HistoryPanel() {
         {status.footprintBytes !== undefined && <span>{t("m03History.footprint", { bytes: status.footprintBytes })}</span>}
       </div>}
       {error && <div className="notice notice-warning" role="alert"><strong>{t("m03History.error")}</strong><code>{error}</code></div>}
+      {detailError && <div className="notice notice-warning" role="alert"><strong>{t("m03History.error")}</strong><code>{detailError}</code></div>}
+      {traceError && <div className="notice notice-warning" role="alert"><strong>{t("m03History.traceError")}</strong><code>{traceError}</code></div>}
       {loading && items.length === 0 && <InlineFeedback>{t("m03History.loading")}</InlineFeedback>}
       {!loading && !error && items.length === 0 && <div className="empty-inline"><strong>{t("m03History.empty")}</strong><p>{t("m03History.emptyHelp")}</p></div>}
       {items.length > 0 && <div className="activity-grid" aria-label={t("m03History.list")}>
@@ -209,14 +273,9 @@ export function HistoryPanel() {
       {nextCursor && <div className="settings-actions"><Button variant="secondary" onClick={() => void load(true)} disabled={loading}>{loading ? t("m03History.loading") : t("m03History.loadMore")}</Button></div>}
     </Card>
     {detailLoading && <InlineFeedback>{t("m03History.loadingDetail")}</InlineFeedback>}
-    {selected && <HistoryInspector result={selected} onClose={() => { setSelected(null); setTrace(null); }} onTrace={async () => {
-      try {
-        setTrace(await client.traceGet({ runtimeId: selected.summary.runtimeId, requestId: selected.summary.requestId }));
-      } catch (failure) {
-        setError(typeof failure === "object" && failure !== null && "code" in failure ? String(failure.code) : "EVIDENCE_IO");
-      }
-    }} />}
-    {trace && <TraceInspector result={trace} onClose={() => setTrace(null)} />}
+    {traceLoading && <InlineFeedback>{t("m03History.loadingTrace")}</InlineFeedback>}
+    {selected && <HistoryInspector result={selected} onClose={clearInspection} onTrace={() => openTrace(selected)} />}
+    {trace && <TraceInspector result={trace} onClose={closeTrace} />}
   </>;
 }
 

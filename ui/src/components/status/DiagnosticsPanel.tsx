@@ -16,7 +16,8 @@ type Props = {
   run: DiagnosticRun | null;
   startup: StartupAttempt | null;
   running?: boolean;
-  onRun: () => Promise<DiagnosticRun>;
+  error?: string | null;
+  onRun: () => void | Promise<unknown>;
   onNavigate?: Navigate;
 };
 
@@ -37,7 +38,7 @@ function remediationFor(check: DiagnosticCheck) {
   return check.remediationDetail ?? (check.remediation ? { code: "legacy", summary: check.remediation } : null);
 }
 
-export function DiagnosticsPanel({ run, startup, running = false, onRun, onNavigate }: Props) {
+export function DiagnosticsPanel({ run, startup, running = false, error = null, onRun, onNavigate }: Props) {
   const { t } = useTranslation();
   const [copyFeedback, setCopyFeedback] = useState<"copied" | "failed" | null>(null);
   const copy = async () => {
@@ -61,6 +62,10 @@ export function DiagnosticsPanel({ run, startup, running = false, onRun, onNavig
     </div>
     {copyFeedback === "copied" && <InlineFeedback>{t("diagnostics.copied")}</InlineFeedback>}
     {copyFeedback === "failed" && <InlineFeedback error>{t("diagnostics.copyFailed")}</InlineFeedback>}
+    {error && <div className="notice notice-warning" role="alert">
+      <strong>{t("diagnostics.runFailed")}</strong>
+      <code>{error}</code>
+    </div>}
     {run && <details className="diagnostics-disclosure">
       <summary>
         <span>{t("diagnostics.checks")} · {run.checks.length}</span>

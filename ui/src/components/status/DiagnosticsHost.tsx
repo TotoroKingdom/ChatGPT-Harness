@@ -33,6 +33,7 @@ export function DiagnosticsHost({ onNavigate }: { onNavigate?: Navigate }) {
   const data = useHarnessData();
   const [open, setOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const listener = () => setOpen(true);
@@ -41,9 +42,16 @@ export function DiagnosticsHost({ onNavigate }: { onNavigate?: Navigate }) {
   }, []);
 
   const run = async () => {
+    if (running) return;
     setRunning(true);
+    setError(null);
     try {
       return await data.runDiagnostics();
+    } catch (failure) {
+      const code = typeof failure === "object" && failure !== null && "code" in failure
+        ? String((failure as { code: unknown }).code)
+        : "INTERNAL_ERROR";
+      setError(code);
     } finally {
       setRunning(false);
     }
@@ -56,6 +64,7 @@ export function DiagnosticsHost({ onNavigate }: { onNavigate?: Navigate }) {
         run={data.lastDiagnostics}
         startup={data.latestStartupAttempt ?? null}
         running={running}
+        error={error}
         onRun={run}
         onNavigate={(page, options) => {
           setOpen(false);

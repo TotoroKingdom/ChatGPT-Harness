@@ -5,6 +5,7 @@ import { Button, Disclosure, InlineFeedback, Inspector, ObservedTime, StatusBadg
 import { DiagnosticsTrigger } from "@/components/status/DiagnosticsHost";
 import { useHarnessData } from "@/app/providers/HarnessDataProvider";
 import type { Navigate } from "@/app/router/routes";
+import type { ActivityEvent } from "@protocol/v1";
 import type { ComponentStatus } from "@/services/harness/client";
 import { hasPolicyCritical } from "@/i18n/state-presentation";
 import { activityEventKey, componentStatusKey, errorCodeKey, overallStatusKey, startEligibilityKey } from "@/i18n/presentation";
@@ -21,6 +22,31 @@ function componentTone(status: ComponentStatus): StatusTone {
 
 function serviceVisual(status: ComponentStatus): StatusVisual {
   return status;
+}
+
+/**
+ * Runtime ActivityEvent is a lifecycle notification, not an ActivityEntry.
+ * Only explicit terminal event types may claim success; everything else stays
+ * neutral or reports its own observable failure.
+ */
+function activityEventTone(event: ActivityEvent): StatusTone {
+  switch (event.eventType) {
+    case "execution_completed":
+      return "success";
+    case "execution_failed":
+    case "validation_failed":
+    case "workspace_violation":
+    case "approval_denied":
+      return "danger";
+    case "approval_requested":
+    case "approval_expired":
+    case "approval_cancelled":
+    case "execution_timed_out":
+    case "execution_cancelled":
+      return "warning";
+    default:
+      return "neutral";
+  }
 }
 
 function HeroGlyph({ tone }: { tone: StatusTone }) {
@@ -107,7 +133,10 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
         {critical ? <Button variant="primary" onClick={() => onNavigate?.("policies")}>{t("m8.reviewPolicies")}</Button>
           : !observed ? <Button variant="primary" onClick={refresh}>{t("common.retry")}</Button>
             : transitioning ? <Button disabled>{t(componentStatusKey(data.overall === "stopping" ? "stopping" : "starting"))}</Button>
-              : failed ? <Button variant="primary" onClick={fix}>{t("m8.openSettings")}</Button>
+              : failed ? <>
+                {canStart && <Button variant="primary" onClick={() => void run(data.startHarness)}>{t("overview.start")}</Button>}
+                <Button variant={canStart ? "secondary" : "primary"} onClick={fix}>{t("m8.openSettings")}</Button>
+              </>
                 : data.restartRequired ? <Button variant="primary" onClick={() => void run(data.restartHarness)}>{t("overview.restart")}</Button>
                   : canStart ? <Button variant="primary" onClick={() => void run(data.startHarness)}>{t("overview.start")}</Button>
                     : stopped ? <Button variant="primary" onClick={fix}>{t("m8.openSettings")}</Button> : null}
@@ -164,7 +193,7 @@ export function OverviewPage({ onNavigate }: { onNavigate?: Navigate }) {
           {activityItems === null ? <p className="muted overview-empty-copy">{t("m8.activityUnconfirmed")}</p>
             : activityItems.length === 0 ? <p className="muted overview-empty-copy">{t("activity.empty")}</p>
               : activityItems.slice(-4).reverse().map((event, index) => <div className="activity-mini-row" key={event.eventId ?? index}>
-                <span className="event-marker success" aria-hidden="true" />
+                <span className={`event-marker ${activityEventTone(event)}`} data-state={activityEventTone(event)} aria-hidden="true" />
                 <div className="activity-mini-main"><strong>{t(activityEventKey(event.eventType))}</strong><ObservedTime value={event.timestamp} fallback={event.timestamp} /></div>
               </div>)}
         </div>
