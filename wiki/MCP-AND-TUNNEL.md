@@ -1,6 +1,6 @@
 # MCP and Tunnel Integration
 
-> 本文描述当前 main / HEAD（0.1.3）的 MCP、Approval、History 与 Tunnel 集成。旧 V2 “read-only tools only” 描述已经不适用于当前源码。MCP legacy protocol revision 为 `2025-03-26`，modern protocol revision 为 `2026-07-28`。
+> 本文描述当前 main / HEAD（0.1.3）的 MCP、Approval、History 与 Tunnel 集成。旧 V2 “read-only tools only” 描述已经不适用于当前源码。MCP 冻结 revision 为 `2025-03-26`，互操作 revision 覆盖 `2025-06-18`、`2025-11-25`（Tunnel 客户端当前默认）与 modern `2026-07-28`。
 
 ## 1. 当前真实链路
 
@@ -36,9 +36,11 @@ Runtime 初始化后在：
 127.0.0.1:<ephemeral>/mcp
 ```
 
-启动 Streamable HTTP MCP endpoint。Runtime 使用 `rmcp 3.2.0`，同时支持 legacy `initialize` 协议 revision `2025-03-26` 和 modern per-request envelope revision `2026-07-28`；兼容性身份清单位于 `fixtures/v4/m10-mcp/compatibility-v1.json`。
+启动 Streamable HTTP MCP endpoint。Runtime 使用 `rmcp 3.2.0`，支持的 revision 为 `2025-03-26`、`2025-06-18`、`2025-11-25` 与 `2026-07-28`；兼容性身份清单位于 `fixtures/v4/m10-mcp/compatibility-v1.json`。
 
-`2026-07-28` 的 modern 路径已由本地 `server/discover`、`tools/list` 与 `tools/call` 回归覆盖；modern 工具成功结果同时携带 canonical JSON text 和 `structuredContent`（ChatGPT 连接器依赖后者渲染工具输出，缺失时文件读取会显示为 `{}`）。legacy `2025-03-26` 仍按 M10 冻结契约只输出 text，不输出 `structuredContent`。M10 官方 runner 身份仍冻结为 `2025-03-26`，不能据此声称已通过 `2026-07-28` formal conformance。
+`2025-06-18`、`2025-11-25` 与 `2026-07-28` 已由本地 `initialize` + per-request `_meta` / `server/discover`、`tools/list` 与 `tools/call` 回归覆盖；这些 revision 的工具成功结果同时携带 canonical JSON text 和 `structuredContent`（ChatGPT 连接器依赖后者渲染工具输出，缺失时文件读取会显示为 `{}`）。legacy `2025-03-26` 仍按 M10 冻结契约只输出 text，不输出 `structuredContent`。M10 官方 runner 身份仍冻结为 `2025-03-26`，不能据此声称已通过 `2025-11-25` / `2026-07-28` formal conformance。
+
+`initialize` 的 fallback revision 固定为最新 legacy revision `2025-11-25`，且必须始终属于支持列表；否则握手会宣告一个后续请求校验会拒绝的版本（客户端表现为 `400 Unsupported protocol version`）。
 
 Tauri 通过：
 

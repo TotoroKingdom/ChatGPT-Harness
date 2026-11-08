@@ -393,6 +393,25 @@ mod tests {
         headers
     }
 
+    fn inline_mcp_headers(
+        address: SocketAddr,
+        method: &str,
+        name: Option<&str>,
+        protocol_version: &str,
+    ) -> Vec<(&'static str, String)> {
+        let mut headers = vec![
+            ("Host", format!("127.0.0.1:{}", address.port())),
+            ("Accept", "application/json, text/event-stream".into()),
+            ("Content-Type", "application/json".into()),
+            ("MCP-Protocol-Version", protocol_version.to_owned()),
+            ("Mcp-Method", method.into()),
+        ];
+        if let Some(name) = name {
+            headers.push(("Mcp-Name", name.into()));
+        }
+        headers
+    }
+
     async fn mcp_post(
         address: SocketAddr,
         message: Value,
@@ -427,6 +446,24 @@ mod tests {
             "/mcp",
             body.as_bytes(),
             modern_mcp_headers(address, method, name),
+        )
+        .await
+    }
+
+    async fn inline_mcp_post(
+        address: SocketAddr,
+        protocol_version: &str,
+        method: &str,
+        name: Option<&str>,
+        message: Value,
+    ) -> HttpResponse {
+        let body = serde_json::to_string(&message).expect("serialize MCP request");
+        request(
+            address,
+            "POST",
+            "/mcp",
+            body.as_bytes(),
+            inline_mcp_headers(address, method, name, protocol_version),
         )
         .await
     }
@@ -614,6 +651,112 @@ mod tests {
         assert!(text.contains("\"content\":\"modern protocol\\n\""));
 
         endpoint.shutdown().await.expect("shutdown endpoint");
+    }
+
+    #[tokio::test]
+    async fn interoperable_revisions_accept_per_request_metadata() {
+        for protocol_version in ["2025-06-18", "2025-11-25"] {
+            let workspace = TestWorkspace::new();
+            workspace.write("README.md", "tunnel protocol\n");
+            let mut endpoint = start_mcp_http_endpoint(workspace.context())
+                .await
+                .expect("start endpoint");
+            let address = endpoint.local_addr();
+            let meta = json!({
+                "io.modelcontextprotocol/protocolVersion": protocol_version,
+                "io.modelcontextprotocol/clientInfo": {
+                    "name": "tunnel-client",
+                    "version": "0.0.13"
+                },
+                "io.modelcontextprotocol/clientCapabilities": {}
+            });
+
+            let initialize = inline_mcp_post(
+                address,
+                protocol_version,
+                "initialize",
+                None,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": protocol_version,
+                        "capabilities": {},
+                        "clientInfo": { "name": "tunnel-client", "version": "0.0.13" }
+                    }
+                }),
+            )
+            .await;
+            assert_eq!(
+                initialize.status, 200,
+                "initialize body for {protocol_version}: {:?}",
+                initialize.body
+            );
+            assert_eq!(
+                initialize.json_rpc()["result"]["protocolVersion"],
+                protocol_version,
+                "initialize must echo the requested supported revision"
+            );
+
+            let list = inline_mcp_post(
+                address,
+                protocol_version,
+                "tools/list",
+                None,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": { "_meta": meta.clone() }
+                }),
+            )
+            .await;
+            assert_eq!(
+                list.status, 200,
+                "tools/list body for {protocol_version}: {:?}",
+                list.body
+            );
+            assert!(list.json_rpc()["result"]["tools"]
+                .as_array()
+                .expect("tool array")
+                .iter()
+                .any(|tool| tool["name"] == "read_file"));
+
+            let call = inline_mcp_post(
+                address,
+                protocol_version,
+                "tools/call",
+                Some("read_file"),
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "read_file",
+                        "arguments": { "path": "README.md" },
+                        "_meta": meta
+                    }
+                }),
+            )
+            .await;
+            assert_eq!(
+                call.status, 200,
+                "tools/call body for {protocol_version}: {:?}",
+                call.body
+            );
+            let body = call.json_rpc();
+            assert_eq!(
+                body["result"]["structuredContent"]["content"], "tunnel protocol\n",
+                "structuredContent must be emitted for {protocol_version}"
+            );
+            let text = body["result"]["content"][0]["text"]
+                .as_str()
+                .expect("canonical JSON text block");
+            assert!(text.contains("\"content\":\"tunnel protocol\\n\""));
+
+            endpoint.shutdown().await.expect("shutdown endpoint");
+        }
     }
 
     #[tokio::test]

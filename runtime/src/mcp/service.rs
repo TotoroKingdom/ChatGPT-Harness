@@ -21,6 +21,27 @@ const WRITE: &str = "write";
 const EDIT: &str = "edit";
 const BASH: &str = "bash";
 
+/// Protocol revisions this Runtime MCP server implements.
+///
+/// The frozen M10 identity remains `2025-03-26`. The newer entries are
+/// interoperability revisions exercised by local regression tests only; they
+/// carry no formal conformance claim. Keep this list in sync with
+/// `fixtures/v4/m10-mcp/compatibility-v1.json`.
+const SUPPORTED_PROTOCOL_VERSIONS: &[ProtocolVersion] = &[
+    ProtocolVersion::V_2025_03_26,
+    ProtocolVersion::V_2025_06_18,
+    ProtocolVersion::V_2025_11_25,
+    ProtocolVersion::V_2026_07_28,
+];
+
+/// Newest revision that still uses the `initialize` handshake.
+///
+/// `rmcp` echoes this value when a client requests a revision the server does
+/// not implement, so it must stay a member of
+/// [`SUPPORTED_PROTOCOL_VERSIONS`]; otherwise the handshake advertises a
+/// revision that per-request validation later rejects.
+const LEGACY_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_11_25;
+
 #[derive(Clone)]
 pub struct McpService {
     context: McpExecutionContext,
@@ -160,13 +181,16 @@ impl McpService {
 
 impl ServerHandler for McpService {
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
-        Cow::Borrowed(&[ProtocolVersion::V_2025_03_26, ProtocolVersion::V_2026_07_28])
+        Cow::Borrowed(SUPPORTED_PROTOCOL_VERSIONS)
     }
 
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
-            Implementation::new("chatgpt-harness", env!("CARGO_PKG_VERSION")),
-        )
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                "chatgpt-harness",
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_protocol_version(LEGACY_PROTOCOL_VERSION)
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
@@ -227,11 +251,11 @@ fn strip_later_revision_tool_fields(mut tool: Tool) -> Tool {
 
 /// Projects the Runtime's typed safe result onto the negotiated wire shape.
 ///
-/// Legacy peers (MCP 2025-03-26 and older) keep the frozen contract: the typed
-/// payload is moved into a canonical JSON text block and `structuredContent` is
-/// never emitted. Modern peers (MCP 2026-07-28 and newer) additionally receive
-/// the typed payload as `structuredContent`, which ChatGPT uses to render tool
-/// results instead of showing `{}` for content-only successes.
+/// Peers on MCP 2025-03-26 or older keep the frozen contract: the typed payload
+/// is moved into a canonical JSON text block and `structuredContent` is never
+/// emitted. Peers on 2025-06-18 and newer additionally receive the typed
+/// payload as `structuredContent`, which ChatGPT uses to render tool results
+/// instead of showing `{}` for content-only successes.
 fn project_call_tool_result(
     mut result: CallToolResult,
     protocol_version: Option<&ProtocolVersion>,
@@ -269,7 +293,7 @@ fn project_call_tool_result(
 
 fn supports_structured_content(protocol_version: Option<&ProtocolVersion>) -> bool {
     protocol_version
-        .is_some_and(|version| version.as_str() >= ProtocolVersion::V_2026_07_28.as_str())
+        .is_some_and(|version| version.as_str() >= ProtocolVersion::V_2025_06_18.as_str())
 }
 
 fn tool_from_effective(tool: EffectiveTool) -> Option<Tool> {
@@ -2069,12 +2093,35 @@ mod tests {
     }
 
     #[test]
-    fn server_advertises_legacy_and_modern_revisions_without_output_schema() {
+    fn interoperable_wire_projector_preserves_structured_content_next_to_text() {
+        let mut result = CallToolResult::structured(json!({
+            "code": "OK",
+            "value": 7,
+        }));
+        result
+            .content
+            .push(ContentBlock::text("deterministic summary"));
+
+        let projected = project_call_tool_result(result, Some(&ProtocolVersion::V_2025_11_25));
+        let wire = serde_json::to_value(&projected).expect("serialize projected result");
+        assert_eq!(wire["structuredContent"]["value"], 7);
+        assert_eq!(wire["content"][0]["text"], "{\"code\":\"OK\",\"value\":7}");
+        assert_eq!(wire["content"][1]["text"], "deterministic summary");
+    }
+
+    #[test]
+    fn server_advertises_every_implemented_revision_without_output_schema() {
         let workspace = TestWorkspace::new();
         let service = workspace.service();
         assert_eq!(
             service.supported_protocol_versions().as_ref(),
-            &[ProtocolVersion::V_2025_03_26, ProtocolVersion::V_2026_07_28,]
+            SUPPORTED_PROTOCOL_VERSIONS
+        );
+        assert!(
+            service
+                .supported_protocol_versions()
+                .contains(&service.get_info().protocol_version),
+            "initialize fallback must be a supported revision"
         );
         assert!(service
             .wire_tools()

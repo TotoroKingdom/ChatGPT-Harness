@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 pub(crate) const MCP_PROTOCOL_REVISION: &str = "2025-03-26";
+pub(crate) const MCP_INTERMEDIATE_PROTOCOL_REVISIONS: [&str; 2] = ["2025-06-18", "2025-11-25"];
 pub(crate) const MCP_MODERN_PROTOCOL_REVISION: &str = "2026-07-28";
 pub(crate) const RMCP_VERSION: &str = "3.2.0";
 pub(crate) const OFFICIAL_RUNNER_REPOSITORY: &str = "modelcontextprotocol/conformance";
@@ -55,13 +56,14 @@ mod tests {
 
         assert_eq!(manifest.manifest_version, 1);
         assert_eq!(manifest.protocol_revision, MCP_PROTOCOL_REVISION);
-        assert_eq!(
-            manifest.supported_protocol_revisions,
-            vec![
-                MCP_PROTOCOL_REVISION.to_owned(),
-                MCP_MODERN_PROTOCOL_REVISION.to_owned()
-            ]
+        let mut expected_revisions = vec![MCP_PROTOCOL_REVISION.to_owned()];
+        expected_revisions.extend(
+            MCP_INTERMEDIATE_PROTOCOL_REVISIONS
+                .iter()
+                .map(|revision| (*revision).to_owned()),
         );
+        expected_revisions.push(MCP_MODERN_PROTOCOL_REVISION.to_owned());
+        assert_eq!(manifest.supported_protocol_revisions, expected_revisions);
         assert_eq!(manifest.transport, "streamable_http");
         assert_eq!(manifest.runtime_sdk, "rmcp 3.2.0");
         assert_eq!(
