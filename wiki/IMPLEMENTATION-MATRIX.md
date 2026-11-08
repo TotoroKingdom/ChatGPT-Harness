@@ -151,7 +151,7 @@ Bash cwd 固定在 active Workspace，但它不是 OS 级 filesystem sandbox。
 | Capability | 当前实现 |
 | --- | --- |
 | MCP transport | Streamable HTTP，loopback endpoint |
-| MCP protocol revision | `2025-03-26` |
+| MCP protocol revision | `2025-03-26`（legacy）/ `2026-07-28`（modern） |
 | Runtime MCP SDK | `rmcp 3.2.0` |
 | Compatibility manifest | `fixtures/v4/m10-mcp/compatibility-v1.json` |
 | Official runner identity | `modelcontextprotocol/conformance`，commit 与包版本固定在 manifest/test |

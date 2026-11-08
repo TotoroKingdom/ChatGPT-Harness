@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 pub(crate) const MCP_PROTOCOL_REVISION: &str = "2025-03-26";
+pub(crate) const MCP_MODERN_PROTOCOL_REVISION: &str = "2026-07-28";
 pub(crate) const RMCP_VERSION: &str = "3.2.0";
 pub(crate) const OFFICIAL_RUNNER_REPOSITORY: &str = "modelcontextprotocol/conformance";
 pub(crate) const OFFICIAL_RUNNER_COMMIT: &str = "c37eec888e1c6ff140af79987a40008548b7cc5f";
@@ -14,6 +15,7 @@ pub(crate) const STANDALONE_SDK_VERSION: &str = "1.29.0";
 struct CompatibilityManifest {
     manifest_version: u32,
     protocol_revision: String,
+    supported_protocol_revisions: Vec<String>,
     transport: String,
     runtime_sdk: String,
     official_runner: OfficialRunner,
@@ -53,6 +55,13 @@ mod tests {
 
         assert_eq!(manifest.manifest_version, 1);
         assert_eq!(manifest.protocol_revision, MCP_PROTOCOL_REVISION);
+        assert_eq!(
+            manifest.supported_protocol_revisions,
+            vec![
+                MCP_PROTOCOL_REVISION.to_owned(),
+                MCP_MODERN_PROTOCOL_REVISION.to_owned()
+            ]
+        );
         assert_eq!(manifest.transport, "streamable_http");
         assert_eq!(manifest.runtime_sdk, "rmcp 3.2.0");
         assert_eq!(

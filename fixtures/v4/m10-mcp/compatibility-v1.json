@@ -1,6 +1,7 @@
 {
   "manifestVersion": 1,
   "protocolRevision": "2025-03-26",
+  "supportedProtocolRevisions": ["2025-03-26", "2026-07-28"],
   "transport": "streamable_http",
   "serverRole": "mcp_server",
   "runtimeSdk": "rmcp 3.2.0",

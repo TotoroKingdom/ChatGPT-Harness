@@ -375,6 +375,24 @@ mod tests {
         headers
     }
 
+    fn modern_mcp_headers(
+        address: SocketAddr,
+        method: &str,
+        name: Option<&str>,
+    ) -> Vec<(&'static str, String)> {
+        let mut headers = vec![
+            ("Host", format!("127.0.0.1:{}", address.port())),
+            ("Accept", "application/json, text/event-stream".into()),
+            ("Content-Type", "application/json".into()),
+            ("MCP-Protocol-Version", "2026-07-28".into()),
+            ("Mcp-Method", method.into()),
+        ];
+        if let Some(name) = name {
+            headers.push(("Mcp-Name", name.into()));
+        }
+        headers
+    }
+
     async fn mcp_post(
         address: SocketAddr,
         message: Value,
@@ -388,6 +406,27 @@ mod tests {
             "/mcp",
             body.as_bytes(),
             mcp_headers(address, session_id, origin),
+        )
+        .await
+    }
+
+    async fn modern_mcp_post(address: SocketAddr, method: &str, message: Value) -> HttpResponse {
+        modern_mcp_post_named(address, method, None, message).await
+    }
+
+    async fn modern_mcp_post_named(
+        address: SocketAddr,
+        method: &str,
+        name: Option<&str>,
+        message: Value,
+    ) -> HttpResponse {
+        let body = serde_json::to_string(&message).expect("serialize MCP request");
+        request(
+            address,
+            "POST",
+            "/mcp",
+            body.as_bytes(),
+            modern_mcp_headers(address, method, name),
         )
         .await
     }
@@ -457,6 +496,123 @@ mod tests {
                 "unsupported capability was advertised: {unsupported}"
             );
         }
+        endpoint.shutdown().await.expect("shutdown endpoint");
+    }
+
+    #[tokio::test]
+    async fn modern_discover_and_tools_list_are_supported_without_session() {
+        let workspace = TestWorkspace::new();
+        workspace.write("README.md", "modern protocol\n");
+        let mut endpoint = start_mcp_http_endpoint(workspace.context())
+            .await
+            .expect("start endpoint");
+        let address = endpoint.local_addr();
+        let meta = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+                "name": "modern-http-test-client",
+                "version": "1.0"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+        });
+
+        let discover = modern_mcp_post(
+            address,
+            "server/discover",
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "server/discover",
+                "params": { "_meta": meta.clone() }
+            }),
+        )
+        .await;
+        assert_eq!(discover.status, 200, "discover body: {:?}", discover.body);
+        let discover_body = discover.json_rpc();
+        let versions = discover_body["result"]["supportedVersions"]
+            .as_array()
+            .expect("supported versions array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert!(versions.contains(&"2025-03-26"));
+        assert!(versions.contains(&"2026-07-28"));
+        assert_eq!(discover_body["result"]["resultType"], "complete");
+        assert_eq!(
+            discover_body["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+            "chatgpt-harness"
+        );
+
+        let list = modern_mcp_post(
+            address,
+            "tools/list",
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": { "_meta": meta }
+            }),
+        )
+        .await;
+        assert_eq!(list.status, 200, "tools/list body: {:?}", list.body);
+        let list_body = list.json_rpc();
+        assert_eq!(list_body["result"]["resultType"], "complete");
+        let tools = list_body["result"]["tools"].as_array().expect("tool array");
+        assert!(tools.iter().any(|tool| tool["name"] == "read_file"));
+        assert!(tools.iter().all(|tool| tool.get("outputSchema").is_none()));
+
+        endpoint.shutdown().await.expect("shutdown endpoint");
+    }
+
+    #[tokio::test]
+    async fn modern_tools_call_read_file_returns_structured_content() {
+        let workspace = TestWorkspace::new();
+        workspace.write("README.md", "modern protocol\n");
+        let mut endpoint = start_mcp_http_endpoint(workspace.context())
+            .await
+            .expect("start endpoint");
+        let address = endpoint.local_addr();
+        let meta = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+                "name": "modern-http-test-client",
+                "version": "1.0"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+        });
+
+        let call = modern_mcp_post_named(
+            address,
+            "tools/call",
+            Some("read_file"),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "read_file",
+                    "arguments": { "path": "README.md" },
+                    "_meta": meta
+                }
+            }),
+        )
+        .await;
+        assert_eq!(call.status, 200, "tools/call body: {:?}", call.body);
+        let body = call.json_rpc();
+        assert_eq!(body["result"]["resultType"], "complete");
+        assert_eq!(
+            body["result"]["structuredContent"]["content"],
+            "modern protocol\n"
+        );
+        assert_eq!(
+            body["result"]["structuredContent"]["bytesRead"].as_u64(),
+            Some("modern protocol\n".len() as u64)
+        );
+        let text = body["result"]["content"][0]["text"]
+            .as_str()
+            .expect("canonical JSON text block");
+        assert!(text.contains("\"content\":\"modern protocol\\n\""));
+
         endpoint.shutdown().await.expect("shutdown endpoint");
     }
 

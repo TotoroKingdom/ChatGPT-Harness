@@ -160,7 +160,7 @@ impl McpService {
 
 impl ServerHandler for McpService {
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
-        Cow::Borrowed(&[ProtocolVersion::V_2025_03_26])
+        Cow::Borrowed(&[ProtocolVersion::V_2025_03_26, ProtocolVersion::V_2026_07_28])
     }
 
     fn get_info(&self) -> ServerInfo {
@@ -190,6 +190,7 @@ impl ServerHandler for McpService {
     ) -> impl std::future::Future<Output = Result<CallToolResponse, ErrorData>>
            + rmcp::service::MaybeSendFuture
            + '_ {
+        let protocol_version = context.protocol_version();
         let service = self.clone();
         async move {
             if !service.is_known_tool(&request.name) {
@@ -205,7 +206,7 @@ impl ServerHandler for McpService {
             service
                 .call_tool_async_with_cancel(&request.name, arguments, context.ct.clone())
                 .await
-                .map(project_call_tool_result)
+                .map(|result| project_call_tool_result(result, protocol_version.as_ref()))
                 .map(Into::into)
                 .map_err(|error| match error {
                     McpProtocolError::UnknownTool => {
@@ -224,10 +225,21 @@ fn strip_later_revision_tool_fields(mut tool: Tool) -> Tool {
     tool
 }
 
-/// Projects the Runtime's typed safe result into the frozen MCP 2025-03-26
-/// CallToolResult shape. Internal callers continue to receive the structured
-/// result; only the protocol boundary drops `structuredContent`.
-fn project_call_tool_result(mut result: CallToolResult) -> CallToolResult {
+/// Projects the Runtime's typed safe result onto the negotiated wire shape.
+///
+/// Legacy peers (MCP 2025-03-26 and older) keep the frozen contract: the typed
+/// payload is moved into a canonical JSON text block and `structuredContent` is
+/// never emitted. Modern peers (MCP 2026-07-28 and newer) additionally receive
+/// the typed payload as `structuredContent`, which ChatGPT uses to render tool
+/// results instead of showing `{}` for content-only successes.
+fn project_call_tool_result(
+    mut result: CallToolResult,
+    protocol_version: Option<&ProtocolVersion>,
+) -> CallToolResult {
+    if supports_structured_content(protocol_version) {
+        return result;
+    }
+
     let canonical_json = result
         .structured_content
         .take()
@@ -253,6 +265,11 @@ fn project_call_tool_result(mut result: CallToolResult) -> CallToolResult {
     }
     result.content = content;
     result
+}
+
+fn supports_structured_content(protocol_version: Option<&ProtocolVersion>) -> bool {
+    protocol_version
+        .is_some_and(|version| version.as_str() >= ProtocolVersion::V_2026_07_28.as_str())
 }
 
 fn tool_from_effective(tool: EffectiveTool) -> Option<Tool> {
@@ -1994,7 +2011,7 @@ mod tests {
             .content
             .push(ContentBlock::text("deterministic summary"));
 
-        let projected = project_call_tool_result(result);
+        let projected = project_call_tool_result(result, None);
         let wire = serde_json::to_value(&projected).expect("serialize projected result");
         assert!(wire.get("structuredContent").is_none());
         assert_eq!(wire["isError"], false);
@@ -2003,12 +2020,31 @@ mod tests {
     }
 
     #[test]
+    fn modern_wire_projector_preserves_structured_content_next_to_text() {
+        let mut result = CallToolResult::structured(json!({
+            "code": "OK",
+            "value": 7,
+        }));
+        result
+            .content
+            .push(ContentBlock::text("deterministic summary"));
+
+        let projected = project_call_tool_result(result, Some(&ProtocolVersion::V_2026_07_28));
+        let wire = serde_json::to_value(&projected).expect("serialize projected result");
+        assert_eq!(wire["structuredContent"]["value"], 7);
+        assert_eq!(wire["content"][0]["text"], "{\"code\":\"OK\",\"value\":7}");
+        assert_eq!(wire["content"][1]["text"], "deterministic summary");
+        assert_eq!(wire["isError"], false);
+    }
+
+    #[test]
     fn frozen_wire_projector_preserves_safe_tool_error_without_structured_content() {
-        let projected = project_call_tool_result(crate::mcp::errors::read_file_error(
-            &crate::tools::ReadFileError::InvalidArguments {
+        let projected = project_call_tool_result(
+            crate::mcp::errors::read_file_error(&crate::tools::ReadFileError::InvalidArguments {
                 message: "caller input is invalid".into(),
-            },
-        ));
+            }),
+            Some(&ProtocolVersion::V_2025_03_26),
+        );
         let wire = serde_json::to_value(&projected).expect("serialize projected error");
         assert!(wire.get("structuredContent").is_none());
         assert_eq!(wire["isError"], true);
@@ -2020,12 +2056,25 @@ mod tests {
     }
 
     #[test]
-    fn server_advertises_only_the_frozen_mcp_revision_and_no_output_schema() {
+    fn modern_wire_projector_preserves_safe_tool_error_structured_content() {
+        let projected = project_call_tool_result(
+            crate::mcp::errors::read_file_error(&crate::tools::ReadFileError::InvalidArguments {
+                message: "caller input is invalid".into(),
+            }),
+            Some(&ProtocolVersion::V_2026_07_28),
+        );
+        let wire = serde_json::to_value(&projected).expect("serialize projected error");
+        assert_eq!(wire["structuredContent"]["code"], "INVALID_ARGUMENTS");
+        assert_eq!(wire["isError"], true);
+    }
+
+    #[test]
+    fn server_advertises_legacy_and_modern_revisions_without_output_schema() {
         let workspace = TestWorkspace::new();
         let service = workspace.service();
         assert_eq!(
             service.supported_protocol_versions().as_ref(),
-            &[ProtocolVersion::V_2025_03_26]
+            &[ProtocolVersion::V_2025_03_26, ProtocolVersion::V_2026_07_28,]
         );
         assert!(service
             .wire_tools()
