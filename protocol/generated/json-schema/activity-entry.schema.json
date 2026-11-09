@@ -120,6 +120,15 @@
         "cwd": {
           "$ref": "#/$defs/BashWorkingDirectory"
         },
+        "destructive": {
+          "type": "boolean"
+        },
+        "destructiveReasons": {
+          "items": {
+            "$ref": "#/$defs/BashDestructiveReason"
+          },
+          "type": "array"
+        },
         "durationMs": {
           "format": "uint64",
           "minimum": 0,
@@ -165,6 +174,15 @@
       "enum": [
         "classified",
         "unclassified_high_risk"
+      ],
+      "type": "string"
+    },
+    "BashDestructiveReason": {
+      "enum": [
+        "delete",
+        "overwrite",
+        "disk",
+        "repository"
       ],
       "type": "string"
     },
@@ -359,6 +377,7 @@
         "system_guardrail",
         "matched_user_rules",
         "tool_default",
+        "analyzer_risk_floor",
         "invalid_policy_snapshot",
         "invalid_context",
         "unsupported_capability",

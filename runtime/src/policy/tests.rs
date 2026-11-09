@@ -819,6 +819,71 @@ fn bash_command_with_no_match_uses_bash_default_ask() {
 }
 
 #[test]
+fn trust_default_allows_safe_commands_but_keeps_destructive_and_unclassified_floors() {
+    let mut config = PolicyConfig::default();
+    config.tool_defaults.bash = PolicyDecision::Allow;
+
+    let safe = evaluate_bash(config.clone(), "rg foo 2>/dev/null");
+    assert_eq!(safe.decision, PolicyDecision::Allow);
+    assert_eq!(safe.reason, PolicyEvaluationReason::ToolDefault);
+
+    let destructive = evaluate_bash(config.clone(), "rm -rf build");
+    assert_eq!(destructive.decision, PolicyDecision::Ask);
+    assert_eq!(
+        destructive.reason,
+        PolicyEvaluationReason::AnalyzerRiskFloor
+    );
+
+    let unclassified = evaluate_bash(config, "echo $(whoami)");
+    assert_eq!(unclassified.decision, PolicyDecision::Ask);
+    assert_eq!(
+        unclassified.reason,
+        PolicyEvaluationReason::AnalyzerRiskFloor
+    );
+}
+
+#[test]
+fn broad_allow_cannot_lower_destructive_floor() {
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "bash-allow",
+        PolicyDecision::Allow,
+        PolicyMatcherConfig::tool("bash"),
+    ));
+    let result = evaluate_bash(config, "rm -rf build");
+    assert_eq!(result.decision, PolicyDecision::Ask);
+    assert_eq!(result.matched_rule_ids, ["bash-allow"]);
+    assert_eq!(result.reason, PolicyEvaluationReason::AnalyzerRiskFloor);
+}
+
+#[test]
+fn exact_allow_rule_cannot_lower_destructive_floor() {
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "rm-allow",
+        PolicyDecision::Allow,
+        PolicyMatcherConfig::bash_command("rm", vec!["-rf".into()]),
+    ));
+    let result = evaluate_bash(config, "rm -rf build");
+    assert_eq!(result.decision, PolicyDecision::Ask);
+    assert_eq!(result.matched_rule_ids, ["rm-allow"]);
+    assert_eq!(result.reason, PolicyEvaluationReason::AnalyzerRiskFloor);
+}
+
+#[test]
+fn explicit_deny_still_wins_over_destructive_floor() {
+    let mut config = PolicyConfig::default();
+    config.user_rules.push(bash_rule(
+        "bash-deny",
+        PolicyDecision::Deny,
+        PolicyMatcherConfig::tool("bash"),
+    ));
+    let result = evaluate_bash(config, "rm -rf build");
+    assert_eq!(result.decision, PolicyDecision::Deny);
+    assert_eq!(result.reason, PolicyEvaluationReason::MatchedUserRules);
+}
+
+#[test]
 fn broad_bash_allow_cannot_lower_unclassified_command_floor() {
     let mut config = PolicyConfig::default();
     config.user_rules.push(bash_rule(

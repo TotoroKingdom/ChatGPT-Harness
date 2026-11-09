@@ -373,6 +373,10 @@ fn bash_evidence(
                 .and_then(|id| Uuid::parse_str(id).ok())
                 .map(|id| id.to_string()),
             session_grant_hit: context.session_grant_hit,
+            destructive: details.is_some_and(|facts| facts.destructive),
+            destructive_reasons: details
+                .map(|facts| facts.destructive_reasons.clone())
+                .unwrap_or_default(),
             exit_code: context.bash_exit_code,
             duration_ms: context.bash_duration_ms,
         },
@@ -388,6 +392,7 @@ fn policy_reason(reason: PolicyEvaluationReason) -> PolicyReason {
             PolicyReason::ToolDefault
         }
         PolicyEvaluationReason::SystemGuardrail => PolicyReason::SystemGuardrail,
+        PolicyEvaluationReason::AnalyzerRiskFloor => PolicyReason::AnalyzerRiskFloor,
         PolicyEvaluationReason::InvalidRuleSet => PolicyReason::InvalidPolicySnapshot,
         PolicyEvaluationReason::InvalidContext => PolicyReason::InvalidContext,
         PolicyEvaluationReason::UnsupportedCapability => PolicyReason::UnsupportedCapability,
@@ -419,6 +424,8 @@ mod bash_evidence_tests {
             cwd: BashWorkingDirectory::ActiveWorkspace,
             preview_redacted: true,
             preview_truncated: false,
+            destructive: false,
+            destructive_reasons: Vec::new(),
         }
     }
 

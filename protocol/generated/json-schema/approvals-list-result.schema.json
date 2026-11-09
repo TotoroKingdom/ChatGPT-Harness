@@ -137,6 +137,18 @@
         "cwd": {
           "$ref": "#/$defs/BashWorkingDirectory"
         },
+        "destructive": {
+          "default": false,
+          "description": "True when the analyzer matched a destructive operation.",
+          "type": "boolean"
+        },
+        "destructiveReasons": {
+          "description": "Sorted, deduplicated destructive reasons; omitted when empty.",
+          "items": {
+            "$ref": "#/$defs/BashDestructiveReason"
+          },
+          "type": "array"
+        },
         "normalizedSegments": {
           "items": {
             "$ref": "#/$defs/BashApprovalSegment"
@@ -200,6 +212,15 @@
       ],
       "type": "string"
     },
+    "BashDestructiveReason": {
+      "enum": [
+        "delete",
+        "overwrite",
+        "disk",
+        "repository"
+      ],
+      "type": "string"
+    },
     "BashRiskFlag": {
       "enum": [
         "command_substitution",
@@ -232,6 +253,7 @@
         "system_guardrail",
         "matched_user_rules",
         "tool_default",
+        "analyzer_risk_floor",
         "invalid_policy_snapshot",
         "invalid_context",
         "unsupported_capability",

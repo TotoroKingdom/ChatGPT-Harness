@@ -50,6 +50,7 @@ function bashApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
     cwd: "active_workspace",
     previewRedacted: false,
     previewTruncated: false,
+    destructive: false,
   };
   return approval("pending", {
     requestId: "bash_request_01",
@@ -126,6 +127,23 @@ describe("M8 T6 Approval queue", () => {
     expect(screen.getByText("active_workspace")).toBeInTheDocument();
     expect(screen.getByText(/disabled for unclassified high-risk commands/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Allow for session" })).toBeDisabled();
+  });
+
+  it("shows destructive reasons and keeps exact session grants available for classified destructive commands", () => {
+    const request = bashApproval({
+      allowForSessionEligible: true,
+      bashDetails: {
+        ...bashApproval().bashDetails!,
+        destructive: true,
+        destructiveReasons: ["delete", "repository"],
+      },
+    });
+    setup([request]);
+
+    expect(screen.getAllByText(/Destructive operation/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/File or directory deletion/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/cannot be auto-allowed by a persistent Allow rule/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow for session" })).not.toBeDisabled();
   });
 
   it("puts the file-tool session scope in the decision surface without claiming content matching", () => {

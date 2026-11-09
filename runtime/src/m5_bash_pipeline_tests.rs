@@ -4,9 +4,9 @@ use crate::approval::ApprovalManagerError;
 use crate::mcp::McpService;
 use crate::state::RuntimeCore;
 use harness_control_protocol::{
-    ApprovalDecision, ApprovalRequest, ApprovalStatus, BashConfig, DecimalU64, PolicyDecision,
-    PolicyMatcherConfig, RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode,
-    ToolConfig, UserPolicyRuleConfig, WorkspaceConfig,
+    ApprovalDecision, ApprovalRequest, ApprovalStatus, BashConfig, BashDestructiveReason,
+    DecimalU64, PolicyDecision, PolicyMatcherConfig, RuntimeConfigSnapshot, RuntimeLimits,
+    SecurityConfig, SecurityMode, ToolConfig, UserPolicyRuleConfig, WorkspaceConfig,
 };
 use rmcp::model::CallToolResult;
 use serde_json::{json, Value};
@@ -266,6 +266,37 @@ async fn classified_session_grant_matches_full_normalized_shape_and_not_wider_pr
     assert!(!wider.is_finished());
     fixture.resolve(&request, ApprovalDecision::Deny).unwrap();
     assert_eq!(code(&finish(wider).await), "APPROVAL_DENIED");
+}
+
+#[tokio::test]
+async fn destructive_redirect_requires_approval_and_exact_session_grant() {
+    let fixture = Fixture::new(|cfg| {
+        cfg.policies.tool_defaults.bash = PolicyDecision::Allow;
+    });
+    let first = call(fixture.service(), "printf granted > granted.txt");
+    let approval = pending(&fixture).await;
+    assert_eq!(approval.allow_for_session_eligible, Some(true));
+    let details = approval.bash_details.as_ref().unwrap();
+    assert!(details.destructive);
+    assert!(details
+        .destructive_reasons
+        .contains(&BashDestructiveReason::Overwrite));
+    fixture
+        .resolve(&approval, ApprovalDecision::AllowForSession)
+        .unwrap();
+    let _ = finish(first).await;
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.join("granted.txt")).unwrap(),
+        "granted"
+    );
+
+    let _ = finish(call(fixture.service(), "printf granted > granted.txt")).await;
+    let different = call(fixture.service(), "printf granted > other.txt");
+    let request = pending(&fixture).await;
+    assert!(!different.is_finished());
+    fixture.resolve(&request, ApprovalDecision::Deny).unwrap();
+    assert_eq!(code(&finish(different).await), "APPROVAL_DENIED");
+    assert!(!fixture.root.join("other.txt").exists());
 }
 
 #[tokio::test]

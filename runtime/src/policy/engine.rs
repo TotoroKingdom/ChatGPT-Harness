@@ -98,6 +98,7 @@ pub(crate) enum PolicyEvaluationReason {
     NoApplicableRules,
     ToolDefault,
     SystemGuardrail,
+    AnalyzerRiskFloor,
     InvalidRuleSet,
     InvalidContext,
     UnsupportedCapability,
@@ -443,6 +444,7 @@ impl PolicyEngine {
         let mut matched_ids = BTreeSet::new();
         let mut aggregate = PolicyDecision::Allow;
         let mut any_explicit = false;
+        let mut floor_raised = false;
 
         for segment in &analysis.segments {
             let mut segment_decision: Option<PolicyDecision> = None;
@@ -474,22 +476,30 @@ impl PolicyEngine {
             let decision = if matches!(
                 analysis.classification,
                 crate::bash::analyzer::BashClassification::UnclassifiedHighRisk
-            ) {
-                max_decision(Some(decision), PolicyDecision::Ask)
+            ) || !segment.destructive.is_empty()
+            {
+                let floored = max_decision(Some(decision.clone()), PolicyDecision::Ask);
+                if floored != decision {
+                    floor_raised = true;
+                }
+                floored
             } else {
                 decision
             };
             aggregate = max_decision(Some(aggregate), decision);
         }
 
+        let reason = if floor_raised && !matches!(aggregate, PolicyDecision::Deny) {
+            PolicyEvaluationReason::AnalyzerRiskFloor
+        } else if any_explicit {
+            PolicyEvaluationReason::MatchedUserRules
+        } else {
+            PolicyEvaluationReason::ToolDefault
+        };
         PolicyEvaluation {
             decision: aggregate,
             matched_rule_ids: matched_ids.into_iter().collect(),
-            reason: if any_explicit {
-                PolicyEvaluationReason::MatchedUserRules
-            } else {
-                PolicyEvaluationReason::ToolDefault
-            },
+            reason,
         }
     }
 
@@ -698,6 +708,7 @@ pub(crate) fn to_wire_reason(reason: PolicyEvaluationReason) -> PolicyReason {
             PolicyReason::ToolDefault
         }
         PolicyEvaluationReason::SystemGuardrail => PolicyReason::SystemGuardrail,
+        PolicyEvaluationReason::AnalyzerRiskFloor => PolicyReason::AnalyzerRiskFloor,
         PolicyEvaluationReason::InvalidRuleSet => PolicyReason::InvalidPolicySnapshot,
         PolicyEvaluationReason::InvalidContext => PolicyReason::InvalidContext,
         PolicyEvaluationReason::UnsupportedCapability => PolicyReason::UnsupportedCapability,

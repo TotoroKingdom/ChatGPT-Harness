@@ -6,7 +6,9 @@
 //! small supported grammar is classified high risk and therefore receives at
 //! least the ASK policy floor.
 
-use harness_control_protocol::{normalize_bash_executable, BashCommandMatcherConfig};
+use harness_control_protocol::{
+    normalize_bash_executable, BashCommandMatcherConfig, BashDestructiveReason,
+};
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -49,6 +51,16 @@ pub(crate) struct BashCommandSegment {
     /// callers must use the sanitized projections for public evidence.
     pub(crate) argv: Vec<String>,
     pub(crate) risk_flags: Vec<BashRiskFlag>,
+    pub(crate) destructive: Vec<BashDestructiveReason>,
+    pub(crate) redirects: Vec<BashRedirect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BashRedirect {
+    pub(crate) fd: Option<String>,
+    pub(crate) operator: String,
+    pub(crate) target: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,9 +79,26 @@ impl BashCommandAnalysis {
         self.is_classified() && !self.segments.is_empty()
     }
 
+    pub(crate) fn is_destructive(&self) -> bool {
+        self.segments
+            .iter()
+            .any(|segment| !segment.destructive.is_empty())
+    }
+
+    pub(crate) fn destructive_reasons(&self) -> Vec<BashDestructiveReason> {
+        let mut reasons = self
+            .segments
+            .iter()
+            .flat_map(|segment| segment.destructive.iter().copied())
+            .collect::<Vec<_>>();
+        reasons.sort();
+        reasons.dedup();
+        reasons
+    }
+
     /// Returns a stable, compact representation of the exact normalized
-    /// command shape.  Only segments, operators, executable identity and
-    /// logical argv participate; risk metadata is intentionally excluded.
+    /// command shape.  Segments, operators, executable identity, logical argv
+    /// and bounded redirect facts participate; risk metadata is excluded.
     pub(crate) fn normalized_scope(&self) -> String {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -83,6 +112,7 @@ impl BashCommandAnalysis {
         struct ScopeSegment<'a> {
             executable: &'a str,
             argv: &'a [String],
+            redirects: &'a [BashRedirect],
         }
 
         let segments = self
@@ -91,6 +121,7 @@ impl BashCommandAnalysis {
             .map(|segment| ScopeSegment {
                 executable: &segment.executable,
                 argv: &segment.argv,
+                redirects: &segment.redirects,
             })
             .collect();
         serde_json::to_string(&Scope {
@@ -117,6 +148,16 @@ impl BashCommandAnalysis {
         struct DisplaySegment {
             executable: String,
             argv: Vec<String>,
+            #[serde(skip_serializing_if = "Vec::is_empty")]
+            redirects: Vec<DisplayRedirect>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DisplayRedirect {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            fd: Option<String>,
+            operator: String,
+            target: String,
         }
 
         let segments = self
@@ -125,6 +166,15 @@ impl BashCommandAnalysis {
             .map(|segment| DisplaySegment {
                 executable: sanitize_executable(&segment.executable),
                 argv: sanitize_argv(segment),
+                redirects: segment
+                    .redirects
+                    .iter()
+                    .map(|redirect| DisplayRedirect {
+                        fd: redirect.fd.clone(),
+                        operator: redirect.operator.clone(),
+                        target: sanitize_redirect_target(&redirect.target),
+                    })
+                    .collect(),
             })
             .collect();
         let serialized = serde_json::to_string(&Scope {
@@ -149,6 +199,9 @@ impl BashCommandAnalysis {
             && self.segments.iter().all(|segment| {
                 sanitize_executable(&segment.executable) == segment.executable
                     && sanitize_argv(segment) == segment.argv
+                    && segment.redirects.iter().all(|redirect| {
+                        sanitize_redirect_target(&redirect.target) == redirect.target
+                    })
             })
     }
 
@@ -168,6 +221,16 @@ impl BashCommandAnalysis {
             for argument in sanitize_argv(segment) {
                 output.push(' ');
                 output.push_str(&quote_display_token(&argument));
+            }
+            for redirect in &segment.redirects {
+                output.push(' ');
+                if let Some(fd) = &redirect.fd {
+                    output.push_str(fd);
+                }
+                output.push_str(&redirect.operator);
+                output.push_str(&quote_display_token(&sanitize_redirect_target(
+                    &redirect.target,
+                )));
             }
         }
         if output.len() > MAX_DISPLAY_BYTES {
@@ -227,9 +290,13 @@ enum Quote {
 /// the ASK floor and can still produce a useful sanitized approval preview.
 pub(crate) fn analyze(command: &str) -> BashCommandAnalysis {
     let mut segments: Vec<Vec<Token>> = vec![Vec::new()];
+    let mut segment_destructive: Vec<BTreeSet<BashDestructiveReason>> = vec![BTreeSet::new()];
+    let mut segment_redirects: Vec<Vec<BashRedirect>> = vec![Vec::new()];
     let mut operators = Vec::new();
     let mut current = String::new();
     let mut current_flags = BTreeSet::new();
+    let mut current_quoted = false;
+    let mut current_escaped = false;
     let mut quote = Quote::None;
     let mut token_started = false;
     let mut global_flags = BTreeSet::new();
@@ -306,23 +373,30 @@ pub(crate) fn analyze(command: &str) -> BashCommandAnalysis {
                     index += 1;
                     continue;
                 }
+                if current.is_empty() && !token_started {
+                    current_quoted = false;
+                    current_escaped = false;
+                }
                 if character.is_control() {
                     current_flags.insert(BashRiskFlag::UnsupportedGrammar);
                     global_flags.insert(BashRiskFlag::UnsupportedGrammar);
                 }
                 if character == '\'' {
                     quote = Quote::Single;
+                    current_quoted = true;
                     token_started = true;
                     index += 1;
                     continue;
                 }
                 if character == '"' {
                     quote = Quote::Double;
+                    current_quoted = true;
                     token_started = true;
                     index += 1;
                     continue;
                 }
                 if character == '\\' {
+                    current_escaped = true;
                     if let Some(next) = chars.get(index + 1).copied() {
                         if matches!(next, '\n' | '\r') {
                             index += 2;
@@ -369,23 +443,69 @@ pub(crate) fn analyze(command: &str) -> BashCommandAnalysis {
                     continue;
                 }
                 if matches!(character, '<' | '>') {
-                    flush_token(
-                        &mut current,
-                        &mut current_flags,
-                        token_started,
-                        &mut segments,
-                    );
-                    token_started = false;
-                    current_flags.insert(BashRiskFlag::Redirection);
-                    global_flags.insert(BashRiskFlag::Redirection);
-                    if chars.get(index + 1) == Some(&character) {
-                        index += 2;
+                    let fd_prefix = if token_started
+                        && current_flags.is_empty()
+                        && !current_quoted
+                        && !current_escaped
+                        && !current.is_empty()
+                        && current.chars().all(|character| character.is_ascii_digit())
+                    {
+                        token_started = false;
+                        current_quoted = false;
+                        current_escaped = false;
+                        Some(std::mem::take(&mut current))
                     } else {
-                        index += 1;
+                        flush_token(
+                            &mut current,
+                            &mut current_flags,
+                            token_started,
+                            &mut segments,
+                        );
+                        token_started = false;
+                        None
+                    };
+                    let parsed =
+                        parse_redirection(&chars, index, fd_prefix.as_deref(), &mut global_flags);
+                    if let Some(reason) = parsed.destructive {
+                        segment_destructive
+                            .last_mut()
+                            .expect("segments and destructive facts stay aligned")
+                            .insert(reason);
                     }
+                    if let Some(redirect) = parsed.redirect {
+                        segment_redirects
+                            .last_mut()
+                            .expect("segments and redirect facts stay aligned")
+                            .push(redirect);
+                    }
+                    index = parsed.next;
                     continue;
                 }
                 if character == '&' {
+                    if chars.get(index + 1) == Some(&'>') {
+                        flush_token(
+                            &mut current,
+                            &mut current_flags,
+                            token_started,
+                            &mut segments,
+                        );
+                        token_started = false;
+                        let parsed = parse_redirection(&chars, index, None, &mut global_flags);
+                        if let Some(reason) = parsed.destructive {
+                            segment_destructive
+                                .last_mut()
+                                .expect("segments and destructive facts stay aligned")
+                                .insert(reason);
+                        }
+                        if let Some(redirect) = parsed.redirect {
+                            segment_redirects
+                                .last_mut()
+                                .expect("segments and redirect facts stay aligned")
+                                .push(redirect);
+                        }
+                        index = parsed.next;
+                        continue;
+                    }
                     flush_token(
                         &mut current,
                         &mut current_flags,
@@ -396,6 +516,8 @@ pub(crate) fn analyze(command: &str) -> BashCommandAnalysis {
                     if chars.get(index + 1) == Some(&'&') {
                         operators.push(BashOperator::AndIf);
                         segments.push(Vec::new());
+                        segment_destructive.push(BTreeSet::new());
+                        segment_redirects.push(Vec::new());
                         index += 2;
                     } else {
                         current_flags.insert(BashRiskFlag::UnsupportedGrammar);
@@ -415,10 +537,14 @@ pub(crate) fn analyze(command: &str) -> BashCommandAnalysis {
                     if chars.get(index + 1) == Some(&'|') {
                         operators.push(BashOperator::OrIf);
                         segments.push(Vec::new());
+                        segment_destructive.push(BTreeSet::new());
+                        segment_redirects.push(Vec::new());
                         index += 2;
                     } else {
                         operators.push(BashOperator::Pipe);
                         segments.push(Vec::new());
+                        segment_destructive.push(BTreeSet::new());
+                        segment_redirects.push(Vec::new());
                         index += 1;
                     }
                     continue;
@@ -433,6 +559,8 @@ pub(crate) fn analyze(command: &str) -> BashCommandAnalysis {
                     token_started = false;
                     operators.push(BashOperator::Sequence);
                     segments.push(Vec::new());
+                    segment_destructive.push(BTreeSet::new());
+                    segment_redirects.push(Vec::new());
                     index += 1;
                     continue;
                 }
@@ -468,7 +596,11 @@ pub(crate) fn analyze(command: &str) -> BashCommandAnalysis {
 
     let mut analyzed = segments
         .into_iter()
-        .map(|tokens| analyze_segment(tokens, &mut global_flags))
+        .zip(segment_destructive)
+        .zip(segment_redirects)
+        .map(|((tokens, destructive), redirects)| {
+            analyze_segment(tokens, destructive, redirects, &mut global_flags)
+        })
         .collect::<Vec<_>>();
     if analyzed.iter().all(|segment| segment.executable.is_empty()) {
         global_flags.insert(BashRiskFlag::UnsupportedGrammar);
@@ -482,6 +614,8 @@ pub(crate) fn analyze(command: &str) -> BashCommandAnalysis {
             executable: UNSUPPORTED_EXECUTABLE.into(),
             argv: Vec::new(),
             risk_flags: Vec::new(),
+            destructive: Vec::new(),
+            redirects: Vec::new(),
         });
     }
     if !global_flags.is_empty() {
@@ -527,6 +661,8 @@ fn flush_token(
 
 fn analyze_segment(
     tokens: Vec<Token>,
+    mut destructive: BTreeSet<BashDestructiveReason>,
+    redirects: Vec<BashRedirect>,
     global_flags: &mut BTreeSet<BashRiskFlag>,
 ) -> BashCommandSegment {
     if tokens.is_empty() {
@@ -535,6 +671,8 @@ fn analyze_segment(
             executable: String::new(),
             argv: Vec::new(),
             risk_flags: Vec::new(),
+            destructive: Vec::new(),
+            redirects: Vec::new(),
         };
     }
     let executable_token = &tokens[0].value;
@@ -602,11 +740,559 @@ fn analyze_segment(
     if is_interpreter_inline_code(&executable, &argv) {
         risk_flags.insert(BashRiskFlag::InterpreterInlineCode);
     }
+    let (detected, wrapper_unsupported) = detect_destructive(executable_name, &argv);
+    destructive.extend(detected);
+    if wrapper_unsupported {
+        risk_flags.insert(BashRiskFlag::UnsupportedGrammar);
+    }
     BashCommandSegment {
         executable,
         argv,
         risk_flags: risk_flags.into_iter().collect(),
+        destructive: destructive.into_iter().collect(),
+        redirects,
     }
+}
+
+struct ParsedRedirection {
+    next: usize,
+    destructive: Option<BashDestructiveReason>,
+    redirect: Option<BashRedirect>,
+}
+
+fn parse_redirection(
+    chars: &[char],
+    index: usize,
+    fd_prefix: Option<&str>,
+    global_flags: &mut BTreeSet<BashRiskFlag>,
+) -> ParsedRedirection {
+    let first = chars[index];
+    let mut operator = String::new();
+    let mut cursor = index;
+
+    if first == '&' {
+        operator.push('&');
+        cursor += 1;
+        if chars.get(cursor) == Some(&'>') {
+            operator.push('>');
+            cursor += 1;
+            if chars.get(cursor) == Some(&'>') {
+                operator.push('>');
+                cursor += 1;
+            }
+        } else {
+            mark_unsupported_redirection(global_flags);
+            return ParsedRedirection {
+                next: cursor,
+                destructive: None,
+                redirect: None,
+            };
+        }
+    } else {
+        operator.push(first);
+        cursor += 1;
+        if let Some(next) = chars.get(cursor).copied() {
+            if next == first {
+                operator.push(next);
+                cursor += 1;
+                if first == '<' && chars.get(cursor) == Some(&'<') {
+                    operator.push('<');
+                    cursor += 1;
+                }
+            } else if next == '&' {
+                operator.push('&');
+                cursor += 1;
+            } else if first == '>' && next == '|' {
+                operator.push('|');
+                cursor += 1;
+            } else if first == '<' && next == '>' {
+                operator.push('>');
+                cursor += 1;
+            }
+        }
+    }
+
+    if operator == "<<" || operator == "<<<" {
+        mark_unsupported_redirection(global_flags);
+        return ParsedRedirection {
+            next: chars.len(),
+            destructive: None,
+            redirect: None,
+        };
+    }
+    if operator.starts_with(">>>") {
+        mark_unsupported_redirection(global_flags);
+        return ParsedRedirection {
+            next: cursor,
+            destructive: None,
+            redirect: None,
+        };
+    }
+    if chars.get(cursor) == Some(&'(') {
+        mark_unsupported_redirection(global_flags);
+        global_flags.insert(BashRiskFlag::UnsupportedGrammar);
+        return ParsedRedirection {
+            next: cursor,
+            destructive: None,
+            redirect: None,
+        };
+    }
+
+    if operator == "<&" || operator == ">&" {
+        if let Some((target, next)) = parse_fd_target(chars, cursor) {
+            return ParsedRedirection {
+                next,
+                destructive: None,
+                redirect: Some(BashRedirect {
+                    fd: fd_prefix.map(str::to_owned),
+                    operator,
+                    target,
+                }),
+            };
+        }
+        mark_unsupported_redirection(global_flags);
+        return ParsedRedirection {
+            next: cursor,
+            destructive: None,
+            redirect: None,
+        };
+    }
+
+    let Some(target) = parse_redirect_target(chars, cursor) else {
+        mark_unsupported_redirection(global_flags);
+        return ParsedRedirection {
+            next: cursor,
+            destructive: None,
+            redirect: None,
+        };
+    };
+    if target.dynamic {
+        mark_unsupported_redirection(global_flags);
+        global_flags.insert(BashRiskFlag::DynamicExpansion);
+        return ParsedRedirection {
+            next: target.next,
+            destructive: None,
+            redirect: None,
+        };
+    }
+    if target.malformed {
+        mark_unsupported_redirection(global_flags);
+        global_flags.insert(BashRiskFlag::MalformedQuoting);
+        return ParsedRedirection {
+            next: target.next,
+            destructive: None,
+            redirect: None,
+        };
+    }
+    if operator.starts_with('<') && operator != "<>" || is_safe_redirect_target(&target.value) {
+        return ParsedRedirection {
+            next: target.next,
+            destructive: None,
+            redirect: Some(BashRedirect {
+                fd: fd_prefix.map(str::to_owned),
+                operator,
+                target: target.value,
+            }),
+        };
+    }
+    ParsedRedirection {
+        next: target.next,
+        destructive: Some(BashDestructiveReason::Overwrite),
+        redirect: Some(BashRedirect {
+            fd: fd_prefix.map(str::to_owned),
+            operator,
+            target: target.value,
+        }),
+    }
+}
+
+fn mark_unsupported_redirection(global_flags: &mut BTreeSet<BashRiskFlag>) {
+    global_flags.insert(BashRiskFlag::Redirection);
+    global_flags.insert(BashRiskFlag::UnsupportedGrammar);
+}
+
+fn is_safe_redirect_target(value: &str) -> bool {
+    let normalized = value
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "/dev/null" | "nul" | "nul:" | "con" | "con:"
+    )
+}
+
+struct RedirectTarget {
+    value: String,
+    next: usize,
+    dynamic: bool,
+    malformed: bool,
+}
+
+fn parse_redirect_target(chars: &[char], start: usize) -> Option<RedirectTarget> {
+    let mut cursor = start;
+    while chars
+        .get(cursor)
+        .is_some_and(|character| character.is_ascii_whitespace())
+    {
+        cursor += 1;
+    }
+    let mut value = String::new();
+    let mut quote = Quote::None;
+    let mut dynamic = false;
+    let mut malformed = false;
+
+    while let Some(&character) = chars.get(cursor) {
+        match quote {
+            Quote::Single => {
+                if character == '\'' {
+                    quote = Quote::None;
+                } else {
+                    value.push(character);
+                }
+                cursor += 1;
+            }
+            Quote::Double => {
+                if character == '"' {
+                    quote = Quote::None;
+                    cursor += 1;
+                    continue;
+                }
+                if character == '\\' {
+                    if let Some(&next) = chars.get(cursor + 1) {
+                        match next {
+                            '"' | '\\' | '$' | '`' => {
+                                value.push(next);
+                                cursor += 2;
+                                continue;
+                            }
+                            '\n' | '\r' => {
+                                cursor += 2;
+                                if next == '\r' && chars.get(cursor) == Some(&'\n') {
+                                    cursor += 1;
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        malformed = true;
+                        cursor += 1;
+                        continue;
+                    }
+                }
+                if character == '$' || character == '`' {
+                    dynamic = true;
+                }
+                if character.is_control() {
+                    malformed = true;
+                }
+                value.push(character);
+                cursor += 1;
+            }
+            Quote::None => {
+                if character.is_ascii_whitespace()
+                    || matches!(character, '<' | '>' | '|' | '&' | ';')
+                {
+                    break;
+                }
+                if character == '\'' {
+                    quote = Quote::Single;
+                    cursor += 1;
+                    continue;
+                }
+                if character == '"' {
+                    quote = Quote::Double;
+                    cursor += 1;
+                    continue;
+                }
+                if character == '\\' {
+                    if let Some(&next) = chars.get(cursor + 1) {
+                        match next {
+                            '\n' | '\r' => {
+                                cursor += 2;
+                                if next == '\r' && chars.get(cursor) == Some(&'\n') {
+                                    cursor += 1;
+                                }
+                                continue;
+                            }
+                            _ => {
+                                value.push(next);
+                                cursor += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    malformed = true;
+                    cursor += 1;
+                    continue;
+                }
+                if character == '$' || character == '`' {
+                    dynamic = true;
+                } else if matches!(
+                    character,
+                    '*' | '?' | '[' | ']' | '~' | '!' | '(' | ')' | '{' | '}'
+                ) {
+                    dynamic = true;
+                }
+                if character.is_control() {
+                    malformed = true;
+                }
+                value.push(character);
+                cursor += 1;
+            }
+        }
+    }
+
+    if quote != Quote::None {
+        malformed = true;
+    }
+    if value.is_empty() {
+        return None;
+    }
+    Some(RedirectTarget {
+        value,
+        next: cursor,
+        dynamic,
+        malformed,
+    })
+}
+
+fn parse_fd_target(chars: &[char], start: usize) -> Option<(String, usize)> {
+    let mut cursor = start;
+    while chars
+        .get(cursor)
+        .is_some_and(|character| character.is_ascii_whitespace())
+    {
+        cursor += 1;
+    }
+    let mut value = String::new();
+    while let Some(&character) = chars.get(cursor) {
+        if character.is_ascii_digit() || character == '-' {
+            value.push(character);
+            cursor += 1;
+        } else {
+            break;
+        }
+    }
+    if value.is_empty() {
+        return None;
+    }
+    if let Some(&next) = chars.get(cursor) {
+        if !next.is_ascii_whitespace() && !matches!(next, '<' | '>' | '|' | '&' | ';') {
+            return None;
+        }
+    }
+    Some((value, cursor))
+}
+
+fn detect_destructive(
+    executable_name: &str,
+    argv: &[String],
+) -> (BTreeSet<BashDestructiveReason>, bool) {
+    let mut reasons = BTreeSet::new();
+    let mut wrapper_unsupported = false;
+    let name = executable_name
+        .trim_end_matches(".exe")
+        .to_ascii_lowercase();
+
+    if matches!(
+        name.as_str(),
+        "rm" | "rmdir"
+            | "unlink"
+            | "shred"
+            | "sdelete"
+            | "del"
+            | "erase"
+            | "rd"
+            | "remove-item"
+            | "ri"
+    ) {
+        reasons.insert(BashDestructiveReason::Delete);
+    }
+    if name == "truncate" || name == "dd" {
+        reasons.insert(BashDestructiveReason::Overwrite);
+    }
+    if name == "format"
+        || name.starts_with("mkfs")
+        || matches!(name.as_str(), "wipefs" | "diskpart" | "fdisk" | "parted")
+    {
+        reasons.insert(BashDestructiveReason::Disk);
+    }
+    if matches!(name.as_str(), "tee" | "set-content" | "clear-content") {
+        reasons.insert(BashDestructiveReason::Overwrite);
+    }
+    if name == "sed"
+        && argv
+            .iter()
+            .any(|argument| argument == "--in-place" || argument.starts_with("-i"))
+    {
+        reasons.insert(BashDestructiveReason::Overwrite);
+    }
+    if name == "perl"
+        && argv
+            .iter()
+            .any(|argument| argument.starts_with('-') && argument.contains('i'))
+    {
+        reasons.insert(BashDestructiveReason::Overwrite);
+    }
+    if name == "git" {
+        reasons.extend(git_destructive(argv));
+    }
+    if name == "find" {
+        if argv.iter().any(|argument| argument == "-delete") {
+            reasons.insert(BashDestructiveReason::Delete);
+        }
+        if argv
+            .iter()
+            .any(|argument| argument == "-exec" || argument == "-execdir")
+        {
+            wrapper_unsupported = true;
+            if let Some(command) = find_exec_command(argv) {
+                reasons.extend(destructive_for_wrapped_command(command, &[]));
+            }
+        }
+    }
+    if name == "xargs" {
+        wrapper_unsupported = true;
+        if let Some((command, args)) = wrapped_command(argv) {
+            reasons.extend(destructive_for_wrapped_command(command, args));
+        }
+    }
+    if matches!(
+        name.as_str(),
+        "sudo"
+            | "doas"
+            | "runas"
+            | "su"
+            | "chroot"
+            | "nice"
+            | "nohup"
+            | "timeout"
+            | "stdbuf"
+            | "setsid"
+            | "ionice"
+            | "watch"
+            | "parallel"
+            | "busybox"
+            | "toybox"
+            | "wsl"
+            | "ssh"
+    ) {
+        wrapper_unsupported = true;
+    }
+
+    (reasons, wrapper_unsupported)
+}
+
+fn git_destructive(argv: &[String]) -> BTreeSet<BashDestructiveReason> {
+    let mut reasons = BTreeSet::new();
+    let Some(subcommand) = argv.first().map(String::as_str) else {
+        return reasons;
+    };
+    let rest = &argv[1..];
+    match subcommand {
+        "rm" => {
+            reasons.insert(BashDestructiveReason::Delete);
+        }
+        "clean"
+            if rest.iter().any(|argument| {
+                argument == "--force" || argument.starts_with('-') && argument.contains('f')
+            }) =>
+        {
+            reasons.insert(BashDestructiveReason::Delete);
+        }
+        "reset" if rest.iter().any(|argument| argument == "--hard") => {
+            reasons.insert(BashDestructiveReason::Repository);
+        }
+        "checkout"
+            if rest.iter().any(|argument| {
+                argument == "-f" || argument == "--force" || argument == "--" || argument == "."
+            }) =>
+        {
+            reasons.insert(BashDestructiveReason::Repository);
+        }
+        "restore" => {
+            reasons.insert(BashDestructiveReason::Repository);
+        }
+        "stash"
+            if rest
+                .first()
+                .is_some_and(|argument| argument == "drop" || argument == "clear") =>
+        {
+            reasons.insert(BashDestructiveReason::Delete);
+        }
+        "branch"
+            if rest.iter().any(|argument| argument == "-D")
+                || (rest.iter().any(|argument| argument == "--delete")
+                    && rest
+                        .iter()
+                        .any(|argument| argument == "-f" || argument == "--force")) =>
+        {
+            reasons.insert(BashDestructiveReason::Delete);
+        }
+        "push"
+            if rest.iter().any(|argument| {
+                argument == "-f"
+                    || argument == "--force"
+                    || argument == "--delete"
+                    || argument == "--force-with-lease"
+                    || argument.starts_with("--force-with-lease=")
+            }) =>
+        {
+            reasons.insert(BashDestructiveReason::Repository);
+        }
+        "filter-branch" => {
+            reasons.insert(BashDestructiveReason::Repository);
+        }
+        "worktree" if rest.first().is_some_and(|argument| argument == "remove") => {
+            reasons.insert(BashDestructiveReason::Delete);
+        }
+        _ => {}
+    }
+    reasons
+}
+
+fn wrapped_command(argv: &[String]) -> Option<(&str, &[String])> {
+    for (index, argument) in argv.iter().enumerate() {
+        if argument.starts_with('-') {
+            continue;
+        }
+        return Some((argument.as_str(), &argv[index + 1..]));
+    }
+    None
+}
+
+fn find_exec_command(argv: &[String]) -> Option<&str> {
+    let index = argv
+        .iter()
+        .position(|argument| argument == "-exec" || argument == "-execdir")?;
+    argv.get(index + 1).map(String::as_str)
+}
+
+fn destructive_for_wrapped_command(
+    command: &str,
+    argv: &[String],
+) -> BTreeSet<BashDestructiveReason> {
+    let name = command
+        .rsplit('/')
+        .next()
+        .unwrap_or(command)
+        .trim_end_matches(".exe")
+        .to_ascii_lowercase();
+    let mut reasons = BTreeSet::new();
+    if matches!(
+        name.as_str(),
+        "rm" | "rmdir" | "unlink" | "shred" | "sdelete" | "del" | "erase" | "rd"
+    ) {
+        reasons.insert(BashDestructiveReason::Delete);
+    }
+    if name == "git" {
+        reasons.extend(git_destructive(argv));
+    }
+    reasons
 }
 
 fn mark_expansion(
@@ -812,6 +1498,18 @@ fn sanitize_executable(executable: &str) -> String {
     }
 }
 
+fn sanitize_redirect_target(target: &str) -> String {
+    if target.len() > MAX_DISPLAY_BYTES / 2
+        || target.chars().any(|character| character.is_control())
+        || contains_publicly_sensitive_shape(target)
+        || is_secret_key(target)
+    {
+        REDACTED.into()
+    } else {
+        target.into()
+    }
+}
+
 fn quote_display_token(token: &str) -> String {
     // The preview is never executable authority, but quoting shell syntax
     // keeps literal argv such as `&&` and `$(...)` from looking like syntax.
@@ -911,7 +1609,7 @@ mod tests {
                 "python -c \"print(1)\"",
                 BashRiskFlag::InterpreterInlineCode,
             ),
-            ("cat < input.txt", BashRiskFlag::Redirection),
+            ("cat <<EOF\nhi\nEOF", BashRiskFlag::Redirection),
             ("echo $NAME", BashRiskFlag::DynamicExpansion),
         ] {
             let analysis = analyze(command);
@@ -921,6 +1619,105 @@ mod tests {
                 "{command}"
             );
             assert!(analysis.risk_flags().contains(&flag), "{command}");
+        }
+    }
+
+    #[test]
+    fn safe_redirections_are_classified_and_not_destructive() {
+        for command in [
+            "rg -n foo 2>/dev/null",
+            "rg -n foo > /dev/null",
+            "rg -n foo 2>&1 | head -100",
+            "rg -n foo >NUL",
+            "rg -n foo </dev/null",
+            "rg -n foo &>/dev/null",
+        ] {
+            let analysis = analyze(command);
+            assert!(analysis.is_classified(), "{command}");
+            assert!(!analysis.is_destructive(), "{command}");
+        }
+    }
+
+    #[test]
+    fn file_output_redirection_is_classified_destructive() {
+        for command in [
+            "echo hi > out.txt",
+            "echo hi >> out.txt",
+            "echo hi 2> out.txt",
+            "echo hi &> out.txt",
+        ] {
+            let analysis = analyze(command);
+            assert!(analysis.is_classified(), "{command}");
+            assert!(analysis.is_destructive(), "{command}");
+            assert!(
+                analysis
+                    .destructive_reasons()
+                    .contains(&BashDestructiveReason::Overwrite),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_or_heredoc_redirection_stays_unclassified() {
+        for command in [
+            "echo hi > $FILE",
+            "echo hi > *.txt",
+            "cat <<EOF\nhi\nEOF",
+            "diff <(echo a) <(echo b)",
+        ] {
+            assert_eq!(
+                analyze(command).classification,
+                BashClassification::UnclassifiedHighRisk,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn destructive_commands_are_detected_across_segments() {
+        for command in [
+            "rm -rf build",
+            "del foo.txt",
+            "git clean -fd",
+            "git reset --hard HEAD",
+            "git push --force",
+            "git push --delete old",
+            "git restore .",
+            "git checkout .",
+            "git stash drop",
+            "git branch -D old",
+            "find . -delete",
+        ] {
+            let analysis = analyze(command);
+            assert!(analysis.is_destructive(), "{command}");
+        }
+        for command in [
+            "cd module-platform && rg foo | head -100",
+            "git status",
+            "git diff",
+            "npm test",
+            "cat < input.txt",
+        ] {
+            let analysis = analyze(command);
+            assert!(analysis.is_classified(), "{command}");
+            assert!(!analysis.is_destructive(), "{command}");
+        }
+    }
+
+    #[test]
+    fn wrappers_that_can_hide_arbitrary_execution_stay_unclassified() {
+        for command in [
+            "sudo rm -rf /",
+            "wsl rm -rf /",
+            "xargs rm -rf",
+            "find . -exec sh -c 'rm -rf /' ;",
+        ] {
+            assert_eq!(
+                analyze(command).classification,
+                BashClassification::UnclassifiedHighRisk,
+                "{command}"
+            );
         }
     }
 
@@ -935,6 +1732,47 @@ mod tests {
             first.normalized_scope(),
             analyze("git 'status'").normalized_scope()
         );
+    }
+
+    #[test]
+    fn normalized_scope_keeps_redirect_targets_exact() {
+        assert_ne!(
+            analyze("echo hi > a.txt").normalized_scope(),
+            analyze("echo hi > b.txt").normalized_scope()
+        );
+        assert_ne!(
+            analyze("echo hi").normalized_scope(),
+            analyze("echo hi > a.txt").normalized_scope()
+        );
+        assert_eq!(
+            analyze("echo hi > a.txt").normalized_scope(),
+            analyze("echo hi > 'a.txt'").normalized_scope()
+        );
+        assert!(analyze("echo hi > a.txt")
+            .normalized_scope()
+            .contains("a.txt"));
+    }
+
+    #[test]
+    fn quoted_digits_are_arguments_not_file_descriptors() {
+        let analysis = analyze("echo '2'>out.txt");
+        assert_eq!(segment(&analysis, 0).argv, ["2"]);
+        assert_eq!(segment(&analysis, 0).redirects[0].fd, None);
+
+        let escaped = analyze("echo 2\\3>out.txt");
+        assert_eq!(segment(&escaped, 0).argv, ["23"]);
+        assert_eq!(segment(&escaped, 0).redirects[0].fd, None);
+    }
+
+    #[test]
+    fn sanitized_scope_redacts_secret_redirect_targets() {
+        let analysis = analyze("echo hi > token=PRIVATE_REDIRECT_SECRET");
+        assert!(!analysis
+            .sanitized_scope()
+            .contains("PRIVATE_REDIRECT_SECRET"));
+        assert!(!analysis
+            .sanitized_preview()
+            .contains("PRIVATE_REDIRECT_SECRET"));
     }
 
     #[test]

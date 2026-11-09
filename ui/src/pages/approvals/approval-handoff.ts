@@ -6,7 +6,7 @@ export function safeApprovalMatcher(request: ApprovalRequest): PolicyMatcherConf
   if (["read_file", "glob", "grep", "write", "edit"].includes(request.tool)) return { type: "tool", tool: request.tool };
   if (request.tool !== "bash") return undefined;
   const details = request.bashDetails;
-  if (!details || details.classification !== "classified" || details.previewRedacted !== false || details.previewTruncated !== false || !Array.isArray(details.normalizedSegments) || details.normalizedSegments.length !== 1) return undefined;
+  if (!details || details.destructive === true || details.classification !== "classified" || details.previewRedacted !== false || details.previewTruncated !== false || !Array.isArray(details.normalizedSegments) || details.normalizedSegments.length !== 1) return undefined;
   const segment = details.normalizedSegments[0];
   if (!segment || segment.argvRedacted !== false || typeof segment.executable !== "string" || !Array.isArray(segment.argv) || !segment.argv.every((token) => typeof token === "string") || normalizeExecutable(segment.executable) !== segment.executable) return undefined;
   // Frozen matcher validation bounds; no shell parsing of the display preview.

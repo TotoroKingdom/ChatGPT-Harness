@@ -157,6 +157,7 @@ Bash 是 async MCP execution：
 - concurrency 1；
 - high-risk/unclassified command 至少 ASK；
 - unclassified high-risk 不允许 Session Grant。
+- 删除、覆盖、磁盘/格式化、Git 破坏性操作始终至少 ASK；持久 Allow 规则不能降低该下限。
 
 Bash 工作目录固定到 active Workspace，但并非 OS filesystem sandbox。
 

@@ -6,7 +6,7 @@ import { Sidebar } from "./Sidebar";
 import { useTranslation } from "react-i18next";
 import { hasPolicyCritical } from "@/i18n/state-presentation";
 import { DiagnosticsTrigger } from "@/components/status/DiagnosticsHost";
-import { StatusBadge } from "@/components/common/primitives";
+import { Button, StatusBadge } from "@/components/common/primitives";
 
 export function AppShell({ page, onNavigate, children }: { page: PageKey; onNavigate: (page: PageKey) => void; children: ReactNode }) {
   const { t } = useTranslation();
@@ -15,6 +15,10 @@ export function AppShell({ page, onNavigate, children }: { page: PageKey; onNavi
   const mainRef = useRef<HTMLElement>(null);
   const pending = data.approvals?.status === "success" || data.approvals?.status === "empty" ? data.approvals.data.items.filter((item) => item.status === "pending").length : undefined;
   const critical = data.policies ? hasPolicyCritical(data.components.runtime, data.policies) : false;
+  const effectiveBashDecision = data.policies?.status === "success" || data.policies?.status === "empty"
+    ? data.policies.data.effective?.perTool.find((tool) => tool.tool === "bash")?.decision
+    : undefined;
+  const trustMode = data.config?.policies?.toolDefaults?.bash === "allow" || effectiveBashDecision === "allow";
   const status = data.overall ?? "stopped";
   const observed = data.harnessObserved !== false;
   useEffect(() => {
@@ -40,6 +44,7 @@ export function AppShell({ page, onNavigate, children }: { page: PageKey; onNavi
           >
             {critical ? t("m8.needsAttention") : t("m8.harnessState", { status: observed ? t(`status.${status}`) : t("m8.unknown") })}
           </StatusBadge>
+          {trustMode && <Button variant="quiet" className="trust-mode-indicator" title={t("policies.bashTrustModeResidualRisk")} onClick={() => onNavigate("policies")}><StatusBadge tone="warning" visual="warning">{t("policies.bashTrustModeBadge")}</StatusBadge></Button>}
           <DiagnosticsTrigger variant="quiet" />
         </div>
       </header>

@@ -443,6 +443,8 @@ mod tests {
             risk_flags: vec![BashRiskFlag::Redirection],
             approval_request_id: None,
             session_grant_hit: false,
+            destructive: false,
+            destructive_reasons: Vec::new(),
             exit_code: Some(0),
             duration_ms: Some(12),
         });

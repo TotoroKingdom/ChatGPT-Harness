@@ -230,6 +230,7 @@ function bashApproval(): ApprovalRequest {
     cwd: "active_workspace",
     previewRedacted: false,
     previewTruncated: false,
+    destructive: false,
   };
   return {
     ...approval(),

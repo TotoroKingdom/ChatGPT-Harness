@@ -3,7 +3,7 @@ import type { ApprovalRequest, BashApprovalDetails } from "@protocol/v1";
 import { safeApprovalMatcher } from "./approval-handoff";
 
 function request(patch: Partial<BashApprovalDetails> = {}): ApprovalRequest {
-  return { requestId: "a1", runtimeId: "runtime1", generationId: "generation1", tool: "bash", sanitizedArguments: {}, scopeSummary: "git status", matchedRuleIds: [], policyReason: "tool_default", riskLevel: "low", createdAt: "2026-10-05T00:00:00Z", expiresAt: "2026-10-05T01:00:00Z", status: "pending", allowForSessionEligible: true, bashDetails: { commandPreview: "git status", classification: "classified", normalizedSegments: [{ executable: "git", argv: ["status"], argvRedacted: false }], riskFlags: [], cwd: "active_workspace", previewRedacted: false, previewTruncated: false, ...patch } };
+  return { requestId: "a1", runtimeId: "runtime1", generationId: "generation1", tool: "bash", sanitizedArguments: {}, scopeSummary: "git status", matchedRuleIds: [], policyReason: "tool_default", riskLevel: "low", createdAt: "2026-10-05T00:00:00Z", expiresAt: "2026-10-05T01:00:00Z", status: "pending", allowForSessionEligible: true, bashDetails: { commandPreview: "git status", classification: "classified", normalizedSegments: [{ executable: "git", argv: ["status"], argvRedacted: false }], riskFlags: [], cwd: "active_workspace", previewRedacted: false, previewTruncated: false, destructive: false, ...patch } };
 }
 it("prefills only an unambiguous single segment and preserves literal tokens", () => {
   const source = request({ normalizedSegments: [{ executable: "printf", argv: ["two words", ""], argvRedacted: false }] });
@@ -13,6 +13,7 @@ it("prefills only an unambiguous single segment and preserves literal tokens", (
 });
 it.each([
   { previewRedacted: true }, { previewTruncated: true }, { classification: "unclassified_high_risk" as const },
+  { destructive: true },
   { previewRedacted: undefined }, { previewTruncated: undefined },
   { normalizedSegments: [] },
   { normalizedSegments: [{ executable: "git", argv: ["status"], argvRedacted: false }, { executable: "git", argv: ["push"], argvRedacted: false }] },

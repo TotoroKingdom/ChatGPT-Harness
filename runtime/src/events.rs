@@ -151,6 +151,7 @@ fn policy_reason_name(reason: PolicyReason) -> &'static str {
         PolicyReason::SystemGuardrail => "system_guardrail",
         PolicyReason::MatchedUserRules => "matched_user_rules",
         PolicyReason::ToolDefault => "tool_default",
+        PolicyReason::AnalyzerRiskFloor => "analyzer_risk_floor",
         PolicyReason::InvalidPolicySnapshot => "invalid_policy_snapshot",
         PolicyReason::InvalidContext => "invalid_context",
         PolicyReason::UnsupportedCapability => "unsupported_capability",

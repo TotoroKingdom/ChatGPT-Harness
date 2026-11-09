@@ -3,6 +3,7 @@ import type {
   ApprovalDecision,
   ApprovalStatus,
   BashClassification,
+  BashDestructiveReason,
   BashRiskFlag,
   MachineErrorCode,
   PolicySnapshotStatus,
@@ -175,6 +176,7 @@ const policyReasonKeys: Record<PolicyReason, TranslationKey> = {
   system_guardrail: "enum.policyReason.systemGuardrail",
   matched_user_rules: "enum.policyReason.matchedUserRules",
   tool_default: "enum.policyReason.toolDefault",
+  analyzer_risk_floor: "enum.policyReason.analyzerRiskFloor",
   invalid_policy_snapshot: "enum.policyReason.invalidPolicySnapshot",
   invalid_context: "enum.policyReason.invalidContext",
   unsupported_capability: "enum.policyReason.unsupportedCapability",
@@ -378,6 +380,17 @@ const bashRiskFlagKeys: Record<PresentationBashRiskFlag, TranslationKey> = {
 
 export function bashRiskFlagKey(value: PresentationBashRiskFlag): TranslationKey {
   return bashRiskFlagKeys[value];
+}
+
+const bashDestructiveReasonKeys: Record<BashDestructiveReason, TranslationKey> = {
+  delete: "enum.bashDestructiveReason.delete",
+  overwrite: "enum.bashDestructiveReason.overwrite",
+  disk: "enum.bashDestructiveReason.disk",
+  repository: "enum.bashDestructiveReason.repository",
+};
+
+export function bashDestructiveReasonKey(value: BashDestructiveReason): TranslationKey {
+  return bashDestructiveReasonKeys[value];
 }
 
 /**

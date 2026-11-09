@@ -138,6 +138,7 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         ApprovalDecision,
         BashClassification,
         BashRiskFlag,
+        BashDestructiveReason,
         BashWorkingDirectory,
         BashApprovalSegment,
         BashApprovalDetails,

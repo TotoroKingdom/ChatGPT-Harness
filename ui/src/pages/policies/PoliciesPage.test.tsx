@@ -89,6 +89,27 @@ describe("M8 PoliciesPage", () => {
     expect(screen.getAllByText(/Current Runtime/).length).toBeGreaterThan(0);
   });
 
+  it("enables Bash trust mode only after explicit confirmation and writes the existing Bash default", async () => {
+    const { mutateConfig, getConfig } = setup();
+    fireEvent.click(screen.getByRole("switch", { name: "Bash trust mode" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent(/Classified, non-destructive Bash commands/);
+    expect(dialog).toHaveTextContent(/not a filesystem sandbox/);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable trust mode" }));
+    await waitFor(() => expect(mutateConfig).toHaveBeenCalledOnce());
+    expect(getConfig().policies.toolDefaults.bash).toBe("allow");
+  });
+
+  it("disables Bash trust mode by restoring the Bash default to ask", async () => {
+    const configValue = config();
+    configValue.policies.toolDefaults.bash = "allow";
+    const { mutateConfig, getConfig } = setup({ configValue });
+    expect(screen.getByRole("switch", { name: "Bash trust mode" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("switch", { name: "Bash trust mode" }));
+    await waitFor(() => expect(mutateConfig).toHaveBeenCalledOnce());
+    expect(getConfig().policies.toolDefaults.bash).toBe("ask");
+  });
+
   it("creates a new rule only from an explicit scope, starts ASK, and preserves the generated ID for retry", async () => {
     const { mutateConfig, getConfig } = setup();
     fireEvent.click(screen.getByRole("button", { name: "Add rule" }));

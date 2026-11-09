@@ -625,6 +625,8 @@ impl ToolExecutor for BashToolRequest {
             cwd: BashWorkingDirectory::ActiveWorkspace,
             preview_redacted,
             preview_truncated,
+            destructive: analysis.is_destructive(),
+            destructive_reasons: analysis.destructive_reasons(),
         };
         let classified = matches!(
             classification,

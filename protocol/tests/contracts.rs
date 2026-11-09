@@ -29,6 +29,22 @@ fn field(value: &Value, name: &str) -> Value {
 }
 
 #[test]
+fn legacy_bash_approval_details_default_destructive_fields() {
+    let details: BashApprovalDetails = serde_json::from_value(serde_json::json!({
+        "commandPreview": "git status",
+        "classification": "classified",
+        "normalizedSegments": [],
+        "riskFlags": [],
+        "cwd": "active_workspace",
+        "previewRedacted": false,
+        "previewTruncated": false
+    }))
+    .unwrap();
+    assert!(!details.destructive);
+    assert!(details.destructive_reasons.is_empty());
+}
+
+#[test]
 fn rpc_envelopes_round_trip_with_integer_and_string_ids() {
     let request: RpcRequest = validate(fixture("initialize.request.json"));
     assert_eq!(request.id, RequestId::Integer(1));

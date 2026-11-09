@@ -2,7 +2,7 @@
 // (protocol/src/v1/control_read.rs). These parsers deliberately do not
 // evaluate policy, read persisted config, or infer Runtime readiness from a
 // desired path or mode.
-import type { ToolStatusReason, SanitizedArgumentsEvidence, ExecutionResultEvidence, ToolCapability as SharedToolCapability, AuditEventType as SharedAuditEventType, AuditLifecycleState as SharedAuditLifecycleState, AuditOutcome as SharedAuditOutcome, ActivityCategory as SharedActivityCategory, ActivityFailureCategory as SharedActivityFailureCategory, ApprovalDecision, PolicyDecision, PolicyReason, RuntimeReadiness } from "@protocol/v1";
+import type { ToolStatusReason, SanitizedArgumentsEvidence, ExecutionResultEvidence, ToolCapability as SharedToolCapability, AuditEventType as SharedAuditEventType, AuditLifecycleState as SharedAuditLifecycleState, AuditOutcome as SharedAuditOutcome, ActivityCategory as SharedActivityCategory, ActivityFailureCategory as SharedActivityFailureCategory, ApprovalDecision, PolicyDecision, PolicyReason, RuntimeReadiness, BashDestructiveReason } from "@protocol/v1";
 
 export type ToolCapability = SharedToolCapability;
 export type ToolAvailability =
@@ -63,6 +63,8 @@ export type BashActivityEvidence = {
   riskFlags: BashRiskFlag[];
   approvalRequestId?: string;
   sessionGrantHit: boolean;
+  destructive?: boolean;
+  destructiveReasons?: BashDestructiveReason[];
   exitCode?: number;
   durationMs?: number;
 };
@@ -148,7 +150,7 @@ function ruleId(value: unknown): string {
 }
 
 const decisions = ["allow", "ask", "deny"] as const;
-const policyReasons = ["system_guardrail", "matched_user_rules", "tool_default", "invalid_policy_snapshot", "invalid_context", "unsupported_capability", "tool_disabled"] as const;
+const policyReasons = ["system_guardrail", "matched_user_rules", "tool_default", "analyzer_risk_floor", "invalid_policy_snapshot", "invalid_context", "unsupported_capability", "tool_disabled"] as const;
 const capabilities = ["workspace_read", "workspace_write", "developer_shell"] as const;
 const statusReasons = ["available", "approval_required", "tool_disabled", "developer_mode_required", "runtime_not_ready", "capability_unavailable", "bash_executable_unavailable", "policy_denied", "invalid_policy_snapshot", "invalid_policy_context", "unsupported_capability", "metadata_invalid"] as const;
 const availability = ["available", "available_with_approval", "unavailable_by_mode", "unavailable_by_policy", "unavailable_by_runtime", "disabled"] as const;
@@ -160,6 +162,7 @@ const lifecycleStates = ["received", "validating", "workspace_validating", "poli
 const outcomes = ["in_progress", "success", "failed", "denied", "approval_required"] as const;
 const modes = ["normal", "developer_test"] as const;
 const riskFlags = ["command_substitution", "backticks", "eval", "nested_shell", "interpreter_inline_code", "redirection", "dynamic_expansion", "malformed_quoting", "unsupported_grammar"] as const;
+const destructiveReasons = ["delete", "overwrite", "disk", "repository"] as const;
 
 function parseBashEvidence(value: unknown): BashActivityEvidence {
   const bash = record(value);
@@ -170,6 +173,8 @@ function parseBashEvidence(value: unknown): BashActivityEvidence {
     cwd: enumeration(bash.cwd, ["active_workspace"] as const),
     riskFlags: bash.riskFlags === undefined ? [] : Array.isArray(bash.riskFlags) ? bash.riskFlags.map((flag) => enumeration(flag, riskFlags)) : invalid(),
     sessionGrantHit: boolean(bash.sessionGrantHit),
+    destructive: bash.destructive === undefined ? false : boolean(bash.destructive),
+    destructiveReasons: bash.destructiveReasons === undefined ? [] : Array.isArray(bash.destructiveReasons) ? bash.destructiveReasons.map((reason) => enumeration(reason, destructiveReasons)) : invalid(),
   };
   // Runtime truncates this display projection at 1027 UTF-8 bytes. Preserve
   // the complete legal wire value rather than applying a smaller UI limit.

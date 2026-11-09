@@ -78,7 +78,7 @@ export type BashCommandMatcherConfig = { executable: string, argvPrefix: Array<s
 export type PolicyMatcherConfig = { "type": "tool", tool: string, } | { "type": "bash_command", executable: string, argvPrefix: Array<string>, };
 export type UserPolicyRuleConfig = { id: string, name: string, enabled: boolean, decision: PolicyDecision, matcher: PolicyMatcherConfig, reason: string, };
 export type PolicySnapshotStatus = "valid" | "invalid";
-export type PolicyReason = "system_guardrail" | "matched_user_rules" | "tool_default" | "invalid_policy_snapshot" | "invalid_context" | "unsupported_capability" | "tool_disabled";
+export type PolicyReason = "system_guardrail" | "matched_user_rules" | "tool_default" | "analyzer_risk_floor" | "invalid_policy_snapshot" | "invalid_context" | "unsupported_capability" | "tool_disabled";
 export type EffectivePolicyRule = { id: string, name: string, decision: PolicyDecision, matcher?: PolicyMatcherConfig, reason: string, source: PolicySource, editable: boolean, enabled: boolean, };
 export type PolicyToolAvailability = "available" | "available_with_approval" | "unavailable_by_policy" | "unavailable_by_runtime" | "disabled";
 export type EffectivePolicyTool = { tool: string, decision: PolicyDecision, matchedRuleIds: Array<string>, reason: PolicyReason, availability: PolicyToolAvailability, };
@@ -93,7 +93,7 @@ export type AuditLifecycleState = "received" | "validating" | "workspace_validat
 export type AuditOutcome = "in_progress" | "success" | "failed" | "denied" | "approval_required";
 export type ActivityCategory = "request" | "workspace" | "policy" | "execution" | "approval";
 export type ActivityFailureCategory = "approval_denied" | "approval_expired" | "approval_cancelled" | "tool_disabled" | "target_changed" | "atomic_failure" | "io_failure" | "workspace_violation" | "invalid_arguments" | "execution_failed" | "bash_unavailable" | "bash_invalid_command" | "bash_command_too_long" | "bash_timeout" | "bash_output_limit" | "bash_concurrency_limit" | "bash_spawn_failed" | "bash_cancelled" | "bash_process_failed" | "grep_timeout" | "grep_cancelled" | "glob_timeout" | "glob_cancelled";
-export type BashActivityEvidence = { mode: SecurityMode, modeEligible: boolean, capability: ToolCapability, cwd: BashWorkingDirectory, commandPreview?: string | null, classification?: BashClassification | null, riskFlags?: Array<BashRiskFlag>, approvalRequestId?: string | null, sessionGrantHit: boolean, exitCode?: number | null, durationMs?: number, };
+export type BashActivityEvidence = { mode: SecurityMode, modeEligible: boolean, capability: ToolCapability, cwd: BashWorkingDirectory, commandPreview?: string | null, classification?: BashClassification | null, riskFlags?: Array<BashRiskFlag>, approvalRequestId?: string | null, sessionGrantHit: boolean, destructive?: boolean, destructiveReasons?: Array<BashDestructiveReason>, exitCode?: number | null, durationMs?: number, };
 export type ToolCapability = "workspace_read" | "workspace_write" | "developer_shell";
 export type ActivityEntry = { eventId: string, requestId: string,
 /**
@@ -161,6 +161,7 @@ export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "ca
 export type ApprovalDecision = "allow_once" | "allow_for_session" | "deny";
 export type BashClassification = "classified" | "unclassified_high_risk";
 export type BashRiskFlag = "command_substitution" | "backticks" | "eval" | "nested_shell" | "interpreter_inline_code" | "redirection" | "dynamic_expansion" | "malformed_quoting" | "unsupported_grammar";
+export type BashDestructiveReason = "delete" | "overwrite" | "disk" | "repository";
 export type BashWorkingDirectory = "active_workspace";
 export type BashApprovalSegment = {
 /**
@@ -178,7 +179,15 @@ export type BashApprovalDetails = {
 /**
  * Bounded, shell-display-safe preview; it is never the raw command.
  */
-commandPreview: string, classification: BashClassification, normalizedSegments: Array<BashApprovalSegment>, riskFlags: Array<BashRiskFlag>, cwd: BashWorkingDirectory, previewRedacted: boolean, previewTruncated: boolean, };
+commandPreview: string, classification: BashClassification, normalizedSegments: Array<BashApprovalSegment>, riskFlags: Array<BashRiskFlag>, cwd: BashWorkingDirectory, previewRedacted: boolean, previewTruncated: boolean,
+/**
+ * True when the analyzer matched a destructive operation.
+ */
+destructive: boolean,
+/**
+ * Sorted, deduplicated destructive reasons; omitted when empty.
+ */
+destructiveReasons?: Array<BashDestructiveReason>, };
 export type BashSessionGrantUnavailableReason = "unclassified_high_risk";
 export type ApprovalRequest = { requestId: string, runtimeId: string, generationId: string, tool: string, sanitizedArguments: { [key in string]?: string }, scopeSummary: string, matchedRuleIds: Array<string>, policyReason: PolicyReason, riskLevel: RiskLevel,
 /**

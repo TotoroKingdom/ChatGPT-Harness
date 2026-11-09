@@ -37,6 +37,8 @@ ChatGPT-Harness 是一款面向 Windows 的桌面应用。它通过 MCP（Model 
 | `edit` | 唯一精确匹配后原子替换 | 启用，Policy = ALLOW |
 | `bash` | 受控 Git Bash 命令 | 关闭，Policy = ASK；仅 Developer/Test 模式可用 |
 
+> Bash 可在 **Policies（策略）** 中显式开启“Bash 信任模式”。该模式把 Bash 默认值从 ASK 放宽为 ALLOW，但只自动允许已分类且非破坏性的命令；删除、覆盖、磁盘/Git 破坏性操作、未分类命令和显式 DENY 仍会询问或拒绝。信任模式不是文件系统沙箱，包管理器脚本、任意程序内部行为和未被静态识别的操作仍可能执行。
+
 > 从旧版本升级的配置会保留 `grep` 关闭状态，避免在用户不知情时扩大工具面；需要时可在 **Tools（工具）** 中手动启用。
 
 工具是否真正暴露给 ChatGPT，由 Runtime 的 effective catalog 决定：工具必须已实现、已启用、Security Mode 允许、Runtime readiness 满足且 Policy 不为 DENY。`tools/list` 只返回 `Available` 或 `AvailableWithApproval` 的工具。

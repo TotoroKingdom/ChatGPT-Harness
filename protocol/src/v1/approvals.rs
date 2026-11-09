@@ -28,6 +28,17 @@ pub enum BashRiskFlag {
     UnsupportedGrammar,
 }
 
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema, TS,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BashDestructiveReason {
+    Delete,
+    Overwrite,
+    Disk,
+    Repository,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum BashWorkingDirectory {
@@ -58,6 +69,12 @@ pub struct BashApprovalDetails {
     pub cwd: BashWorkingDirectory,
     pub preview_redacted: bool,
     pub preview_truncated: bool,
+    /// True when the analyzer matched a destructive operation.
+    #[serde(default)]
+    pub destructive: bool,
+    /// Sorted, deduplicated destructive reasons; omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub destructive_reasons: Vec<BashDestructiveReason>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

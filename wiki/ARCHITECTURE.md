@@ -277,6 +277,8 @@ Session Grant：
 
 Bash 的 unclassified high-risk 请求不能获得 AllowForSession。
 
+破坏性 Bash 命令（删除、覆盖、磁盘/格式化、Git 破坏性操作）始终至少为 ASK；持久 Allow 规则不能降低该下限。用户选择 AllowForSession 时，仍只记住当前 generation 内完全相同的 normalized scope。
+
 ## 8. Bash Architecture
 
 Bash capability = `DeveloperShell`。
@@ -292,9 +294,22 @@ Bash capability = `DeveloperShell`。
 
 `runtime/src/bash/analyzer.rs` 生成用于 Policy/Approval 的 bounded logical facts，不把 raw command 直接当作 matcher。
 
-高风险特征包括 command substitution、backticks、eval、nested shell、inline interpreter code、redirection、dynamic expansion、malformed quoting、unsupported grammar 等。
+高风险特征包括 command substitution、backticks、eval、nested shell、inline interpreter code、不安全 redirection、dynamic expansion、malformed quoting、unsupported grammar 等。
+
+安全重定向 `2>/dev/null`、`>/dev/null`、`2>&1`、`>NUL`、`</dev/null` 和 `&>/dev/null` 会被消费并保持 Classified；输出到普通文件、`tee`、`sed -i`、`perl -i` 等归类为破坏性覆盖。heredoc、process substitution、动态重定向目标等仍保持 UnclassifiedHighRisk。
+
+`analyzer_risk_floor` 作为审批原因出现在证据中，用于区分“工具默认值”和“分析器下限”。
 
 无法可靠分类的命令至少获得 ASK floor。
+
+### Bash trust mode
+
+当前实现不新增独立授权字段。Policies 页的“Bash 信任模式”是显式 UI 预设：开启时把 `toolDefaults.bash` 写为 `allow`，关闭时若当前为 `allow` 则写回 `ask`。因此：
+
+- 已分类且非破坏性的命令自动允许；
+- 破坏性、未分类、显式 DENY 仍为 ASK 或 DENY；
+- 变更只对下一代 Runtime 生效；
+- 该模式不是 OS 级 filesystem sandbox，残余风险必须在 UI 中明确展示。
 
 ### Runtime hard limits
 

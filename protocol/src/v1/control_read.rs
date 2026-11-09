@@ -10,6 +10,10 @@ pub const ACTIVITY_SNAPSHOT: &str = "control.activity.snapshot";
 pub const EFFECTIVE_TOOLS_GET: &str = "control.effective_tools.get";
 pub const MAX_ACTIVITY_LIMIT: u64 = 256;
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ReadErrorCode {
@@ -343,6 +347,10 @@ pub struct BashActivityEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_request_id: Option<String>,
     pub session_grant_hit: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub destructive: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub destructive_reasons: Vec<crate::BashDestructiveReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

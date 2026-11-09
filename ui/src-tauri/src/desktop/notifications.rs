@@ -348,6 +348,8 @@ mod tests {
             cwd: BashWorkingDirectory::ActiveWorkspace,
             preview_redacted: true,
             preview_truncated: false,
+            destructive: false,
+            destructive_reasons: Vec::new(),
         });
         let content = format_approval_notification(&pending).unwrap();
         let payload = serde_json::json!({

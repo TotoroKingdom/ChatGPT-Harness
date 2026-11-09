@@ -251,6 +251,7 @@ pub enum PolicyReason {
     SystemGuardrail,
     MatchedUserRules,
     ToolDefault,
+    AnalyzerRiskFloor,
     InvalidPolicySnapshot,
     InvalidContext,
     UnsupportedCapability,

@@ -215,6 +215,7 @@
         "system_guardrail",
         "matched_user_rules",
         "tool_default",
+        "analyzer_risk_floor",
         "invalid_policy_snapshot",
         "invalid_context",
         "unsupported_capability",

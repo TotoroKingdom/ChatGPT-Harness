@@ -84,6 +84,9 @@ bash
 | Developer/Test mode gate | 已实现 | Normal mode 不可用 |
 | Analyzer | 已实现 | quote-aware + risk flags |
 | High-risk ASK floor | 已实现 | unclassified high-risk 至少 ASK |
+| Safe redirection classification | 已实现 | `/dev/null`、NUL、fd duplication 保持 Classified |
+| Destructive ASK floor | 已实现 | 删除/覆盖/磁盘/Git 破坏性操作始终至少 ASK；Allow 规则不能降低 |
+| Bash trust mode preset | 已实现 | Policies 页把 Bash 默认值显式写为 ALLOW；未知/破坏性仍 ASK |
 | Command-specific Policy | 已实现 | executable + argvPrefix |
 | Async execution | 已实现 | Runtime-owned |
 | Command size | 已实现 | 8192 bytes |

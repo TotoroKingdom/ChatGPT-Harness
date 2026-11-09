@@ -286,6 +286,7 @@ time { color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabu
 }
 .page-heading p { margin-top: 3px; max-width: 72ch; color: var(--text-muted); font-size: 12px; line-height: 18px; }
 .page-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.page-header-actions .trust-mode-indicator { padding: 0; background: transparent; border: 0; }
 .page-content {
   width: 100%;
   max-width: var(--content-max);
@@ -1011,6 +1012,7 @@ dd { color: var(--text-primary); text-align: right; }
   .sidebar { width: 184px; flex-basis: 184px; }
   .brand-copy span, .sidebar-runtime-meta { display: none; }
   .page-header-actions .status-badge { display: none; }
+  .page-header-actions .trust-mode-indicator { display: none; }
   .metrics-summary { grid-template-columns: 1fr; }
 }
 

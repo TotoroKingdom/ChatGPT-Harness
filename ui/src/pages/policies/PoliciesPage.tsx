@@ -162,6 +162,7 @@ export function PoliciesPage({
   const [ruleFeedback, setRuleFeedback] = useState<Record<string, { message: Message; error: boolean } | undefined>>({});
   const [message, setMessage] = useState<Message | null>(null);
   const [error, setError] = useState<Message | null>(null);
+  const [trustModeConfirmOpen, setTrustModeConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<UserPolicyRuleConfig | null>(null);
   const [deleteFeedback, setDeleteFeedback] = useState<{ message: Message; error: boolean } | null>(null);
 
@@ -171,6 +172,7 @@ export function PoliciesPage({
   const effectiveUserRules = effective?.userRules ?? legacyItems.filter((rule) => rule.source === "user").map(legacyProjection);
   const effectiveByTool = useMemo(() => new Map((effective?.perTool ?? []).map((item) => [item.tool, item])), [effective]);
   const configurationConfirmed = Boolean(data.config);
+  const trustModeEnabled = desired.toolDefaults.bash === "allow";
   const editingId = editorBaseline?.id ?? null;
   const editorDirty = Boolean(editor && editorInitial && JSON.stringify(editor) !== JSON.stringify(editorInitial));
   const { finishDraft } = useDraftNavigation();
@@ -436,6 +438,25 @@ export function PoliciesPage({
     {isConflict(error) && editorBaseline && <div className="secondary-actions"><Button variant="secondary" onClick={reloadConflictedRule}>{t("m8.reload")}</Button><Button variant="quiet" onClick={closeEditor}>{tx(t, "common.cancel", "Cancel")}</Button></div>}
     {message && <InlineFeedback>{renderMessage(t, message)}</InlineFeedback>}
 
+    <Section title={tx(t, "policies.bashTrustMode", "Bash trust mode")} action={<StatusBadge tone={trustModeEnabled ? "warning" : "neutral"}>{trustModeEnabled ? tx(t, "policies.bashTrustModeEnabled", "Enabled") : tx(t, "policies.bashTrustModeDisabled", "Disabled")}</StatusBadge>}>
+      <Card>
+        <p>{tx(t, "policies.bashTrustModeDescription", "Automatically allow classified, non-destructive Bash commands. Destructive, unclassified, and explicitly denied commands still ask or deny.")}</p>
+        <p className="muted">{tx(t, "policies.bashTrustModeResidualRisk", "This is not a filesystem sandbox. Package-manager scripts, arbitrary program behavior, network exfiltration, and overwrites that are not statically recognized may still run. Enable it only when you trust the current workspace.")}</p>
+        <div className="settings-actions">
+          <Switch
+            checked={trustModeEnabled}
+            label={tx(t, "policies.bashTrustMode", "Bash trust mode")}
+            disabled={!configurationConfirmed || Boolean(pendingDefaults.bash)}
+            onChange={(checked) => {
+              if (checked) setTrustModeConfirmOpen(true);
+              else void saveDefault("bash", "ask");
+            }}
+          />
+          <span className="muted">{trustModeEnabled ? tx(t, "policies.bashTrustModeEnabled", "Enabled") : tx(t, "policies.bashTrustModeDisabled", "Disabled")}</span>
+        </div>
+      </Card>
+    </Section>
+
     <Section title={tx(t, "m8Policies.defaults", "Tool defaults")} action={<span className="muted">{configurationConfirmed ? tx(t, "m8Policies.defaultsHint", "Saved configuration · changes apply to the next Runtime generation") : tx(t, "m8Policies.configUnavailable", "Saved configuration is not confirmed")}</span>}>
       <div className="data-table">
         <div className="data-table-head policy-default-grid" aria-hidden="true"><span>{t("policies.tool")}</span><span>{tx(t, "m8Policies.savedValue", "Saved")} / {tx(t, "m8Policies.currentRuntime", "Current Runtime")}</span><span>{t("policies.desiredDefault")}</span></div>
@@ -458,6 +479,7 @@ export function PoliciesPage({
         </div>;
       })}
       </div>
+      {trustModeEnabled && <p className="muted">{tx(t, "policies.bashTrustModeToolsHint", "Trust mode treats Bash Ask as Allow. Deny still applies, while destructive and unclassified commands still ask.")}</p>}
     </Section>
 
     <Section title={tx(t, "m8Policies.userRules", "User rules")} action={<Button variant="primary" disabled={!configurationConfirmed} onClick={openCreate}>{tx(t, "m8Policies.addRule", "Add rule")}</Button>}>
@@ -481,6 +503,14 @@ export function PoliciesPage({
     {rule && !editor && <RuleInspector rule={rule} t={t} pending={Boolean(pendingRuleIds[rule.id])} onClose={closeEditor} onEdit={() => enterEditMode(rule)} onToggle={() => void toggleRule(rule)} onDelete={() => requestDelete(rule)} editing={false} />}
     {editor && (createOpen ? <Sheet title={tx(t, "m8Policies.createTitle", "Create rule")} onClose={approvalDraft ? () => requestLeave(returnToApproval) : closeEditor}><RuleEditor value={editor} onChange={setEditor} onSave={() => void saveRule()} onCancel={approvalDraft ? () => requestLeave(returnToApproval) : closeEditor} saving={saving} blocked={isConflict(error)} error={error?.key as RuleEditorError | undefined} mode="create" /></Sheet> : <RuleInspector rule={rule} t={t} onClose={closeEditor} onEdit={() => undefined} onToggle={() => undefined} onDelete={() => undefined} editing editingValue={editor} onEditorChange={setEditor} onSave={() => void saveRule()} onCancel={closeEditor} saving={saving} blocked={isConflict(error)} error={error?.key as RuleEditorError | undefined} />)}
     {deleteTarget && <Dialog title={tx(t, "m8Policies.deleteTitle", "Delete rule?")} onClose={() => { if (!saving) setDeleteTarget(null); }}><p>{tx(t, "m8Policies.deleteBody", "This removes the selected user rule from the desired configuration.")}</p><p><strong>{deleteTarget.name}</strong></p><p className="mono">{deleteTarget.id}</p>{deleteFeedback && <InlineFeedback error={deleteFeedback.error}>{tx(t, deleteFeedback.message.key, "Delete failed. The rule is still present; review the error and retry.")}</InlineFeedback>}<div className="settings-actions"><Button variant="quiet" disabled={saving} onClick={() => setDeleteTarget(null)}>{tx(t, "common.cancel", "Cancel")}</Button><Button variant="danger" disabled={saving} onClick={() => void deleteRule()}>{saving ? t("m8.saving") : tx(t, "m8Policies.confirmDelete", "Delete rule")}</Button></div></Dialog>}
+    {trustModeConfirmOpen && <Dialog title={tx(t, "policies.bashTrustModeConfirmTitle", "Enable Bash trust mode?")} onClose={() => setTrustModeConfirmOpen(false)}>
+      <p>{tx(t, "policies.bashTrustModeConfirmBody", "Classified, non-destructive Bash commands will run automatically without per-command approval. Destructive commands, commands that cannot be statically classified, and explicit denials still ask or deny.")}</p>
+      <p className="muted">{tx(t, "policies.bashTrustModeResidualRisk", "This is not a filesystem sandbox. Package-manager scripts, arbitrary program behavior, network exfiltration, and overwrites that are not statically recognized may still run. Enable it only when you trust the current workspace.")}</p>
+      <div className="settings-actions">
+        <Button variant="quiet" onClick={() => setTrustModeConfirmOpen(false)}>{tx(t, "common.cancel", "Cancel")}</Button>
+        <Button variant="danger" onClick={() => { setTrustModeConfirmOpen(false); void saveDefault("bash", "allow"); }}>{tx(t, "policies.bashTrustModeConfirm", "Enable trust mode")}</Button>
+      </div>
+    </Dialog>}
   </div>;
 }
 

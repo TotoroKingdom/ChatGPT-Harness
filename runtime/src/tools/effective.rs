@@ -150,6 +150,7 @@ fn policy_reason(reason: PolicyEvaluationReason) -> &'static str {
         PolicyEvaluationReason::NoApplicableRules => "no applicable policy rule; denied by default",
         PolicyEvaluationReason::ToolDefault => "tool default denied the request",
         PolicyEvaluationReason::SystemGuardrail => "denied by system guardrail",
+        PolicyEvaluationReason::AnalyzerRiskFloor => "raised to approval by analyzer risk floor",
         PolicyEvaluationReason::InvalidRuleSet => "policy evaluation failed; denied by default",
         PolicyEvaluationReason::InvalidContext => "policy context is invalid; denied by default",
         PolicyEvaluationReason::UnsupportedCapability => {

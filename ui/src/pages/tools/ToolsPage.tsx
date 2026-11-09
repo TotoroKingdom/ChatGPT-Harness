@@ -291,6 +291,7 @@ export function ToolsPage() {
                 disabled={!config || defaultFeedback?.status === "saving"}
                 label={t("m8Tools.defaultFor", { tool: tool.name })}
               />
+              {tool.key === "bash" && policyFor(tool) === "allow" && <p className="muted">{t("policies.bashTrustModeToolsHint")}</p>}
             </div>
             {(enabledFeedback || defaultFeedback) && <div className="tool-feedback">{enabledFeedback && <FeedbackView feedback={enabledFeedback} t={t} />}{defaultFeedback && <FeedbackView feedback={defaultFeedback} t={t} />}</div>}
           </div>;

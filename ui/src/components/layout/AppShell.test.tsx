@@ -1,10 +1,14 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import { AppShell } from "./AppShell";
 import { ControlReadView } from "@/components/status/ControlReadView";
 
-vi.mock("@/app/providers/HarnessDataProvider", () => ({ useHarnessData: () => ({ client: { adapterKind: "real" }, components: { runtime: "ready" } }) }));
+const state = vi.hoisted(() => ({ context: undefined as any }));
+vi.mock("@/app/providers/HarnessDataProvider", () => ({ useHarnessData: () => state.context }));
+beforeEach(() => {
+  state.context = { client: { adapterKind: "real" }, components: { runtime: "ready" } };
+});
 afterEach(cleanup);
 
 it("switches shell copy without changing route identity or children", async () => {
@@ -27,4 +31,16 @@ it("localizes an existing control read error on live switch without a new reques
   await act(async () => { await i18n.changeLanguage("zh-CN"); });
   expect(screen.getByRole("alert")).not.toHaveTextContent("Runtime unavailable");
   expect(screen.getByRole("alert").textContent).toMatch(/[\u4e00-\u9fff]/);
+});
+
+it("shows the Bash trust mode indicator from saved config and navigates to policies", () => {
+  state.context = {
+    client: { adapterKind: "real" },
+    components: { runtime: "ready" },
+    config: { policies: { toolDefaults: { bash: "allow" } } },
+  };
+  const navigate = vi.fn();
+  render(<AppShell page="overview" onNavigate={navigate}><span>child</span></AppShell>);
+  fireEvent.click(screen.getByRole("button", { name: /Bash trust mode/ }));
+  expect(navigate).toHaveBeenCalledWith("policies");
 });

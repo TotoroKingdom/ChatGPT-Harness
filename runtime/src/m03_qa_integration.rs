@@ -387,6 +387,8 @@ fn int_04() {
             risk_flags: Vec::new(),
             approval_request_id: None,
             session_grant_hit: false,
+            destructive: false,
+            destructive_reasons: Vec::new(),
             exit_code: Some(7),
             duration_ms: Some(1),
         }),

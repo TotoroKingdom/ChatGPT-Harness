@@ -29,6 +29,7 @@ import {
   approvalDecisionKey,
   approvalStatusKey,
   bashClassificationKey,
+  bashDestructiveReasonKey,
   bashRiskFlagKey,
   componentStatusKey,
   errorCodeKey,
@@ -67,7 +68,7 @@ describe("typed machine-value presentation mappings", () => {
 
   it("maps policy, availability, readiness and risk families", () => {
     for (const decision of ["allow", "ask", "deny"] as PolicyDecision[]) translated(policyDecisionKey(decision));
-    for (const reason of ["system_guardrail", "matched_user_rules", "tool_default", "invalid_policy_snapshot", "invalid_context", "unsupported_capability", "tool_disabled"] as PolicyReason[]) translated(policyReasonKey(reason));
+    for (const reason of ["system_guardrail", "matched_user_rules", "tool_default", "analyzer_risk_floor", "invalid_policy_snapshot", "invalid_context", "unsupported_capability", "tool_disabled"] as PolicyReason[]) translated(policyReasonKey(reason));
     for (const availability of ["available", "available_with_approval", "unavailable_by_mode", "unavailable_by_policy", "unavailable_by_runtime", "disabled"] as ToolAvailability[]) translated(toolAvailabilityKey(availability));
     for (const readiness of ["ready", "unavailable"] as ToolReadiness[]) translated(toolReadinessKey(readiness));
     for (const risk of ["low", "medium", "high"] as RiskLevel[]) translated(riskLevelKey(risk));
@@ -86,6 +87,7 @@ describe("typed machine-value presentation mappings", () => {
     for (const failure of ["tool_disabled", "target_changed", "atomic_failure", "io_failure", "workspace_violation", "invalid_arguments", "execution_failed", "bash_unavailable", "bash_invalid_command", "bash_command_too_long", "bash_timeout", "bash_output_limit", "bash_concurrency_limit", "bash_spawn_failed", "bash_cancelled", "bash_process_failed", "grep_timeout", "grep_cancelled"] as ActivityFailureCategory[]) translated(activityFailureCategoryKey(failure));
     for (const classification of ["classified", "unclassified_high_risk"] as BashClassification[]) translated(bashClassificationKey(classification));
     for (const flag of ["command_substitution", "backticks", "eval", "nested_shell", "interpreter_inline_code", "redirection", "dynamic_expansion", "malformed_quoting", "unsupported_grammar"] as BashRiskFlag[]) translated(bashRiskFlagKey(flag));
+    for (const reason of ["delete", "overwrite", "disk", "repository"] as const) translated(bashDestructiveReasonKey(reason));
   });
 
   it("keeps route identity in keys while translating labels", async () => {

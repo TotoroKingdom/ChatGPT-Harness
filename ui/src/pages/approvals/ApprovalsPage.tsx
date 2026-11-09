@@ -24,6 +24,7 @@ import {
 import {
   approvalDecisionKey,
   approvalStatusKey,
+  bashDestructiveReasonKey,
   bashClassificationKey,
   bashRiskFlagKey,
   componentStatusKey,
@@ -88,6 +89,15 @@ function displayState(details: BashApprovalDetails): TranslationKey {
 function riskExplanation(t: TFunction, request: ApprovalRequest): string {
   const details = request.bashDetails;
   const level = request.riskLevel ? t(riskLevelKey(request.riskLevel)) : tx(t, "notReported");
+  if (details?.destructive) {
+    const reasons = Array.isArray(details.destructiveReasons) ? details.destructiveReasons : [];
+    return tx(t, "riskExplanation", {
+      level,
+      details: reasons.length
+        ? reasons.map((reason) => t(bashDestructiveReasonKey(reason))).join(", ")
+        : tx(t, "riskDestructive"),
+    });
+  }
   if (details?.classification === "unclassified_high_risk") {
     return tx(t, "riskExplanation", { level, details: tx(t, "riskUnclassified") });
   }
@@ -113,6 +123,8 @@ function previewState(t: TFunction, request: ApprovalRequest): string {
     || typeof details.classification !== "string"
     || !Array.isArray(details.normalizedSegments)
     || !Array.isArray(details.riskFlags)
+    || (details.destructive !== undefined && typeof details.destructive !== "boolean")
+    || (details.destructiveReasons !== undefined && !Array.isArray(details.destructiveReasons))
     || typeof details.cwd !== "string"
     || typeof details.previewRedacted !== "boolean"
     || typeof details.previewTruncated !== "boolean"
@@ -218,6 +230,8 @@ function FrontEvidence({ request, expired, soon, runtimeIdentityKnown = true, ev
     {details && <p className="muted"><strong>{tx(t, "classification")}: </strong>{details.classification ? t(bashClassificationKey(details.classification)) : tx(t, "notReported")}</p>}
     {details?.cwd === "active_workspace" && <p className="muted"><strong>{tx(t, "workspace")}: </strong><span className="mono">{details.cwd}</span> · {tx(t, "activeWorkspace")}</p>}
     {details && Array.isArray(details.riskFlags) && details.riskFlags.length > 0 && <p className="muted"><strong>{tx(t, "risk")}: </strong>{details.riskFlags.map((flag) => t(bashRiskFlagKey(flag))).join(", ")}</p>}
+    {details?.destructive && <p className="muted"><strong>{tx(t, "destructive")}: </strong>{Array.isArray(details.destructiveReasons) && details.destructiveReasons.length > 0 ? details.destructiveReasons.map((reason) => t(bashDestructiveReasonKey(reason))).join(", ") : tx(t, "riskDestructive")}</p>}
+    {details?.destructive && details.classification === "classified" && <p className="muted">{tx(t, "destructiveRuleUnavailable")}</p>}
     {request.tool === "bash" && <p className="muted">{sessionEligible ? tx(t, "sessionScope") : tx(t, "sessionUnavailable", { reason: request.allowForSessionUnavailableReason === "unclassified_high_risk" ? tx(t, "riskUnclassified") : tx(t, "runtimeUnavailable") })}</p>}
     {request.tool !== "bash" && <p className="muted">{tx(t, "fileSessionScope", { tool: request.tool, scope: request.scopeSummary })}</p>}
     {!runtimeIdentityKnown && <InlineFeedback error>{tx(t, "runtimeUnavailable")}</InlineFeedback>}
@@ -248,6 +262,7 @@ function AdvancedEvidence({ request }: { request: ApprovalRequest }) {
         <small>{tx(t, "preview")}</small>
         <pre className="mono">{details.commandPreview}</pre>
         <p className="muted">{tx(t, "classification")}: {details.classification ? t(bashClassificationKey(details.classification)) : tx(t, "notReported")}</p>
+        {details.destructive && <p className="muted">{tx(t, "destructiveReasons")}: {Array.isArray(details.destructiveReasons) && details.destructiveReasons.length > 0 ? details.destructiveReasons.map((reason) => t(bashDestructiveReasonKey(reason))).join(", ") : tx(t, "riskDestructive")}</p>}
         <p className="muted">{tx(t, "workspace")}: {details.cwd}</p>
         {(details.previewRedacted || details.previewTruncated) && <p className="muted">{tx(t, "displayFacts", { state: tx(t, displayState(details)) })}</p>}
       </div>}
@@ -605,7 +620,12 @@ export function ApprovalsPage({ onNavigate, initialRequestId }: { onNavigate?: A
       ...(matcher ? { matcher } : {}),
       approvalRequestId: request.requestId,
     };
-    setFeedback((current) => ({ ...current, [request.requestId]: { tone: "info", copyKey: matcher || broadScope ? "ruleDraftPrepared" : "unsafeRuleDraft" } }));
+    const feedbackKey = matcher || broadScope
+      ? "ruleDraftPrepared"
+      : request.bashDetails?.destructive === true
+        ? "destructiveRuleUnavailable"
+        : "unsafeRuleDraft";
+    setFeedback((current) => ({ ...current, [request.requestId]: { tone: "info", copyKey: feedbackKey } }));
     onNavigate?.("policies", { policyDraft: draft });
   }, [onNavigate, t]);
 
