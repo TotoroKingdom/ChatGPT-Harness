@@ -8,6 +8,7 @@ use crate::bash::{BashRuntime, BashRuntimeError};
 use crate::events::{ActivityEventInput, ActivityEventSender};
 use crate::policy::PolicyEngine;
 use crate::session_grant::SessionGrantStore;
+use crate::tools::search::control::SearchBudgets;
 use crate::tools::{
     EditError, EffectiveTool, EffectiveToolCatalog, GlobError, GrepError, ReadFileError,
     ToolRegistry, WriteError,
@@ -69,6 +70,7 @@ pub(crate) enum PipelineEvent {
     ExecutionStarted,
     ExecutionCompleted,
     ExecutionFailed,
+    ExecutionTimedOut,
     RequestDenied,
     ApprovalRequired,
     ApprovalResolved {
@@ -132,6 +134,7 @@ pub(crate) struct ExecutionPipeline {
     session_grants: Arc<SessionGrantStore>,
     bash_runtime: Option<Arc<BashRuntime>>,
     bash_cancellation_observer: Arc<dyn BashCancellationObserver>,
+    search_budgets: SearchBudgets,
 }
 
 impl ExecutionPipeline {
@@ -158,7 +161,13 @@ impl ExecutionPipeline {
             session_grants: Arc::new(SessionGrantStore::new("unbound-runtime")),
             bash_runtime: None,
             bash_cancellation_observer: Arc::new(NoopBashCancellationObserver),
+            search_budgets: SearchBudgets::default(),
         }
+    }
+
+    pub(crate) fn with_search_budgets(mut self, budgets: SearchBudgets) -> Self {
+        self.search_budgets = budgets;
+        self
     }
 
     pub(crate) fn with_counters(mut self, counters: Arc<super::RequestCounters>) -> Self {
@@ -463,7 +472,12 @@ impl ExecutionPipeline {
                 let _running = self.counters.running_guard();
                 self.emit(context, PipelineEvent::ExecutionStarted, audit_events);
                 let permit = ExecutionPermit { _private: () };
-                match executor.execute(&permit, &self.guard, self.max_read_bytes) {
+                match executor.execute(
+                    &permit,
+                    &self.guard,
+                    self.max_read_bytes,
+                    self.search_budgets,
+                ) {
                     Ok(output) => {
                         executor.record_output(context, &output);
                         self.transition(context, RequestState::Completed)?;
@@ -884,7 +898,12 @@ impl ExecutionPipeline {
         let _running = self.counters.running_guard();
         self.emit(context, PipelineEvent::ExecutionStarted, audit_events);
         let permit = ExecutionPermit { _private: () };
-        match executor.execute(&permit, &self.guard, self.max_read_bytes) {
+        match executor.execute(
+            &permit,
+            &self.guard,
+            self.max_read_bytes,
+            self.search_budgets,
+        ) {
             Ok(output) => {
                 executor.record_output(context, &output);
                 self.transition(context, RequestState::Completed)?;
@@ -927,6 +946,7 @@ impl ExecutionPipeline {
                 &permit,
                 &self.guard,
                 self.max_read_bytes,
+                self.search_budgets,
                 self.bash_runtime.clone(),
                 request_cancel,
             )
@@ -939,6 +959,7 @@ impl ExecutionPipeline {
                 Ok(output)
             }
             Err(error) => {
+                executor.record_partial_output(context, &error);
                 if E::TOOL_NAME == "bash" {
                     context.set_bash_duration(
                         started.elapsed().as_millis().min(u64::MAX as u128) as u64
@@ -950,8 +971,16 @@ impl ExecutionPipeline {
                     error,
                     ExecutionError::BashRuntime(BashRuntimeError::Cancelled)
                         | ExecutionError::Grep(GrepError::Cancelled)
+                        | ExecutionError::Glob(GlobError::Cancelled)
                 ) {
                     self.emit(context, PipelineEvent::ExecutionCancelled, audit_events);
+                } else if matches!(
+                    error,
+                    ExecutionError::BashRuntime(BashRuntimeError::Timeout)
+                        | ExecutionError::Grep(GrepError::SearchTimeout { .. })
+                        | ExecutionError::Glob(GlobError::SearchTimeout { .. })
+                ) {
+                    self.emit(context, PipelineEvent::ExecutionTimedOut, audit_events);
                 } else {
                     self.emit(context, PipelineEvent::ExecutionFailed, audit_events);
                 }
@@ -1139,8 +1168,10 @@ fn audit_failure_category(error: &ExecutionError) -> AuditFailureCategory {
             BashRuntimeError::Cancelled => AuditFailureCategory::BashCancelled,
             BashRuntimeError::ProcessFailed => AuditFailureCategory::BashProcessFailed,
         },
-        ExecutionError::Grep(GrepError::SearchTimeout) => AuditFailureCategory::GrepTimeout,
+        ExecutionError::Grep(GrepError::SearchTimeout { .. }) => AuditFailureCategory::GrepTimeout,
         ExecutionError::Grep(GrepError::Cancelled) => AuditFailureCategory::GrepCancelled,
+        ExecutionError::Glob(GlobError::SearchTimeout { .. }) => AuditFailureCategory::GlobTimeout,
+        ExecutionError::Glob(GlobError::Cancelled) => AuditFailureCategory::GlobCancelled,
         ExecutionError::ToolDisabled => AuditFailureCategory::ToolDisabled,
         ExecutionError::InvalidArguments
         | ExecutionError::ReadFile(ReadFileError::InvalidArguments { .. })

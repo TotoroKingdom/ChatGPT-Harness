@@ -883,6 +883,7 @@ mod validation_tests {
             policies: PolicyConfig::default(),
             desktop: harness_control_protocol::DesktopConfig::default(),
             history: harness_control_protocol::HistoryConfig::default(),
+            search: harness_control_protocol::SearchConfig::default(),
         }
     }
 

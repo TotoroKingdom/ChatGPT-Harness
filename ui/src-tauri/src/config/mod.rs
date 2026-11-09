@@ -1,6 +1,6 @@
 use harness_control_protocol::{
-    AppConfig, BashConfig, DecimalU64, DesktopConfig, PolicyConfig, SecurityConfig, SecurityMode,
-    ToolConfig, TunnelConfig, UiConfig, UiLanguage, WorkspaceConfig,
+    AppConfig, BashConfig, DecimalU64, DesktopConfig, PolicyConfig, SearchConfig, SecurityConfig,
+    SecurityMode, ToolConfig, TunnelConfig, UiConfig, UiLanguage, WorkspaceConfig,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -212,6 +212,7 @@ impl ConfigStore {
             policies: PolicyConfig::default(),
             desktop: harness_control_protocol::DesktopConfig::default(),
             history: harness_control_protocol::HistoryConfig::default(),
+            search: SearchConfig::default(),
         }
     }
 
@@ -306,6 +307,10 @@ fn validate_current(config: &mut AppConfig) -> Result<(), ConfigError> {
         .map_err(|_| ConfigError::Invalid("invalid policy configuration".into()))?;
     config
         .history
+        .validate()
+        .map_err(|error| ConfigError::Invalid(error.into()))?;
+    config
+        .search
         .validate()
         .map_err(|error| ConfigError::Invalid(error.into()))?;
     if let Some(path) = config.tunnel.tunnel_client_path.as_mut() {
@@ -452,6 +457,7 @@ mod tests {
             policies: PolicyConfig::default(),
             desktop: harness_control_protocol::DesktopConfig::default(),
             history: harness_control_protocol::HistoryConfig::default(),
+            search: harness_control_protocol::SearchConfig::default(),
         }
     }
     #[test]
@@ -598,6 +604,31 @@ mod tests {
             store.load().unwrap().unwrap().config_revision,
             DecimalU64::new(48)
         );
+    }
+
+    #[test]
+    fn search_defaults_load_and_valid_changes_advance_revision() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(directory.path().into());
+        let mut value = serde_json::to_value(c()).unwrap();
+        value["configRevision"] = serde_json::json!("47");
+        value.as_object_mut().unwrap().remove("search");
+        fs::write(&store.file, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let mut loaded = store.load().unwrap().unwrap();
+        assert_eq!(loaded.config_revision, DecimalU64::new(47));
+        assert_eq!(
+            loaded.search,
+            harness_control_protocol::SearchConfig::default()
+        );
+
+        loaded.search.glob_timeout_seconds = 45;
+        let saved = store.save(loaded.clone()).unwrap();
+        assert_eq!(saved.config_revision, DecimalU64::new(48));
+        assert_eq!(saved.search.glob_timeout_seconds, 45);
+
+        loaded.search.glob_timeout_seconds = 4;
+        assert!(store.save(loaded).is_err());
     }
 
     #[test]
@@ -884,6 +915,7 @@ mod tests {
             tools: config.tools,
             bash: config.bash,
             policies: config.policies,
+            search: config.search,
         };
         let encoded = serde_json::to_value(snapshot).unwrap();
         assert!(encoded.get("ui").is_none());

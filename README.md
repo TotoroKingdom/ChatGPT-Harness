@@ -31,6 +31,8 @@ ChatGPT-Harness 是一款面向 Windows 的桌面应用。它通过 MCP（Model 
 | `read_file` | 读取工作区文件 | 启用，Policy = ALLOW |
 | `glob` | 按模式匹配工作区路径 | 启用，Policy = ALLOW |
 | `grep` | 在工作区内进行文本/正则搜索 | 启用，Policy = ALLOW |
+
+> `glob` 和 `grep` 默认遵循 `.gitignore`、嵌套 `.gitignore`、`.ignore` 与 Git 排除规则，并在遍历阶段剪枝被忽略的目录（不会硬编码 `target`、`node_modules` 等名称）。显式指定被忽略目录作为 `basePath`、`scope`、固定目录前缀或 `include` 前缀时，仍可搜索该目录。可在 **Settings → 搜索工具** 分别设置 5–120 秒的 glob/grep 超时，重新启动 Harness 后生效。
 | `write` | 原子创建或覆盖 UTF-8 文件 | 启用，Policy = ALLOW |
 | `edit` | 唯一精确匹配后原子替换 | 启用，Policy = ALLOW |
 | `bash` | 受控 Git Bash 命令 | 关闭，Policy = ASK；仅 Developer/Test 模式可用 |
@@ -77,7 +79,7 @@ Windows 桌面应用由 React UI 和 Tauri Host 组成，负责配置管理、�
 - **Policies（策略）**：配置 Tool Defaults、User Rules 和只读的 System Rules。
 - **Approvals（审批）**：查看并处理需要人工确认的请求。
 - **Activity（活动）**：查看实时事件；切换到 History 查询持久化历史，切换到 Metrics 查看调用指标和请求追踪。
-- **Settings（设置）**：工作区、连接凭据、代理、安全模式、通知、自动启动、历史保留、语言、外观、诊断和重置。
+- **Settings（设置）**：工作区、连接凭据、代理、安全模式、通知、自动启动、历史保留、搜索工具超时、语言、外观、诊断和重置。
 
 ## 本地数据与隐私
 

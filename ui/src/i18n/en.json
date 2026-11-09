@@ -209,6 +209,8 @@
       "bashProcessFailed": "Bash process failed",
       "grepTimeout": "grep search timed out",
       "grepCancelled": "grep search cancelled",
+      "globTimeout": "glob search timed out",
+      "globCancelled": "glob search cancelled",
       "approvalDenied": "Approval denied",
       "approvalExpired": "Approval expired",
       "approvalCancelled": "Approval cancelled"
@@ -615,6 +617,17 @@
   "settings": {
     "appearance": "Appearance",
     "index": "Settings navigation",
+    "search": {
+      "title": "Search tools",
+      "globTimeout": "Glob timeout (seconds)",
+      "grepTimeout": "Grep timeout (seconds)",
+      "range": "5–120 seconds",
+      "rangeError": "Enter a whole number between 5 and 120.",
+      "restartHint": "Saved search timeouts apply after Harness is restarted. Running tool calls are not interrupted.",
+      "save": "Save Search settings",
+      "saved": "Search settings saved. Restart Harness to apply them.",
+      "saveFailed": "Could not save Search settings."
+    },
     "groups": {
       "preferences": "Preferences & notifications",
       "preferencesHelp": "Language, appearance and desktop reminders.",

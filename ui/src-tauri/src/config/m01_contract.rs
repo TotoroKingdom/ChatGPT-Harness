@@ -59,6 +59,7 @@ fn desktop_preferences_are_host_only_and_do_not_enter_runtime_snapshot() {
         tools: config.tools.clone(),
         bash: config.bash.clone(),
         policies: config.policies.clone(),
+        search: config.search.clone(),
     };
     let serialized = serde_json::to_value(snapshot).unwrap();
     assert!(serialized.get("desktop").is_none());

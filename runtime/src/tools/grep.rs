@@ -1,15 +1,20 @@
+use crate::tools::search::control::{ControlError, SearchBudget, SearchControl};
+use crate::tools::search::filters::{fixed_directory_prefix, PathFilters};
+use crate::tools::search::walker::{
+    self, LinkPolicy, WalkDiagnosticCode, WalkEntry, WalkEntryKind, WalkRequest,
+};
 use crate::workspace::{WorkspaceError, WorkspaceGuard};
-use globset::{GlobBuilder, GlobMatcher};
+use grep_matcher::Matcher as _;
+use grep_regex::RegexMatcherBuilder;
+use grep_searcher::{BinaryDetection, SearcherBuilder, Sink, SinkMatch};
 use harness_control_protocol::GrepMode;
-use regex::{Regex, RegexBuilder};
 use serde::Serialize;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 pub const MAX_QUERY_BYTES: usize = 4096;
@@ -25,7 +30,9 @@ pub const MAX_SCANNED_FILES: usize = 10_000;
 pub const MAX_SCANNED_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_SINGLE_FILE_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_DIAGNOSTICS: usize = 100;
-pub const SEARCH_WALL_TIMEOUT: Duration = Duration::from_secs(5);
+/// Historical name retained for callers that imported the old constant.
+/// The effective budget now comes from Runtime configuration.
+pub const SEARCH_WALL_TIMEOUT: Duration = Duration::from_secs(30);
 pub const REGEX_COMPILED_PROGRAM_LIMIT: usize = 2 * 1024 * 1024;
 pub const MAX_SCOPE_BYTES: usize = 1024;
 
@@ -111,6 +118,7 @@ pub enum GrepTruncationReason {
     MaxDiscoveredEntries,
     MaxScannedFiles,
     MaxScannedBytes,
+    Timeout,
 }
 
 impl GrepTruncationReason {
@@ -121,6 +129,7 @@ impl GrepTruncationReason {
             Self::MaxDiscoveredEntries => "max_discovered_entries",
             Self::MaxScannedFiles => "max_scanned_files",
             Self::MaxScannedBytes => "max_scanned_bytes",
+            Self::Timeout => "timeout",
         }
     }
 }
@@ -165,7 +174,7 @@ pub enum GrepError {
     InvalidScope { message: String },
     Workspace(WorkspaceError),
     IoFailure { path: String, kind: io::ErrorKind },
-    SearchTimeout,
+    SearchTimeout { partial: Option<Box<GrepOutput>> },
     Cancelled,
 }
 
@@ -184,7 +193,7 @@ impl fmt::Display for GrepError {
             Self::IoFailure { path, kind } => {
                 write!(formatter, "grep I/O failure for {path}: {kind:?}")
             }
-            Self::SearchTimeout => write!(formatter, "grep search timed out"),
+            Self::SearchTimeout { .. } => write!(formatter, "grep search timed out"),
             Self::Cancelled => write!(formatter, "grep search was cancelled"),
         }
     }
@@ -220,14 +229,18 @@ pub(crate) fn validate_grep_request(request: &GrepRequest) -> Result<(), GrepErr
 }
 
 /// Executes a grep request only after the ExecutionPipeline has granted the
-/// private permit. The synchronous form remains available to non-async
-/// callers and tests; the MCP path uses the blocking-worker variant below.
+/// private permit. The synchronous form uses the default configured budget.
 pub(crate) fn execute_grep(
     _permit: &crate::execution::ExecutionPermit,
     guard: &WorkspaceGuard,
     request: &GrepRequest,
 ) -> Result<GrepOutput, GrepError> {
-    execute_grep_inner(guard, request, CancellationToken::new())
+    execute_grep_with_control(
+        guard,
+        request,
+        active_search_budget(),
+        CancellationToken::new(),
+    )
 }
 
 pub(crate) fn execute_grep_cancellable(
@@ -235,116 +248,165 @@ pub(crate) fn execute_grep_cancellable(
     request: &GrepRequest,
     cancel: CancellationToken,
 ) -> Result<GrepOutput, GrepError> {
-    execute_grep_inner(guard, request, cancel)
+    execute_grep_with_control(guard, request, active_search_budget(), cancel)
 }
 
-fn execute_grep_inner(
+pub(crate) fn execute_grep_with_control(
     guard: &WorkspaceGuard,
     request: &GrepRequest,
+    budget: SearchBudget,
     cancel: CancellationToken,
 ) -> Result<GrepOutput, GrepError> {
+    let budget = effective_search_budget(budget);
     validate_grep_request(request)?;
-    let matcher = compile_matcher(request)?;
-    let filters = Filters::compile(request)?;
+    let matcher = GrepMatcher::compile(request)?;
+    let filters = PathFilters::compile(&request.include, &request.exclude).map_err(|error| {
+        GrepError::InvalidFilterPattern {
+            message: error.to_string(),
+        }
+    })?;
     let scope = approve_scope(guard, &request.scope)?;
-    let started = Instant::now();
-    check_control(&cancel, started)?;
+    let control = Arc::new(Mutex::new(SearchControl::new(budget, cancel)));
 
-    let mut pending = BinaryHeap::new();
-    pending.push(PendingEntry::directory(scope.logical.clone(), scope.path));
+    let mut ignore_overrides = Vec::new();
+    if !scope.logical.is_empty() {
+        ignore_overrides.push(scope.logical.clone());
+    }
+    for pattern in &request.include {
+        if let Some(prefix) = fixed_directory_prefix(pattern) {
+            ignore_overrides.push(prefix);
+        }
+    }
+
+    let walked = walker::walk(
+        guard,
+        WalkRequest {
+            base_logical: scope.logical,
+            base_path: scope.path,
+            max_depth: None,
+            links: LinkPolicy::Skip,
+            max_entries: MAX_DISCOVERED_ENTRIES,
+            filters: filters.clone(),
+            ignore_overrides,
+        },
+        Arc::clone(&control),
+    );
+
     let mut state = SearchState::default();
+    state.discovered_entries = walked.entries.len();
+    if walked.truncated {
+        state.stop(GrepTruncationReason::MaxDiscoveredEntries);
+    }
+    for diagnostic in walked.diagnostics {
+        state.diagnostics.push(
+            diagnostic.logical,
+            grep_diagnostic_code(diagnostic.code),
+            None,
+        );
+    }
+    state.diagnostics.truncated |= walked.diagnostics_truncated;
 
-    while let Some(entry) = pending.pop() {
-        check_control(&cancel, started)?;
-        if entry.kind == EntryKind::File {
+    let mut control_error = walked.control_error;
+    if control_error.is_none() {
+        for entry in walked.entries {
+            if entry.kind != WalkEntryKind::File {
+                continue;
+            }
+            if !filters.allows(&entry.logical) {
+                continue;
+            }
             match scan_file(
-                guard, &entry, request, &matcher, &filters, &mut state, &cancel, started,
-            )? {
+                guard,
+                &entry,
+                request,
+                &matcher,
+                &mut state,
+                Arc::clone(&control),
+            ) {
                 FileOutcome::Continue => {}
                 FileOutcome::Stop(reason) => {
                     state.stop(reason);
                     break;
                 }
-            }
-            continue;
-        }
-
-        if state.discovered_entries >= MAX_DISCOVERED_ENTRIES {
-            state.stop(GrepTruncationReason::MaxDiscoveredEntries);
-            break;
-        }
-        let remaining = MAX_DISCOVERED_ENTRIES - state.discovered_entries;
-        let entries = match read_sorted_entries(&entry.path, remaining) {
-            Ok(entries) => entries,
-            Err(error) => {
-                state.diagnostics.push(
-                    entry.logical.clone(),
-                    GrepDiagnosticCode::Unreadable,
-                    Some(error.kind()),
-                );
-                continue;
-            }
-        };
-        if entries.overflow {
-            state.stop(GrepTruncationReason::MaxDiscoveredEntries);
-            break;
-        }
-        for (name, path) in entries.items {
-            state.discovered_entries += 1;
-            let logical = join_logical(&entry.logical, &name);
-            let metadata = match fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(error) => {
-                    state.diagnostics.push(
-                        logical,
-                        if error.kind() == io::ErrorKind::NotFound {
-                            GrepDiagnosticCode::TargetChanged
-                        } else {
-                            GrepDiagnosticCode::Unreadable
-                        },
-                        Some(error.kind()),
-                    );
-                    continue;
+                FileOutcome::Control(error) => {
+                    control_error = Some(error);
+                    break;
                 }
-            };
-            if is_reparse_or_symlink(&metadata) {
-                state.skipped_files += 1;
-                state
-                    .diagnostics
-                    .push(logical, GrepDiagnosticCode::ReparseSkipped, None);
-                continue;
-            }
-            if metadata.is_dir() {
-                pending.push(PendingEntry::directory(logical, path));
-            } else if metadata.is_file() {
-                pending.push(PendingEntry::file(logical, path));
-            } else {
-                state.skipped_files += 1;
-                state
-                    .diagnostics
-                    .push(logical, GrepDiagnosticCode::UnsupportedFile, None);
             }
         }
     }
 
-    Ok(state.finish())
+    match control_error {
+        Some(ControlError::Cancelled) => Err(GrepError::Cancelled),
+        Some(ControlError::Timeout) => {
+            state.stop(GrepTruncationReason::Timeout);
+            let output = state.finish();
+            if output.matches.is_empty() {
+                Err(GrepError::SearchTimeout { partial: None })
+            } else {
+                Err(GrepError::SearchTimeout {
+                    partial: Some(Box::new(output)),
+                })
+            }
+        }
+        None => Ok(state.finish()),
+    }
+}
+
+struct GrepMatcher {
+    inner: grep_regex::RegexMatcher,
+}
+
+impl GrepMatcher {
+    fn compile(request: &GrepRequest) -> Result<Self, GrepError> {
+        let mut builder = RegexMatcherBuilder::new();
+        builder
+            .fixed_strings(request.mode == GrepMode::Literal)
+            .multi_line(true)
+            .crlf(true)
+            .line_terminator(Some(b'\n'));
+        builder
+            .build(&request.query)
+            .map(|inner| Self { inner })
+            .map_err(|error| GrepError::InvalidRegex {
+                message: error.to_string(),
+            })
+    }
+
+    fn find(&self, line: &[u8]) -> Option<std::ops::Range<usize>> {
+        self.inner
+            .find(line)
+            .ok()
+            .flatten()
+            .map(|found| found.start()..found.end())
+    }
+}
+
+fn grep_diagnostic_code(code: WalkDiagnosticCode) -> GrepDiagnosticCode {
+    match code {
+        WalkDiagnosticCode::WorkspaceRejected => GrepDiagnosticCode::Unreadable,
+        WalkDiagnosticCode::BrokenLink => GrepDiagnosticCode::TargetChanged,
+        WalkDiagnosticCode::MetadataFailed => GrepDiagnosticCode::Unreadable,
+        WalkDiagnosticCode::ReadDirectoryFailed => GrepDiagnosticCode::Unreadable,
+        WalkDiagnosticCode::ReparseSkipped => GrepDiagnosticCode::ReparseSkipped,
+    }
 }
 
 fn scan_file(
     guard: &WorkspaceGuard,
-    entry: &PendingEntry,
+    entry: &WalkEntry,
     request: &GrepRequest,
-    matcher: &LineMatcher,
-    filters: &Filters,
+    matcher: &GrepMatcher,
     state: &mut SearchState,
-    cancel: &CancellationToken,
-    started: Instant,
-) -> Result<FileOutcome, GrepError> {
-    if !filters.allows(&entry.logical) {
-        return Ok(FileOutcome::Continue);
+    control: Arc<Mutex<SearchControl>>,
+) -> FileOutcome {
+    if let Err(error) = control_lock(&control).check() {
+        return FileOutcome::Control(error);
     }
     run_scan_hook(&entry.path);
-    check_control(cancel, started)?;
+    if let Err(error) = control_lock(&control).check() {
+        return FileOutcome::Control(error);
+    }
     let metadata = match fs::symlink_metadata(&entry.path) {
         Ok(metadata) => metadata,
         Err(error) => {
@@ -358,7 +420,7 @@ fn scan_file(
                 },
                 Some(error.kind()),
             );
-            return Ok(FileOutcome::Continue);
+            return FileOutcome::Continue;
         }
     };
     if is_reparse_or_symlink(&metadata) {
@@ -368,10 +430,10 @@ fn scan_file(
             GrepDiagnosticCode::ReparseSkipped,
             None,
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     if metadata.is_dir() {
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     if !metadata.is_file() {
         state.skipped_files += 1;
@@ -380,7 +442,7 @@ fn scan_file(
             GrepDiagnosticCode::UnsupportedFile,
             None,
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     if metadata.len() > MAX_SINGLE_FILE_BYTES {
         state.skipped_files += 1;
@@ -389,13 +451,13 @@ fn scan_file(
             GrepDiagnosticCode::FileTooLarge,
             None,
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     if state.scanned_files >= MAX_SCANNED_FILES as u64 {
-        return Ok(FileOutcome::Stop(GrepTruncationReason::MaxScannedFiles));
+        return FileOutcome::Stop(GrepTruncationReason::MaxScannedFiles);
     }
     if state.scanned_bytes.saturating_add(metadata.len()) > MAX_SCANNED_BYTES {
-        return Ok(FileOutcome::Stop(GrepTruncationReason::MaxScannedBytes));
+        return FileOutcome::Stop(GrepTruncationReason::MaxScannedBytes);
     }
 
     run_toctou_hook(&entry.path);
@@ -412,14 +474,22 @@ fn scan_file(
                 },
                 Some(error.kind()),
             );
-            return Ok(FileOutcome::Continue);
+            return FileOutcome::Continue;
         }
     };
 
-    let final_path = opened_final_path(&file).map_err(|error| GrepError::IoFailure {
-        path: entry.logical.clone(),
-        kind: error.kind(),
-    })?;
+    let final_path = match opened_final_path(&file) {
+        Ok(path) => path,
+        Err(error) => {
+            state.skipped_files += 1;
+            state.diagnostics.push(
+                entry.logical.clone(),
+                GrepDiagnosticCode::Unreadable,
+                Some(error.kind()),
+            );
+            return FileOutcome::Continue;
+        }
+    };
     if !guard.contains_canonical_path(&final_path) {
         state.skipped_files += 1;
         state.diagnostics.push(
@@ -427,7 +497,7 @@ fn scan_file(
             GrepDiagnosticCode::TargetChanged,
             None,
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     let opened_metadata = match file.metadata() {
         Ok(metadata) => metadata,
@@ -438,7 +508,7 @@ fn scan_file(
                 GrepDiagnosticCode::Unreadable,
                 Some(error.kind()),
             );
-            return Ok(FileOutcome::Continue);
+            return FileOutcome::Continue;
         }
     };
     if !opened_metadata.is_file() || is_reparse_or_symlink(&opened_metadata) {
@@ -448,7 +518,7 @@ fn scan_file(
             GrepDiagnosticCode::TargetChanged,
             None,
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     if opened_metadata.len() > MAX_SINGLE_FILE_BYTES {
         state.skipped_files += 1;
@@ -457,10 +527,10 @@ fn scan_file(
             GrepDiagnosticCode::FileTooLarge,
             None,
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     if state.scanned_bytes.saturating_add(opened_metadata.len()) > MAX_SCANNED_BYTES {
-        return Ok(FileOutcome::Stop(GrepTruncationReason::MaxScannedBytes));
+        return FileOutcome::Stop(GrepTruncationReason::MaxScannedBytes);
     }
 
     state.scanned_files += 1;
@@ -476,7 +546,7 @@ fn scan_file(
             GrepDiagnosticCode::Unreadable,
             Some(error.kind()),
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     state.scanned_bytes = state.scanned_bytes.saturating_add(bytes.len() as u64);
     if bytes.len() as u64 > MAX_SINGLE_FILE_BYTES {
@@ -486,7 +556,7 @@ fn scan_file(
             GrepDiagnosticCode::FileTooLarge,
             None,
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
     if bytes.contains(&0) {
         state.skipped_files += 1;
@@ -495,9 +565,9 @@ fn scan_file(
             GrepDiagnosticCode::BinarySkipped,
             None,
         );
-        return Ok(FileOutcome::Continue);
+        return FileOutcome::Continue;
     }
-    let text = match String::from_utf8(bytes) {
+    let text = match std::str::from_utf8(&bytes) {
         Ok(text) => text,
         Err(_) => {
             state.skipped_files += 1;
@@ -506,75 +576,150 @@ fn scan_file(
                 GrepDiagnosticCode::InvalidUtf8Skipped,
                 None,
             );
-            return Ok(FileOutcome::Continue);
+            return FileOutcome::Continue;
         }
     };
-    let text = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
-    if let Some(reason) = scan_lines(
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    scan_text(
         &entry.logical,
-        text,
+        text.as_bytes(),
         request,
         matcher,
         state,
-        cancel,
-        started,
-    )? {
-        return Ok(FileOutcome::Stop(reason));
-    }
-    Ok(FileOutcome::Continue)
+        control,
+    )
 }
 
-fn scan_lines(
+fn scan_text(
     logical_path: &str,
-    text: &str,
+    text: &[u8],
     request: &GrepRequest,
-    matcher: &LineMatcher,
+    matcher: &GrepMatcher,
     state: &mut SearchState,
-    cancel: &CancellationToken,
-    started: Instant,
-) -> Result<Option<GrepTruncationReason>, GrepError> {
-    let mut line_start = 0;
-    let mut line_number = 1_u64;
-    while line_start <= text.len() {
-        check_control(cancel, started)?;
-        let (line_end, next_start) = match text[line_start..].find('\n') {
-            Some(offset) => (line_start + offset, line_start + offset + 1),
-            None => (text.len(), text.len() + 1),
-        };
-        let mut trimmed_end = line_end;
-        if trimmed_end > line_start && text.as_bytes()[trimmed_end - 1] == b'\r' {
-            trimmed_end -= 1;
-        }
-        let line = &text[line_start..trimmed_end];
-        if let Some(range) = matcher.find(line) {
-            if state.matches.len() >= request.max_results as usize {
-                return Ok(Some(GrepTruncationReason::MaxResults));
-            }
-            let (preview, preview_start) = bounded_preview(line, range.start, range.end);
-            let cost = logical_path.len().saturating_add(preview.len()) as u64;
-            if state.output_bytes.saturating_add(cost) > request.max_output_bytes as u64 {
-                return Ok(Some(GrepTruncationReason::MaxOutputBytes));
-            }
-            let preview_truncated =
-                preview_start != 0 || preview_start.saturating_add(preview.len()) < line.len();
-            state.output_bytes = state.output_bytes.saturating_add(cost);
-            state.matches.push(GrepMatch {
-                path: logical_path.to_owned(),
-                line_number,
-                preview,
-                preview_start_byte: preview_start as u64,
-                match_start_byte: range.start as u64,
-                match_end_byte: range.end as u64,
-                preview_truncated,
-            });
-        }
-        if next_start > text.len() {
-            break;
-        }
-        line_start = next_start;
-        line_number += 1;
+    control: Arc<Mutex<SearchControl>>,
+) -> FileOutcome {
+    let mut sink = MatchSink {
+        lines: Vec::new(),
+        limit: request.max_results as usize + 1,
+    };
+    let mut searcher = SearcherBuilder::new()
+        .line_number(true)
+        .binary_detection(BinaryDetection::quit(b'\x00'))
+        .build();
+    let reader = ControlReader {
+        inner: io::Cursor::new(text),
+        control: Arc::clone(&control),
+    };
+    let search_result = searcher.search_reader(&matcher.inner, reader, &mut sink);
+    if let Some(error) = control_lock(&control).last_error() {
+        return FileOutcome::Control(error);
     }
-    Ok(None)
+    if let Err(error) = search_result {
+        state.skipped_files += 1;
+        state.diagnostics.push(
+            logical_path.to_owned(),
+            GrepDiagnosticCode::Unreadable,
+            Some(error.kind()),
+        );
+        return FileOutcome::Continue;
+    }
+
+    let over_limit = sink.lines.len() > request.max_results as usize;
+    for raw_line in sink.lines {
+        if let Err(error) = control_lock(&control).check() {
+            return FileOutcome::Control(error);
+        }
+        let line = match std::str::from_utf8(&raw_line.bytes) {
+            Ok(line) => line,
+            Err(_) => continue,
+        };
+        let Some(range) = matcher.find(line.as_bytes()) else {
+            continue;
+        };
+        if state.matches.len() >= request.max_results as usize {
+            return FileOutcome::Stop(GrepTruncationReason::MaxResults);
+        }
+        let (preview, preview_start) = bounded_preview(line, range.start, range.end);
+        let cost = logical_path.len().saturating_add(preview.len()) as u64;
+        if state.output_bytes.saturating_add(cost) > request.max_output_bytes as u64 {
+            return FileOutcome::Stop(GrepTruncationReason::MaxOutputBytes);
+        }
+        let preview_truncated =
+            preview_start != 0 || preview_start.saturating_add(preview.len()) < line.len();
+        state.output_bytes = state.output_bytes.saturating_add(cost);
+        state.matches.push(GrepMatch {
+            path: logical_path.to_owned(),
+            line_number: raw_line.number,
+            preview,
+            preview_start_byte: preview_start as u64,
+            match_start_byte: range.start as u64,
+            match_end_byte: range.end as u64,
+            preview_truncated,
+        });
+    }
+    if over_limit {
+        return FileOutcome::Stop(GrepTruncationReason::MaxResults);
+    }
+    FileOutcome::Continue
+}
+
+struct RawLine {
+    number: u64,
+    bytes: Vec<u8>,
+}
+
+struct MatchSink {
+    lines: Vec<RawLine>,
+    limit: usize,
+}
+
+impl Sink for MatchSink {
+    type Error = io::Error;
+
+    fn matched(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+        mat: &SinkMatch<'_>,
+    ) -> Result<bool, io::Error> {
+        let mut bytes = mat.bytes().to_vec();
+        while bytes
+            .last()
+            .is_some_and(|byte| matches!(byte, b'\n' | b'\r'))
+        {
+            bytes.pop();
+        }
+        self.lines.push(RawLine {
+            number: mat.line_number().unwrap_or(0),
+            bytes,
+        });
+        Ok(self.lines.len() < self.limit)
+    }
+}
+
+struct ControlReader<R> {
+    inner: R,
+    control: Arc<Mutex<SearchControl>>,
+}
+
+impl<R: Read> Read for ControlReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        {
+            let mut control = control_lock(&self.control);
+            if let Err(error) = control.check() {
+                control.record_error(error);
+                drop(control);
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "search control stopped scanning",
+                ));
+            }
+        }
+        self.inner.read(buffer)
+    }
+}
+
+fn control_lock(control: &Mutex<SearchControl>) -> MutexGuard<'_, SearchControl> {
+    control.lock().unwrap_or_else(|error| error.into_inner())
 }
 
 fn bounded_preview(line: &str, match_start: usize, match_end: usize) -> (String, usize) {
@@ -616,68 +761,6 @@ fn previous_char_boundary(value: &str, mut index: usize) -> usize {
         index -= 1;
     }
     index
-}
-
-fn compile_matcher(request: &GrepRequest) -> Result<LineMatcher, GrepError> {
-    match request.mode {
-        GrepMode::Literal => Ok(LineMatcher::Literal(request.query.clone())),
-        GrepMode::Regex => RegexBuilder::new(&request.query)
-            .size_limit(REGEX_COMPILED_PROGRAM_LIMIT)
-            .build()
-            .map(LineMatcher::Regex)
-            .map_err(|error| GrepError::InvalidRegex {
-                message: error.to_string(),
-            }),
-    }
-}
-
-enum LineMatcher {
-    Literal(String),
-    Regex(Regex),
-}
-
-impl LineMatcher {
-    fn find(&self, line: &str) -> Option<std::ops::Range<usize>> {
-        match self {
-            Self::Literal(query) => line.find(query).map(|start| start..start + query.len()),
-            Self::Regex(regex) => regex.find(line).map(|found| found.range()),
-        }
-    }
-}
-
-struct Filters {
-    include: Vec<GlobMatcher>,
-    exclude: Vec<GlobMatcher>,
-}
-
-impl Filters {
-    fn compile(request: &GrepRequest) -> Result<Self, GrepError> {
-        Ok(Self {
-            include: compile_patterns(&request.include)?,
-            exclude: compile_patterns(&request.exclude)?,
-        })
-    }
-
-    fn allows(&self, path: &str) -> bool {
-        let included =
-            self.include.is_empty() || self.include.iter().any(|glob| glob.is_match(path));
-        included && !self.exclude.iter().any(|glob| glob.is_match(path))
-    }
-}
-
-fn compile_patterns(patterns: &[String]) -> Result<Vec<GlobMatcher>, GrepError> {
-    patterns
-        .iter()
-        .map(|pattern| {
-            GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .build()
-                .map(|glob| glob.compile_matcher())
-                .map_err(|error| GrepError::InvalidFilterPattern {
-                    message: error.to_string(),
-                })
-        })
-        .collect()
 }
 
 fn validate_filter_patterns(patterns: &[String], kind: &str) -> Result<(), GrepError> {
@@ -847,88 +930,7 @@ impl Diagnostics {
 enum FileOutcome {
     Continue,
     Stop(GrepTruncationReason),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EntryKind {
-    Directory,
-    File,
-}
-
-struct PendingEntry {
-    logical: String,
-    path: PathBuf,
-    kind: EntryKind,
-}
-
-impl PendingEntry {
-    fn directory(logical: String, path: PathBuf) -> Self {
-        Self {
-            logical,
-            path,
-            kind: EntryKind::Directory,
-        }
-    }
-
-    fn file(logical: String, path: PathBuf) -> Self {
-        Self {
-            logical,
-            path,
-            kind: EntryKind::File,
-        }
-    }
-}
-
-impl PartialEq for PendingEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.logical == other.logical
-    }
-}
-
-impl Eq for PendingEntry {}
-
-impl PartialOrd for PendingEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for PendingEntry {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.logical.cmp(&self.logical)
-    }
-}
-
-struct SortedEntries {
-    items: Vec<(String, PathBuf)>,
-    overflow: bool,
-}
-
-fn read_sorted_entries(path: &Path, remaining: usize) -> io::Result<SortedEntries> {
-    let mut names = BTreeMap::<String, PathBuf>::new();
-    let mut overflow = false;
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-            overflow = true;
-            continue;
-        };
-        if names.len() < remaining {
-            names.insert(name, entry.path());
-        } else {
-            overflow = true;
-            if let Some(last) = names.keys().next_back().cloned() {
-                if name < last {
-                    names.remove(&last);
-                    names.insert(name, entry.path());
-                }
-            }
-        }
-    }
-    Ok(SortedEntries {
-        items: names.into_iter().collect(),
-        overflow,
-    })
+    Control(ControlError),
 }
 
 fn join_logical(parent: &str, name: &str) -> String {
@@ -943,19 +945,9 @@ fn logical_to_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn check_control(cancel: &CancellationToken, started: Instant) -> Result<(), GrepError> {
-    if cancel.is_cancelled() {
-        return Err(GrepError::Cancelled);
-    }
-    if started.elapsed() >= active_search_timeout() {
-        return Err(GrepError::SearchTimeout);
-    }
-    Ok(())
-}
-
 #[cfg(not(test))]
-fn active_search_timeout() -> Duration {
-    SEARCH_WALL_TIMEOUT
+fn active_search_budget() -> SearchBudget {
+    SearchBudget::default()
 }
 
 #[cfg(test)]
@@ -965,10 +957,25 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn active_search_timeout() -> Duration {
+fn active_search_budget() -> SearchBudget {
+    SearchBudget {
+        timeout: SEARCH_TIMEOUT_OVERRIDE
+            .with(std::cell::Cell::get)
+            .unwrap_or(SEARCH_WALL_TIMEOUT),
+    }
+}
+
+#[cfg(test)]
+fn effective_search_budget(budget: SearchBudget) -> SearchBudget {
     SEARCH_TIMEOUT_OVERRIDE
         .with(std::cell::Cell::get)
-        .unwrap_or(SEARCH_WALL_TIMEOUT)
+        .map(|timeout| SearchBudget { timeout })
+        .unwrap_or(budget)
+}
+
+#[cfg(not(test))]
+fn effective_search_budget(budget: SearchBudget) -> SearchBudget {
+    budget
 }
 
 #[cfg(test)]
@@ -1341,6 +1348,49 @@ mod tests {
     }
 
     #[test]
+    fn gitignore_prunes_build_outputs_and_explicit_include_overrides_it() {
+        let workspace = TestWorkspace::new();
+        workspace.write(".gitignore", "target/\n");
+        workspace.write("target/debug/app.rs", "needle-in-build\n");
+        workspace.write("src/main.rs", "needle-in-source\n");
+        let default = grep(&workspace, &GrepRequest::new("needle")).unwrap();
+        assert_eq!(
+            default
+                .matches
+                .iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
+            ["src/main.rs"]
+        );
+        assert_eq!(default.scanned_files, 2);
+
+        let explicit = grep(
+            &workspace,
+            &GrepRequest::new("needle").with_include(vec!["target/**/*.rs".into()]),
+        )
+        .unwrap();
+        assert_eq!(
+            explicit
+                .matches
+                .iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
+            ["target/debug/app.rs"]
+        );
+
+        let excluded = grep(
+            &workspace,
+            &GrepRequest::new("needle").with_exclude(vec!["target/**".into()]),
+        )
+        .unwrap();
+        assert_eq!(excluded.scanned_files, 2);
+        assert!(excluded
+            .matches
+            .iter()
+            .all(|item| !item.path.starts_with("target/")));
+    }
+
+    #[test]
     fn cancellation_and_timeout_are_errors_without_partial_success() {
         let workspace = TestWorkspace::new();
         workspace.write("a.txt", "needle\n");
@@ -1351,10 +1401,10 @@ mod tests {
             Err(GrepError::Cancelled)
         );
         let _timeout = override_search_timeout(Duration::ZERO);
-        assert_eq!(
+        assert!(matches!(
             grep(&workspace, &GrepRequest::new("needle")),
-            Err(GrepError::SearchTimeout)
-        );
+            Err(GrepError::SearchTimeout { .. })
+        ));
     }
 
     #[test]
@@ -1425,11 +1475,12 @@ mod tests {
         }
         let one_over = grep(&workspace, &GrepRequest::new("needle")).unwrap();
         assert!(one_over.truncated);
-        assert_eq!(
-            one_over.truncation_reasons,
-            [GrepTruncationReason::MaxDiscoveredEntries]
-        );
-        assert_eq!(one_over.scanned_files, 0);
+        assert!(one_over
+            .truncation_reasons
+            .contains(&GrepTruncationReason::MaxDiscoveredEntries));
+        // Valid bounded candidates are still processed before the truncation
+        // marker is reported.
+        assert_eq!(one_over.scanned_files, MAX_SCANNED_FILES as u64);
 
         fs::remove_file(
             workspace
@@ -1562,21 +1613,51 @@ mod tests {
         let cancel_from_hook = cancel.clone();
         let _hook = install_scan_hook(move |_| cancel_from_hook.cancel());
         assert_eq!(
-            execute_grep_cancellable(&workspace.guard(), &GrepRequest::new("needle"), cancel,),
+            execute_grep_cancellable(&workspace.guard(), &GrepRequest::new("needle"), cancel),
             Err(GrepError::Cancelled)
         );
         drop(_hook);
 
         let _timeout = override_search_timeout(Duration::from_millis(1));
         let _hook = install_scan_hook(|_| std::thread::sleep(Duration::from_millis(10)));
-        assert_eq!(
+        assert!(matches!(
             execute_grep_cancellable(
                 &workspace.guard(),
                 &GrepRequest::new("needle"),
                 CancellationToken::new(),
             ),
-            Err(GrepError::SearchTimeout)
-        );
+            Err(GrepError::SearchTimeout { .. })
+        ));
+    }
+
+    #[test]
+    fn timeout_after_a_valid_match_returns_marked_partial_results() {
+        let workspace = TestWorkspace::new();
+        workspace.write("a.txt", "needle\n");
+        workspace.write("b.txt", "needle\n");
+        let _timeout = override_search_timeout(Duration::from_millis(100));
+        let _hook = install_scan_hook(|path| {
+            if path.file_name().is_some_and(|name| name == "b.txt") {
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        });
+        match execute_grep_cancellable(
+            &workspace.guard(),
+            &GrepRequest::new("needle"),
+            CancellationToken::new(),
+        ) {
+            Err(GrepError::SearchTimeout {
+                partial: Some(output),
+            }) => {
+                assert_eq!(output.matches.len(), 1);
+                assert_eq!(output.matches[0].path, "a.txt");
+                assert!(output.truncated);
+                assert!(output
+                    .truncation_reasons
+                    .contains(&GrepTruncationReason::Timeout));
+            }
+            other => panic!("expected partial timeout, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1632,26 +1713,6 @@ mod tests {
         assert_eq!(output.diagnostics.len(), MAX_DIAGNOSTICS);
         assert!(output.diagnostics_truncated);
         assert_eq!(output.skipped_files, (MAX_DIAGNOSTICS + 1) as u64);
-    }
-
-    #[test]
-    fn discovered_entry_selection_is_sorted_and_reports_overflow_without_reading_more() {
-        let workspace = TestWorkspace::new();
-        let directory = workspace.root.join("entries");
-        fs::create_dir_all(&directory).unwrap();
-        for name in ["c.txt", "a.txt", "b.txt"] {
-            fs::write(directory.join(name), "").unwrap();
-        }
-        let selected = read_sorted_entries(&directory, 2).unwrap();
-        assert!(selected.overflow);
-        assert_eq!(
-            selected
-                .items
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>(),
-            ["a.txt", "b.txt"]
-        );
     }
 
     #[cfg(windows)]
@@ -1803,6 +1864,130 @@ mod tests {
                 target.as_ptr(),
                 SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE,
             )
+        }
+    }
+
+    /// Manual evidence run:
+    /// `CHATGPT_HARNESS_PERF_ROOT=D:\ChatGPT-Harness cargo test -p chatgpt-harness-runtime perf_search_benchmark -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn perf_search_benchmark() {
+        use crate::tools::{execute_grep_with_control, GlobRequest};
+
+        let synthetic = std::env::var("CHATGPT_HARNESS_PERF_SYNTHETIC").is_ok();
+        let (root, cleanup) = if synthetic {
+            let base =
+                std::env::temp_dir().join(format!("chatgpt-harness-perf-{}", uuid::Uuid::new_v4()));
+            let root = base.join("workspace");
+            fs::create_dir_all(root.join("src")).unwrap();
+            fs::create_dir_all(root.join("build")).unwrap();
+            fs::write(root.join(".gitignore"), "build/\n").unwrap();
+            for index in 0..25_000 {
+                let directory = root.join("src").join(format!("d{:02}", index % 100));
+                fs::create_dir_all(&directory).unwrap();
+                fs::write(
+                    directory.join(format!("file-{index:05}.rs")),
+                    "pub struct Synthetic;\n",
+                )
+                .unwrap();
+            }
+            for index in 0..25_000 {
+                fs::write(
+                    root.join("build").join(format!("artifact-{index:05}.bin")),
+                    "ignored\n",
+                )
+                .unwrap();
+            }
+            (root, Some(base))
+        } else {
+            let root = std::env::var("CHATGPT_HARNESS_PERF_ROOT")
+                .map(PathBuf::from)
+                .or_else(|_| std::env::current_dir())
+                .unwrap();
+            (root, None)
+        };
+
+        let workspace = Workspace::new(&root).unwrap();
+        let guard = WorkspaceGuard::new(&workspace);
+        let budget = SearchBudget::default();
+        let run_glob = |pattern: &str| {
+            let mut samples = Vec::new();
+            let mut last = None;
+            for _ in 0..3 {
+                let started = std::time::Instant::now();
+                let output = crate::tools::execute_glob_with_control(
+                    &guard,
+                    &GlobRequest::new(pattern),
+                    budget,
+                    CancellationToken::new(),
+                )
+                .unwrap();
+                samples.push(started.elapsed().as_millis());
+                last = Some(output);
+            }
+            samples.sort_unstable();
+            let output = last.unwrap();
+            println!(
+                "PERF glob pattern={pattern:?} samples_ms={samples:?} median_ms={} matches={} truncated={} diagnostics={}",
+                samples[1],
+                output.matches.len(),
+                output.truncated,
+                output.diagnostics.len()
+            );
+        };
+        let run_grep = |label: &str, request: GrepRequest| {
+            let mut samples = Vec::new();
+            let mut last = None;
+            for _ in 0..3 {
+                let started = std::time::Instant::now();
+                let output =
+                    execute_grep_with_control(&guard, &request, budget, CancellationToken::new())
+                        .unwrap();
+                samples.push(started.elapsed().as_millis());
+                last = Some(output);
+            }
+            samples.sort_unstable();
+            let output = last.unwrap();
+            println!(
+                "PERF grep case={label} samples_ms={samples:?} median_ms={} scanned_files={} scanned_bytes={} matches={} truncated={:?}",
+                samples[1],
+                output.scanned_files,
+                output.scanned_bytes,
+                output.matches.len(),
+                output.truncation_reasons
+            );
+        };
+
+        run_glob("*");
+        run_glob("**/*.rs");
+        run_glob("**/Cargo.toml");
+        run_grep("literal", GrepRequest::new("WorkspaceGuard"));
+        run_grep(
+            "regex",
+            GrepRequest::new(r"fn\s+execute_\w+").with_mode(GrepMode::Regex),
+        );
+        let (include, exclude, scope) = if synthetic {
+            ("src/**/*.rs".into(), "build/**".into(), "src")
+        } else {
+            (
+                "runtime/**/*.rs".into(),
+                "runtime/target/**".into(),
+                "ui/src",
+            )
+        };
+        run_grep(
+            "include_exclude",
+            GrepRequest::new("WorkspaceGuard")
+                .with_include(vec![include])
+                .with_exclude(vec![exclude]),
+        );
+        run_grep(
+            "scope",
+            GrepRequest::new("WorkspaceGuard").with_scope(scope),
+        );
+
+        if let Some(base) = cleanup {
+            let _ = fs::remove_dir_all(base);
         }
     }
 }

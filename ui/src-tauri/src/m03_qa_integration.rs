@@ -56,6 +56,7 @@ fn runtime_config_snapshot(config: &AppConfig) -> RuntimeConfigSnapshot {
         tools: config.tools.clone(),
         bash: config.bash.clone(),
         policies: config.policies.clone(),
+        search: config.search.clone(),
     }
 }
 

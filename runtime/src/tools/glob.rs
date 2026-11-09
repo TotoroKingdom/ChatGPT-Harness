@@ -1,16 +1,23 @@
+use crate::tools::search::control::{ControlError, SearchBudget, SearchControl};
+use crate::tools::search::filters::{fixed_directory_prefix, has_wildcard, PathFilters};
+use crate::tools::search::walker::{
+    self, LinkPolicy, WalkDiagnosticCode, WalkEntryKind, WalkRequest,
+};
 use crate::workspace::{ApprovedPath, WorkspaceError, WorkspaceGuard};
 use globset::{GlobBuilder, GlobMatcher};
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use tokio_util::sync::CancellationToken;
 
 /// Maximum number of matches returned by one glob execution.
 pub const MAX_GLOB_RESULTS: usize = 1_000;
 /// Maximum number of non-fatal traversal diagnostics returned by one glob execution.
 pub const MAX_GLOB_DIAGNOSTICS: usize = 100;
+/// Maximum number of entries discovered before traversal reports truncation.
+pub const MAX_GLOB_DISCOVERED_ENTRIES: usize = 100_000;
 
 /// Runtime-internal input for the `glob` capability.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +44,7 @@ impl GlobRequest {
 pub struct GlobOutput {
     pub matches: Vec<GlobMatch>,
     pub truncated: bool,
+    pub truncation_reasons: Vec<GlobTruncationReason>,
     pub diagnostics: Vec<GlobDiagnostic>,
     pub diagnostics_truncated: bool,
 }
@@ -54,6 +62,23 @@ pub enum GlobMatchKind {
     Directory,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlobTruncationReason {
+    MaxResults,
+    MaxDiscoveredEntries,
+    Timeout,
+}
+
+impl GlobTruncationReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MaxResults => "max_results",
+            Self::MaxDiscoveredEntries => "max_discovered_entries",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GlobDiagnostic {
     /// Normalized logical path relative to the workspace root, using `/`.
@@ -69,6 +94,31 @@ pub enum GlobDiagnosticCode {
     BrokenLink,
     MetadataFailed,
     ReadDirectoryFailed,
+    ReparseSkipped,
+}
+
+impl GlobDiagnosticCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkspaceRejected => "WorkspaceRejected",
+            Self::BrokenLink => "BrokenLink",
+            Self::MetadataFailed => "MetadataFailed",
+            Self::ReadDirectoryFailed => "ReadDirectoryFailed",
+            Self::ReparseSkipped => "ReparseSkipped",
+        }
+    }
+}
+
+impl From<WalkDiagnosticCode> for GlobDiagnosticCode {
+    fn from(code: WalkDiagnosticCode) -> Self {
+        match code {
+            WalkDiagnosticCode::WorkspaceRejected => Self::WorkspaceRejected,
+            WalkDiagnosticCode::BrokenLink => Self::BrokenLink,
+            WalkDiagnosticCode::MetadataFailed => Self::MetadataFailed,
+            WalkDiagnosticCode::ReadDirectoryFailed => Self::ReadDirectoryFailed,
+            WalkDiagnosticCode::ReparseSkipped => Self::ReparseSkipped,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +128,8 @@ pub enum GlobError {
     Workspace(WorkspaceError),
     TargetNotDirectory { path: String },
     IoFailure { path: String, kind: io::ErrorKind },
+    SearchTimeout { partial: Option<Box<GlobOutput>> },
+    Cancelled,
 }
 
 impl fmt::Display for GlobError {
@@ -94,6 +146,8 @@ impl fmt::Display for GlobError {
             Self::IoFailure { path, kind } => {
                 write!(formatter, "I/O failure for {path} ({kind:?})")
             }
+            Self::SearchTimeout { .. } => write!(formatter, "glob search timed out"),
+            Self::Cancelled => write!(formatter, "glob search was cancelled"),
         }
     }
 }
@@ -107,17 +161,27 @@ impl std::error::Error for GlobError {
     }
 }
 
-/// Executes a guarded, deterministic workspace glob.
-///
-/// The `WorkspaceGuard` remains the only filesystem boundary authority. Every
-/// candidate is approved before metadata inspection or directory traversal;
-/// logical paths are retained separately for pattern matching and output.
+/// Executes a guarded, deterministic workspace glob with the default budget.
 pub(crate) fn execute_glob(
     _permit: &crate::execution::ExecutionPermit,
     workspace_guard: &WorkspaceGuard,
     request: &GlobRequest,
 ) -> Result<GlobOutput, GlobError> {
-    let matcher = compile_matcher(&request.pattern)?;
+    execute_glob_with_control(
+        workspace_guard,
+        request,
+        SearchBudget::default(),
+        CancellationToken::new(),
+    )
+}
+
+pub(crate) fn execute_glob_with_control(
+    workspace_guard: &WorkspaceGuard,
+    request: &GlobRequest,
+    budget: SearchBudget,
+    cancel: CancellationToken,
+) -> Result<GlobOutput, GlobError> {
+    let plan = GlobPlan::compile(&request.pattern)?;
     let (base_logical, base_approved) = approve_base_path(workspace_guard, request)?;
 
     let base_metadata =
@@ -131,85 +195,213 @@ pub(crate) fn execute_glob(
         });
     }
 
-    let mut pending = BinaryHeap::new();
     let base_display = logical_to_string(&base_logical);
-    pending.push(PendingPath::new(base_display.clone(), base_approved));
-
-    let mut visited_directories = HashSet::new();
-    let mut matches = Vec::with_capacity(MAX_GLOB_RESULTS);
-    let mut diagnostics = Diagnostics::default();
-    let mut truncated = false;
-
-    while let Some(current) = pending.pop() {
-        let metadata = match fs::metadata(current.approved.as_path()) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                diagnostics.push(
-                    current.logical_path,
-                    GlobDiagnosticCode::MetadataFailed,
-                    Some(sanitized_io_message(error.kind())),
-                );
-                continue;
-            }
-        };
-
-        let kind = if metadata.is_dir() {
-            GlobMatchKind::Directory
+    let mut walk_logical = base_display.clone();
+    let mut walk_path = base_approved;
+    let mut ignore_overrides = Vec::new();
+    if let Some(prefix) = &plan.fixed_prefix {
+        let prefix_logical = if walk_logical.is_empty() {
+            prefix.clone()
         } else {
-            GlobMatchKind::File
+            format!("{walk_logical}/{prefix}")
         };
-        if !current.logical_path.is_empty()
-            && matcher.is_match(relative_to_base(&base_display, &current.logical_path))
-        {
-            if matches.len() == MAX_GLOB_RESULTS {
-                truncated = true;
-                break;
+        match workspace_guard.approve(Path::new(&prefix_logical)) {
+            Ok(approved) => {
+                if !fs::metadata(approved.as_path())
+                    .map_err(|error| GlobError::IoFailure {
+                        path: prefix_logical.clone(),
+                        kind: error.kind(),
+                    })?
+                    .is_dir()
+                {
+                    return Ok(empty_output());
+                }
+                walk_logical = prefix_logical.clone();
+                walk_path = approved;
+                ignore_overrides.push(prefix_logical);
             }
-            matches.push(GlobMatch {
-                path: current.logical_path.clone(),
-                kind,
-            });
-        }
-
-        if !metadata.is_dir() {
-            continue;
-        }
-        if !visited_directories.insert(current.approved.as_path().to_path_buf()) {
-            continue;
-        }
-
-        let entries = match read_sorted_entries(current.approved.as_path()) {
-            Ok(entries) => entries,
-            Err(error) => {
-                diagnostics.push(
-                    current.logical_path,
-                    GlobDiagnosticCode::ReadDirectoryFailed,
-                    Some(sanitized_io_message(error.kind())),
-                );
-                continue;
-            }
-        };
-
-        for entry in entries {
-            let candidate_logical = join_logical(&current.logical_path, &entry.file_name());
-            let candidate_path = PathBuf::from(&candidate_logical);
-            match workspace_guard.approve(&candidate_path) {
-                Ok(approved) => pending.push(PendingPath::new(candidate_logical, approved)),
-                Err(error) => diagnostics.push(
-                    candidate_logical,
-                    diagnostic_code_for_workspace_error(&error),
-                    None,
-                ),
-            }
+            Err(WorkspaceError::TargetNotFound { .. }) => return Ok(empty_output()),
+            Err(error) => return Err(GlobError::Workspace(error)),
         }
     }
 
-    Ok(GlobOutput {
-        matches,
-        truncated,
-        diagnostics: diagnostics.items,
-        diagnostics_truncated: diagnostics.truncated,
-    })
+    let control = Arc::new(Mutex::new(SearchControl::new(budget, cancel)));
+    let walked = walker::walk(
+        workspace_guard,
+        WalkRequest {
+            base_logical: walk_logical.clone(),
+            base_path: walk_path.as_path().to_path_buf(),
+            max_depth: plan.max_depth,
+            links: LinkPolicy::FollowAuthorized,
+            max_entries: MAX_GLOB_DISCOVERED_ENTRIES,
+            filters: PathFilters::default(),
+            ignore_overrides,
+        },
+        Arc::clone(&control),
+    );
+
+    let mut output = GlobOutput {
+        matches: Vec::with_capacity(MAX_GLOB_RESULTS.min(walked.entries.len())),
+        truncated: walked.truncated,
+        truncation_reasons: if walked.truncated {
+            vec![GlobTruncationReason::MaxDiscoveredEntries]
+        } else {
+            Vec::new()
+        },
+        diagnostics: walked
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| GlobDiagnostic {
+                path: diagnostic.logical,
+                code: diagnostic.code.into(),
+                message: diagnostic.message,
+            })
+            .collect(),
+        diagnostics_truncated: walked.diagnostics_truncated,
+    };
+
+    for entry in walked.entries {
+        if control
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .check()
+            .is_err()
+        {
+            break;
+        }
+        let relative = relative_to_base(&base_display, &entry.logical);
+        if relative.is_empty() {
+            continue;
+        }
+        let name = entry
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !plan.prefilter_matches(&name) || !plan.matcher.is_match(relative) {
+            continue;
+        }
+        if output.matches.len() == MAX_GLOB_RESULTS {
+            output.truncated = true;
+            if !output
+                .truncation_reasons
+                .contains(&GlobTruncationReason::MaxResults)
+            {
+                output
+                    .truncation_reasons
+                    .push(GlobTruncationReason::MaxResults);
+            }
+            break;
+        }
+        output.matches.push(GlobMatch {
+            path: entry.logical,
+            kind: match entry.kind {
+                WalkEntryKind::File => GlobMatchKind::File,
+                WalkEntryKind::Directory => GlobMatchKind::Directory,
+            },
+        });
+    }
+
+    match walked.control_error {
+        Some(ControlError::Cancelled) => Err(GlobError::Cancelled),
+        Some(ControlError::Timeout) => {
+            output.truncated = true;
+            if !output
+                .truncation_reasons
+                .contains(&GlobTruncationReason::Timeout)
+            {
+                output
+                    .truncation_reasons
+                    .push(GlobTruncationReason::Timeout);
+            }
+            if output.matches.is_empty() {
+                Err(GlobError::SearchTimeout { partial: None })
+            } else {
+                Err(GlobError::SearchTimeout {
+                    partial: Some(Box::new(output)),
+                })
+            }
+        }
+        None => Ok(output),
+    }
+}
+
+fn empty_output() -> GlobOutput {
+    GlobOutput {
+        matches: Vec::new(),
+        truncated: false,
+        truncation_reasons: Vec::new(),
+        diagnostics: Vec::new(),
+        diagnostics_truncated: false,
+    }
+}
+
+struct GlobPlan {
+    matcher: GlobMatcher,
+    fixed_prefix: Option<String>,
+    max_depth: Option<usize>,
+    name_filter: NameFilter,
+}
+
+impl GlobPlan {
+    fn compile(pattern: &str) -> Result<Self, GlobError> {
+        validate_pattern_form(pattern)?;
+        let matcher = GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+            .map(|glob| glob.compile_matcher())
+            .map_err(|error| GlobError::InvalidPattern {
+                pattern: pattern.into(),
+                message: error.to_string(),
+            })?;
+        let segments = pattern.split('/').collect::<Vec<_>>();
+        let recursive = segments.iter().any(|segment| *segment == "**");
+        let fixed_prefix = fixed_directory_prefix(pattern);
+        let prefix_segments = fixed_prefix
+            .as_deref()
+            .map(|prefix| prefix.split('/').count())
+            .unwrap_or(0);
+        Ok(Self {
+            matcher,
+            fixed_prefix,
+            max_depth: if recursive {
+                None
+            } else {
+                Some(segments.len().saturating_sub(prefix_segments).max(1))
+            },
+            name_filter: NameFilter::from_terminal(segments.last().copied().unwrap_or("")),
+        })
+    }
+
+    fn prefilter_matches(&self, name: &str) -> bool {
+        match &self.name_filter {
+            NameFilter::Any => true,
+            NameFilter::Exact(expected) => name == expected,
+            NameFilter::Extension(extension) => Path::new(name)
+                .extension()
+                .is_some_and(|value| value.to_string_lossy() == *extension),
+        }
+    }
+}
+
+enum NameFilter {
+    Any,
+    Exact(String),
+    Extension(String),
+}
+
+impl NameFilter {
+    fn from_terminal(segment: &str) -> Self {
+        if !has_wildcard(segment) {
+            return Self::Exact(segment.to_owned());
+        }
+        if let Some(extension) = segment.strip_prefix("*.") {
+            if !has_wildcard(extension) && !extension.is_empty() {
+                return Self::Extension(extension.to_owned());
+            }
+        }
+        Self::Any
+    }
 }
 
 fn approve_base_path(
@@ -229,19 +421,7 @@ fn approve_base_path(
 
 /// Reuses the executor's pure pattern validator before filesystem enforcement.
 pub(crate) fn validate_glob_pattern(pattern: &str) -> Result<(), GlobError> {
-    compile_matcher(pattern).map(|_| ())
-}
-
-fn compile_matcher(pattern: &str) -> Result<GlobMatcher, GlobError> {
-    validate_pattern_form(pattern)?;
-    GlobBuilder::new(pattern)
-        .literal_separator(true)
-        .build()
-        .map(|glob| glob.compile_matcher())
-        .map_err(|error| GlobError::InvalidPattern {
-            pattern: pattern.into(),
-            message: error.to_string(),
-        })
+    GlobPlan::compile(pattern).map(|_| ())
 }
 
 fn validate_pattern_form(pattern: &str) -> Result<(), GlobError> {
@@ -281,28 +461,6 @@ fn is_windows_drive_pattern(pattern: &str) -> bool {
     bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
-fn read_sorted_entries(path: &Path) -> io::Result<Vec<fs::DirEntry>> {
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(path)? {
-        entries.push(entry?);
-    }
-    entries.sort_by(|left, right| normalized_file_name(left).cmp(&normalized_file_name(right)));
-    Ok(entries)
-}
-
-fn normalized_file_name(entry: &fs::DirEntry) -> String {
-    entry.file_name().to_string_lossy().replace('\\', "/")
-}
-
-fn join_logical(parent: &str, name: &std::ffi::OsStr) -> String {
-    let name = name.to_string_lossy().replace('\\', "/");
-    if parent.is_empty() {
-        name
-    } else {
-        format!("{parent}/{name}")
-    }
-}
-
 fn logical_to_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
@@ -315,73 +473,6 @@ fn relative_to_base<'a>(base: &str, logical_path: &'a str) -> &'a str {
             .strip_prefix(base)
             .and_then(|path| path.strip_prefix('/'))
             .unwrap_or(logical_path)
-    }
-}
-
-fn diagnostic_code_for_workspace_error(error: &WorkspaceError) -> GlobDiagnosticCode {
-    match error {
-        WorkspaceError::TargetNotFound { .. } => GlobDiagnosticCode::BrokenLink,
-        _ => GlobDiagnosticCode::WorkspaceRejected,
-    }
-}
-
-fn sanitized_io_message(kind: io::ErrorKind) -> String {
-    format!("filesystem error: {kind:?}")
-}
-
-#[derive(Debug)]
-struct PendingPath {
-    logical_path: String,
-    approved: ApprovedPath,
-}
-
-impl PendingPath {
-    fn new(logical_path: String, approved: ApprovedPath) -> Self {
-        Self {
-            logical_path,
-            approved,
-        }
-    }
-}
-
-impl PartialEq for PendingPath {
-    fn eq(&self, other: &Self) -> bool {
-        self.logical_path == other.logical_path
-    }
-}
-
-impl Eq for PendingPath {}
-
-impl PartialOrd for PendingPath {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for PendingPath {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // Reverse lexical order because `BinaryHeap` is a max-heap.
-        other.logical_path.cmp(&self.logical_path)
-    }
-}
-
-#[derive(Default)]
-struct Diagnostics {
-    items: Vec<GlobDiagnostic>,
-    truncated: bool,
-}
-
-impl Diagnostics {
-    fn push(&mut self, path: String, code: GlobDiagnosticCode, message: Option<String>) {
-        if self.items.len() < MAX_GLOB_DIAGNOSTICS {
-            self.items.push(GlobDiagnostic {
-                path,
-                code,
-                message,
-            });
-        } else {
-            self.truncated = true;
-        }
     }
 }
 
@@ -561,18 +652,91 @@ mod tests {
         let output = execute_glob(&guard, &GlobRequest::new("many/*.txt")).unwrap();
         assert_eq!(output.matches.len(), MAX_GLOB_RESULTS);
         assert!(output.truncated);
+        assert_eq!(
+            output.truncation_reasons,
+            [GlobTruncationReason::MaxResults]
+        );
         assert_eq!(output.matches.first().unwrap().path, "many/file-0000.txt");
         assert_eq!(output.matches.last().unwrap().path, "many/file-0999.txt");
     }
 
     #[test]
-    fn diagnostics_are_bounded() {
-        let mut diagnostics = Diagnostics::default();
-        for index in 0..=MAX_GLOB_DIAGNOSTICS {
-            diagnostics.push(index.to_string(), GlobDiagnosticCode::BrokenLink, None);
-        }
-        assert_eq!(diagnostics.items.len(), MAX_GLOB_DIAGNOSTICS);
-        assert!(diagnostics.truncated);
+    fn gitignore_prunes_build_outputs_and_explicit_prefix_overrides_it() {
+        let workspace = TestWorkspace::new();
+        workspace.write(".gitignore", "target/\n*.log\n");
+        workspace.write("target/debug/app.rs", "");
+        workspace.write("src/main.rs", "");
+        workspace.write("notes.log", "");
+        let guard = workspace.guard();
+
+        let output = execute_glob(&guard, &GlobRequest::new("**/*.rs")).unwrap();
+        assert_eq!(paths(&output), ["src/main.rs"]);
+        let logs = execute_glob(&guard, &GlobRequest::new("**/*.log")).unwrap();
+        assert!(logs.matches.is_empty());
+
+        let explicit = execute_glob(&guard, &GlobRequest::new("target/**/*.rs")).unwrap();
+        assert_eq!(paths(&explicit), ["target/debug/app.rs"]);
+    }
+
+    #[test]
+    fn star_is_shallow_but_double_star_recurses() {
+        let workspace = TestWorkspace::new();
+        workspace.write("top.rs", "");
+        workspace.write("nested/deep.rs", "");
+        let guard = workspace.guard();
+
+        assert_eq!(
+            paths(&execute_glob(&guard, &GlobRequest::new("*")).unwrap()),
+            ["nested", "top.rs"]
+        );
+        assert_eq!(
+            paths(&execute_glob(&guard, &GlobRequest::new("**/*.rs")).unwrap()),
+            ["nested/deep.rs", "top.rs"]
+        );
+    }
+
+    #[test]
+    fn hidden_files_remain_visible_and_nested_gitignore_applies() {
+        let workspace = TestWorkspace::new();
+        workspace.write(".hidden.rs", "");
+        workspace.write("nested/.gitignore", "secret.rs\n");
+        workspace.write("nested/secret.rs", "");
+        workspace.write("nested/visible.rs", "");
+        let guard = workspace.guard();
+
+        assert_eq!(
+            paths(&execute_glob(&guard, &GlobRequest::new("**/*.rs")).unwrap()),
+            [".hidden.rs", "nested/visible.rs"]
+        );
+    }
+
+    #[test]
+    fn timeout_and_cancellation_are_distinct_errors() {
+        let workspace = TestWorkspace::new();
+        workspace.write("a.rs", "");
+        let guard = workspace.guard();
+        assert!(matches!(
+            execute_glob_with_control(
+                &guard,
+                &GlobRequest::new("**/*.rs"),
+                SearchBudget {
+                    timeout: std::time::Duration::ZERO
+                },
+                CancellationToken::new(),
+            ),
+            Err(GlobError::SearchTimeout { .. })
+        ));
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        assert!(matches!(
+            execute_glob_with_control(
+                &guard,
+                &GlobRequest::new("**/*.rs"),
+                SearchBudget::default(),
+                cancel,
+            ),
+            Err(GlobError::Cancelled)
+        ));
     }
 
     #[cfg(windows)]

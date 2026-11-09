@@ -41,6 +41,7 @@ impl Fixture {
             tools,
             bash: BashConfig::default(),
             policies: Default::default(),
+            search: Default::default(),
         };
         change(&mut config);
         let mut core = RuntimeCore::new();

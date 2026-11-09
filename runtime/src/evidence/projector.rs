@@ -96,12 +96,16 @@ fn stage_and_outcome(event: &AuditEvent) -> (EvidenceStage, HistoryOutcome) {
         }
         AuditEventType::ExecutionFailed => {
             let outcome = match event.failure_category {
-                Some(AuditFailureCategory::BashTimeout | AuditFailureCategory::GrepTimeout) => {
-                    HistoryOutcome::TimedOut
-                }
-                Some(AuditFailureCategory::BashCancelled | AuditFailureCategory::GrepCancelled) => {
-                    HistoryOutcome::Cancelled
-                }
+                Some(
+                    AuditFailureCategory::BashTimeout
+                    | AuditFailureCategory::GrepTimeout
+                    | AuditFailureCategory::GlobTimeout,
+                ) => HistoryOutcome::TimedOut,
+                Some(
+                    AuditFailureCategory::BashCancelled
+                    | AuditFailureCategory::GrepCancelled
+                    | AuditFailureCategory::GlobCancelled,
+                ) => HistoryOutcome::Cancelled,
                 Some(AuditFailureCategory::ApprovalExpired) => HistoryOutcome::ApprovalExpired,
                 Some(AuditFailureCategory::ApprovalCancelled) => HistoryOutcome::ApprovalCancelled,
                 _ => HistoryOutcome::Failed,
@@ -195,6 +199,8 @@ fn failure_category(value: AuditFailureCategory) -> ActivityFailureCategory {
         AuditFailureCategory::BashProcessFailed => ActivityFailureCategory::BashProcessFailed,
         AuditFailureCategory::GrepTimeout => ActivityFailureCategory::GrepTimeout,
         AuditFailureCategory::GrepCancelled => ActivityFailureCategory::GrepCancelled,
+        AuditFailureCategory::GlobTimeout => ActivityFailureCategory::GlobTimeout,
+        AuditFailureCategory::GlobCancelled => ActivityFailureCategory::GlobCancelled,
     }
 }
 
@@ -307,6 +313,47 @@ mod tests {
             Some("generation-a")
         );
         assert_eq!(evidence.coverage, EvidenceCoverage::Incomplete);
+    }
+
+    #[test]
+    fn search_timeout_and_cancel_categories_are_never_projected_as_success() {
+        for (category, outcome, activity) in [
+            (
+                AuditFailureCategory::GrepTimeout,
+                HistoryOutcome::TimedOut,
+                ActivityFailureCategory::GrepTimeout,
+            ),
+            (
+                AuditFailureCategory::GlobTimeout,
+                HistoryOutcome::TimedOut,
+                ActivityFailureCategory::GlobTimeout,
+            ),
+            (
+                AuditFailureCategory::GrepCancelled,
+                HistoryOutcome::Cancelled,
+                ActivityFailureCategory::GrepCancelled,
+            ),
+            (
+                AuditFailureCategory::GlobCancelled,
+                HistoryOutcome::Cancelled,
+                ActivityFailureCategory::GlobCancelled,
+            ),
+        ] {
+            let mut source = event(AuditEventType::ExecutionFailed);
+            source.outcome = crate::audit::event::AuditOutcome::Failed;
+            source.failure_category = Some(category);
+            source.result_evidence =
+                Some(harness_control_protocol::ExecutionResultEvidence::Grep {
+                    match_count: 1,
+                    scanned_files: 2,
+                    scanned_bytes: 10,
+                    skipped_files: 0,
+                    truncated: true,
+                });
+            let evidence = SafeEvidenceProjector::new(context()).project(&source);
+            assert_eq!(evidence.outcome, outcome);
+            assert_eq!(evidence.failure_category, Some(activity));
+        }
     }
 
     #[test]

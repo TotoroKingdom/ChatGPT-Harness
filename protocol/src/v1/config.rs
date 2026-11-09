@@ -33,6 +33,61 @@ pub struct AppConfig {
     /// and never part of `RuntimeConfigSnapshot` or authorization truth.
     #[serde(default)]
     pub history: HistoryConfig,
+    /// Runtime search budgets. Optional so existing v3 files keep loading.
+    #[serde(default)]
+    pub search: SearchConfig,
+}
+
+/// Independent wall-clock budgets for the two search tools.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SearchConfig {
+    #[serde(default = "default_search_timeout_seconds")]
+    pub glob_timeout_seconds: u32,
+    #[serde(default = "default_search_timeout_seconds")]
+    pub grep_timeout_seconds: u32,
+}
+
+pub const SEARCH_TIMEOUT_MIN_SECONDS: u32 = 5;
+pub const SEARCH_TIMEOUT_MAX_SECONDS: u32 = 120;
+
+fn default_search_timeout_seconds() -> u32 {
+    30
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            glob_timeout_seconds: 30,
+            grep_timeout_seconds: 30,
+        }
+    }
+}
+
+impl SearchConfig {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !(SEARCH_TIMEOUT_MIN_SECONDS..=SEARCH_TIMEOUT_MAX_SECONDS)
+            .contains(&self.glob_timeout_seconds)
+        {
+            return Err("globTimeoutSeconds must be between 5 and 120");
+        }
+        if !(SEARCH_TIMEOUT_MIN_SECONDS..=SEARCH_TIMEOUT_MAX_SECONDS)
+            .contains(&self.grep_timeout_seconds)
+        {
+            return Err("grepTimeoutSeconds must be between 5 and 120");
+        }
+        Ok(())
+    }
+
+    /// Runtime-side fail-safe for hand-written snapshots. Persistence rejects
+    /// out-of-range values; the Runtime never adopts them silently as valid.
+    pub fn clamped_or_default(&self) -> Self {
+        if self.validate().is_ok() {
+            self.clone()
+        } else {
+            Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -375,6 +430,8 @@ pub struct RuntimeConfigSnapshot {
     pub bash: BashConfig,
     #[serde(default)]
     pub policies: PolicyConfig,
+    #[serde(default)]
+    pub search: SearchConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -387,7 +444,7 @@ pub struct RuntimeLimits {
 
 #[cfg(test)]
 mod tests {
-    use super::{UiConfig, UiLanguage};
+    use super::{SearchConfig, UiConfig, UiLanguage};
 
     #[test]
     fn ui_language_wire_values_are_strict_and_backward_compatible() {
@@ -414,5 +471,53 @@ mod tests {
             serde_json::from_str::<UiConfig>("{}").unwrap(),
             UiConfig::default()
         );
+    }
+
+    #[test]
+    fn search_defaults_load_without_breaking_existing_v3_shape() {
+        let config: super::AppConfig = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 3,
+            "configRevision": "9",
+            "workspace": { "rootPath": "C:/workspace" },
+            "tunnel": {
+                "tunnelId": "tunnel",
+                "autoDetect": true
+            },
+            "security": { "mode": "normal", "developerTestMode": false },
+            "ui": {},
+            "tools": {
+                "readFile": { "enabled": true },
+                "glob": { "enabled": true },
+                "grep": { "enabled": true },
+                "write": { "enabled": true },
+                "edit": { "enabled": true },
+                "bash": { "enabled": false }
+            },
+            "bash": { "autoDetect": true },
+            "policies": {},
+            "desktop": {},
+            "history": {}
+        }))
+        .expect("existing v3 config without search");
+        assert_eq!(config.search, SearchConfig::default());
+        assert_eq!(config.search.glob_timeout_seconds, 30);
+        assert_eq!(config.search.grep_timeout_seconds, 30);
+    }
+
+    #[test]
+    fn search_timeout_bounds_are_enforced() {
+        for (glob, grep, valid) in [
+            (5, 5, true),
+            (120, 120, true),
+            (4, 30, false),
+            (30, 121, false),
+            (0, 0, false),
+        ] {
+            let config = SearchConfig {
+                glob_timeout_seconds: glob,
+                grep_timeout_seconds: grep,
+            };
+            assert_eq!(config.validate().is_ok(), valid);
+        }
     }
 }

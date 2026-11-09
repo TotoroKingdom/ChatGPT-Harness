@@ -240,6 +240,7 @@ impl ToolExecutor for FailingEdit {
         _permit: &ExecutionPermit,
         _guard: &WorkspaceGuard,
         _limit: u32,
+        _search_budgets: crate::tools::search::control::SearchBudgets,
     ) -> Result<Self::Output, ExecutionError> {
         Err(ExecutionError::Edit(self.error.clone()))
     }
@@ -261,6 +262,7 @@ impl ToolExecutor for Spy {
         _permit: &ExecutionPermit,
         _guard: &WorkspaceGuard,
         _limit: u32,
+        _search_budgets: crate::tools::search::control::SearchBudgets,
     ) -> Result<(), ExecutionError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         if self.fail {

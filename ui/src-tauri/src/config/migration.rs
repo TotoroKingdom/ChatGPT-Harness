@@ -23,6 +23,8 @@ pub(super) struct LegacyAppConfigV1 {
     desktop: Option<DesktopConfig>,
     #[serde(default)]
     history: Option<HistoryConfig>,
+    #[serde(default)]
+    search: SearchConfig,
 }
 
 fn shape(value: &Value, allowed: &[&str], required: &[&str]) -> Result<(), ConfigError> {
@@ -86,6 +88,7 @@ pub(super) fn validate_v3_shape(raw: &Value) -> Result<(), ConfigError> {
             "policies",
             "desktop",
             "history",
+            "search",
         ],
         &[
             "schemaVersion",
@@ -122,6 +125,9 @@ pub(super) fn validate_v3_shape(raw: &Value) -> Result<(), ConfigError> {
         &["enabled", "retentionDays", "maxStorageMiB"],
         &["enabled", "retentionDays", "maxStorageMiB"],
     )?;
+    if let Some(search) = raw.get("search") {
+        shape(search, &["globTimeoutSeconds", "grepTimeoutSeconds"], &[])?;
+    }
     Ok(())
 }
 
@@ -144,6 +150,7 @@ pub(super) fn migrate_v1_to_v3(raw: Value) -> Result<AppConfig, ConfigError> {
         bash: legacy.bash,
         desktop: legacy.desktop.unwrap_or_default(),
         history: legacy.history.unwrap_or_default(),
+        search: legacy.search,
     };
     // A pre-M05 Tool surface did not contain grep. Preserve that exposure
     // even when the legacy file omitted the entire tools object.

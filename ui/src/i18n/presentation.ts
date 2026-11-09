@@ -343,6 +343,8 @@ const activityFailureCategoryKeys: Record<ActivityFailureCategory, TranslationKe
   bash_process_failed: "enum.activityFailure.bashProcessFailed",
   grep_timeout: "enum.activityFailure.grepTimeout",
   grep_cancelled: "enum.activityFailure.grepCancelled",
+  glob_timeout: "enum.activityFailure.globTimeout",
+  glob_cancelled: "enum.activityFailure.globCancelled",
 };
 
 export function activityFailureCategoryKey(value: ActivityFailureCategory): TranslationKey {

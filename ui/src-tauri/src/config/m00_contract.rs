@@ -177,6 +177,7 @@ fn production_config_is_v3_and_wire_protocol_remains_v1() {
         tools: config.tools,
         bash: config.bash,
         policies: config.policies,
+        search: config.search,
     };
     let runtime_json = serde_json::to_value(snapshot).unwrap();
     assert!(runtime_json.get("ui").is_none());

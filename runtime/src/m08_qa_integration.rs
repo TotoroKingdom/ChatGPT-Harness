@@ -40,6 +40,7 @@ fn runtime_config(
         tools: ToolConfig::default(),
         bash: BashConfig::default(),
         policies: PolicyConfig::default(),
+        search: harness_control_protocol::SearchConfig::default(),
     };
     let host = RuntimeHostContext {
         host_session_id: Some("m08-real-pipeline-host".into()),

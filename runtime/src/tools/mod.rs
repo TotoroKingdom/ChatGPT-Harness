@@ -7,6 +7,7 @@ mod glob;
 mod grep;
 mod read_file;
 mod registry;
+pub(crate) mod search;
 mod write;
 
 #[cfg(test)]
@@ -19,7 +20,8 @@ pub use edit::{EditError, EditOutput, EditRequest};
 pub use effective::{EffectiveTool, EffectiveToolCatalog, ToolAvailability};
 pub use glob::{
     GlobDiagnostic, GlobDiagnosticCode, GlobError, GlobMatch, GlobMatchKind, GlobOutput,
-    GlobRequest, MAX_GLOB_DIAGNOSTICS, MAX_GLOB_RESULTS,
+    GlobRequest, GlobTruncationReason, MAX_GLOB_DIAGNOSTICS, MAX_GLOB_DISCOVERED_ENTRIES,
+    MAX_GLOB_RESULTS,
 };
 pub use grep::{
     GrepDiagnostic, GrepDiagnosticCode, GrepError, GrepMatch, GrepOutput, GrepRequest,
@@ -34,9 +36,10 @@ pub use registry::{ToolCapability, ToolRegistry};
 pub use write::{WriteError, WriteOutput, WriteRequest};
 
 pub(crate) use edit::execute_edit;
-pub(crate) use glob::{execute_glob, validate_glob_pattern};
+pub(crate) use glob::{execute_glob, execute_glob_with_control, validate_glob_pattern};
 pub(crate) use grep::{
-    execute_grep, execute_grep_cancellable, validate_grep_request, validate_grep_scope,
+    execute_grep, execute_grep_cancellable, execute_grep_with_control, validate_grep_request,
+    validate_grep_scope,
 };
 pub(crate) use read_file::execute_read_file;
 pub(crate) use write::execute_write;

@@ -86,6 +86,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     },
     desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
     history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
+    search: { globTimeoutSeconds: 30, grepTimeoutSeconds: 30 },
     ...overrides,
   };
 }

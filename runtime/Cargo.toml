@@ -13,6 +13,10 @@ harness-control-protocol = { path = "../protocol" }
 chatgpt-harness-evidence-store = { path = "evidence-store" }
 chrono = { version = "0.4", features = ["clock"] }
 globset = "0.4"
+grep-matcher = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
 regex = "1.13"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 jsonschema = "0.32"

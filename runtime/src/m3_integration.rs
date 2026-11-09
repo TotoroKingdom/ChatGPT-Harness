@@ -80,6 +80,7 @@ fn base_snapshot(fixture: &Fixture) -> RuntimeConfigSnapshot {
         tools: ToolConfig::default(),
         bash: harness_control_protocol::BashConfig::default(),
         policies: PolicyConfig::default(),
+        search: harness_control_protocol::SearchConfig::default(),
     }
 }
 

@@ -5,7 +5,7 @@ use super::profile::EvalProfile;
 use super::{EvalError, EvalResult};
 use harness_control_protocol::{
     BashConfig, DecimalU64, PolicyConfig, PolicyDecision, PolicyMatcherConfig,
-    RuntimeConfigSnapshot, RuntimeLimits, SecurityConfig, SecurityMode, ToolConfig,
+    RuntimeConfigSnapshot, RuntimeLimits, SearchConfig, SecurityConfig, SecurityMode, ToolConfig,
     ToolEnabledConfig, ToolPolicyDefaults, UserPolicyRuleConfig, WorkspaceConfig,
 };
 use serde_json::{json, Value};
@@ -439,6 +439,7 @@ pub(crate) fn eval_config_with_profile(
             },
             user_rules,
         },
+        search: SearchConfig::default(),
     })
 }
 
@@ -494,6 +495,7 @@ pub(crate) fn base_policy_config_hash() -> EvalResult<String> {
             },
             user_rules: Vec::new(),
         },
+        search: SearchConfig::default(),
     };
     policy_profile_hash(&config)
 }

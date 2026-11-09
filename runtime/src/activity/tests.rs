@@ -285,6 +285,7 @@ impl Fixture {
             tools: ToolConfig::default(),
             bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
+            search: harness_control_protocol::SearchConfig::default(),
         }
     }
 }

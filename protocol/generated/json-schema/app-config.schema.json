@@ -143,6 +143,25 @@
         }
       ]
     },
+    "SearchConfig": {
+      "additionalProperties": false,
+      "description": "Independent wall-clock budgets for the two search tools.",
+      "properties": {
+        "globTimeoutSeconds": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "grepTimeoutSeconds": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "SecretReference": {
       "additionalProperties": false,
       "description": "An opaque SecretStore lookup reference; it never contains a raw secret.",
@@ -422,6 +441,14 @@
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "search": {
+      "$ref": "#/$defs/SearchConfig",
+      "default": {
+        "globTimeoutSeconds": 30,
+        "grepTimeoutSeconds": 30
+      },
+      "description": "Runtime search budgets. Optional so existing v3 files keep loading."
     },
     "security": {
       "$ref": "#/$defs/SecurityConfig"

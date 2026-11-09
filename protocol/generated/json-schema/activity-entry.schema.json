@@ -33,7 +33,9 @@
         "bash_cancelled",
         "bash_process_failed",
         "grep_timeout",
-        "grep_cancelled"
+        "grep_cancelled",
+        "glob_timeout",
+        "glob_cancelled"
       ],
       "type": "string"
     },

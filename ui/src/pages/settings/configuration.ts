@@ -8,6 +8,7 @@ export const initialConfig: AppConfig = {
   bash: { autoDetect: true }, policies: { toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
   desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
   history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
+  search: { globTimeoutSeconds: 30, grepTimeoutSeconds: 30 },
 };
 export type ProxyValidationKey = "validation.settings.proxyUrl" | "validation.settings.proxyProtocol" | "validation.settings.proxyHost" | "validation.settings.proxyCredentials" | "validation.settings.proxyPath";
 export function validateControlPlaneProxy(value: string): ProxyValidationKey | "" {

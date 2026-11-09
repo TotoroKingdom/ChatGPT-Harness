@@ -166,7 +166,7 @@ impl McpService {
     ) -> Result<CallToolResult, McpProtocolError> {
         match name {
             READ_FILE => Ok(read_file::execute_async(&self.context, arguments).await),
-            GLOB => Ok(glob::execute_async(&self.context, arguments).await),
+            GLOB => Ok(glob::execute_async(&self.context, arguments, request_cancel).await),
             GREP => Ok(grep::execute_async(&self.context, arguments, request_cancel).await),
             WRITE => Ok(write::execute_async(&self.context, arguments).await),
             EDIT => Ok(edit::execute_async(&self.context, arguments).await),
@@ -465,6 +465,7 @@ mod tests {
             tools: ToolConfig::default(),
             bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
+            search: harness_control_protocol::SearchConfig::default(),
         }
     }
 

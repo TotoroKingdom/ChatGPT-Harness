@@ -33,6 +33,7 @@ pub fn generate_typescript(root: &Path) -> io::Result<()> {
         AppConfig,
         DesktopConfig,
         HistoryConfig,
+        SearchConfig,
         ToolPolicyDefaults,
         PolicyConfig,
         ToolEnabledConfig,

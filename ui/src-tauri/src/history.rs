@@ -426,6 +426,7 @@ mod tests {
             policies: Default::default(),
             desktop: Default::default(),
             history,
+            search: Default::default(),
         }
     }
 

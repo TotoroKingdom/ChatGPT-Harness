@@ -226,6 +226,15 @@ impl RuntimeCore {
             &bash_executable,
         ));
         let policy_engine = PolicyEngine::compile(&config.policies, &tool_registry);
+        let search = config.search.clamped_or_default();
+        let search_budgets = crate::tools::search::control::SearchBudgets {
+            glob: crate::tools::search::control::SearchBudget::from_seconds(
+                search.glob_timeout_seconds,
+            ),
+            grep: crate::tools::search::control::SearchBudget::from_seconds(
+                search.grep_timeout_seconds,
+            ),
+        };
         let activity = Arc::new(ActivityStore::with_previous_entries(
             &self.activity,
             Arc::clone(&tool_registry),
@@ -291,6 +300,7 @@ impl RuntimeCore {
         .with_bash_runtime(Arc::clone(&bash_runtime))
         .with_bash_cancellation_observer(bash_cancellation_observer)
         .with_counters(Arc::clone(&self.request_counters))
+        .with_search_budgets(search_budgets)
         .with_approval_state(Arc::clone(&approval_manager), Arc::clone(&session_grants))
         .with_audit_sink(audit_sink);
         let pipeline = pipeline.with_activity_event_sender(activity_event_sender);
@@ -702,6 +712,7 @@ mod tests {
             tools: ToolConfig::default(),
             bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
+            search: harness_control_protocol::SearchConfig::default(),
         }
     }
 

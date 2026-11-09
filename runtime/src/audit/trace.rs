@@ -624,12 +624,16 @@ fn project_event(trace: &mut ActiveTrace, event: &AuditEvent) {
 
 fn execution_status(event: &AuditEvent) -> TraceSpanStatus {
     match event.failure_category {
-        Some(AuditFailureCategory::BashTimeout | AuditFailureCategory::GrepTimeout) => {
-            TraceSpanStatus::TimedOut
-        }
-        Some(AuditFailureCategory::BashCancelled | AuditFailureCategory::GrepCancelled) => {
-            TraceSpanStatus::Cancelled
-        }
+        Some(
+            AuditFailureCategory::BashTimeout
+            | AuditFailureCategory::GrepTimeout
+            | AuditFailureCategory::GlobTimeout,
+        ) => TraceSpanStatus::TimedOut,
+        Some(
+            AuditFailureCategory::BashCancelled
+            | AuditFailureCategory::GrepCancelled
+            | AuditFailureCategory::GlobCancelled,
+        ) => TraceSpanStatus::Cancelled,
         _ if event.event_type == AuditEventType::ExecutionCompleted => TraceSpanStatus::Success,
         _ => TraceSpanStatus::Failed,
     }
@@ -695,6 +699,8 @@ fn failure_category_to_wire(
         AuditFailureCategory::BashProcessFailed => W::BashProcessFailed,
         AuditFailureCategory::GrepTimeout => W::GrepTimeout,
         AuditFailureCategory::GrepCancelled => W::GrepCancelled,
+        AuditFailureCategory::GlobTimeout => W::GlobTimeout,
+        AuditFailureCategory::GlobCancelled => W::GlobCancelled,
     }
 }
 

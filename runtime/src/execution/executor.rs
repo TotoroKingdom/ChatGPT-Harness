@@ -4,8 +4,9 @@ use crate::bash::{
     BashRequest as RuntimeBashRequest, BashRuntime,
 };
 use crate::policy::PolicyContext;
+use crate::tools::search::control::SearchBudgets;
 use crate::tools::{
-    execute_edit, execute_glob, execute_grep, execute_grep_cancellable, execute_read_file,
+    execute_edit, execute_glob_with_control, execute_grep_with_control, execute_read_file,
     execute_write, validate_glob_pattern, validate_grep_request, validate_grep_scope, EditError,
     EditOutput, EditRequest, GlobOutput, GlobRequest, GrepError, GrepOutput, GrepRequest,
     ReadFileOutput, ReadFileRequest, WriteError, WriteOutput, WriteRequest,
@@ -89,6 +90,7 @@ pub(crate) trait ToolExecutor {
         permit: &ExecutionPermit,
         guard: &WorkspaceGuard,
         max_read_bytes: u32,
+        search_budgets: SearchBudgets,
     ) -> Result<Self::Output, ExecutionError>;
 
     fn arguments_evidence(
@@ -121,6 +123,10 @@ pub(crate) trait ToolExecutor {
 
     fn record_output(&self, _context: &mut super::RequestContext, _output: &Self::Output) {}
 
+    /// Records bounded result evidence when a timeout returns partial output.
+    fn record_partial_output(&self, _context: &mut super::RequestContext, _error: &ExecutionError) {
+    }
+
     /// File tools retain their existing synchronous implementation.  Bash
     /// overrides this seam with a cancellation-aware async process wait.
     fn execute_async<'a>(
@@ -128,6 +134,7 @@ pub(crate) trait ToolExecutor {
         permit: &'a ExecutionPermit,
         guard: &'a WorkspaceGuard,
         max_read_bytes: u32,
+        _search_budgets: SearchBudgets,
         _bash_runtime: Option<Arc<BashRuntime>>,
         _cancel: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<Self::Output, ExecutionError>> + Send + 'a>>
@@ -135,7 +142,7 @@ pub(crate) trait ToolExecutor {
         Self: Sync,
         Self::Output: Send + 'a,
     {
-        Box::pin(async move { self.execute(permit, guard, max_read_bytes) })
+        Box::pin(async move { self.execute(permit, guard, max_read_bytes, _search_budgets) })
     }
 }
 
@@ -190,6 +197,7 @@ impl ToolExecutor for ReadFileRequest {
         permit: &ExecutionPermit,
         guard: &WorkspaceGuard,
         max_read_bytes: u32,
+        _search_budgets: SearchBudgets,
     ) -> Result<Self::Output, ExecutionError> {
         execute_read_file(permit, guard, max_read_bytes, self).map_err(ExecutionError::ReadFile)
     }
@@ -245,16 +253,57 @@ impl ToolExecutor for GlobRequest {
             match_count: output.matches.len() as u64,
         });
     }
+
+    fn record_partial_output(&self, context: &mut super::RequestContext, error: &ExecutionError) {
+        if let ExecutionError::Glob(crate::tools::GlobError::SearchTimeout {
+            partial: Some(output),
+        }) = error
+        {
+            self.record_output(context, output);
+        }
+    }
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::Glob(crate::tools::GlobError::Workspace(error))
     }
     fn execute(
         &self,
-        permit: &ExecutionPermit,
+        _permit: &ExecutionPermit,
         guard: &WorkspaceGuard,
         _max_read_bytes: u32,
+        search_budgets: SearchBudgets,
     ) -> Result<Self::Output, ExecutionError> {
-        execute_glob(permit, guard, self).map_err(ExecutionError::Glob)
+        execute_glob_with_control(guard, self, search_budgets.glob, CancellationToken::new())
+            .map_err(ExecutionError::Glob)
+    }
+
+    fn execute_async<'a>(
+        &'a self,
+        _permit: &'a ExecutionPermit,
+        guard: &'a WorkspaceGuard,
+        _max_read_bytes: u32,
+        search_budgets: SearchBudgets,
+        _bash_runtime: Option<Arc<BashRuntime>>,
+        cancel: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Output, ExecutionError>> + Send + 'a>>
+    where
+        Self: Sync,
+        Self::Output: Send + 'a,
+    {
+        let request = self.clone();
+        let guard = guard.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                execute_glob_with_control(&guard, &request, search_budgets.glob, cancel)
+                    .map_err(ExecutionError::Glob)
+            })
+            .await
+            .map_err(|_| {
+                ExecutionError::Glob(crate::tools::GlobError::IoFailure {
+                    path: ".".into(),
+                    kind: std::io::ErrorKind::Other,
+                })
+            })?
+        })
     }
 }
 
@@ -327,17 +376,28 @@ impl ToolExecutor for GrepRequest {
         });
     }
 
+    fn record_partial_output(&self, context: &mut super::RequestContext, error: &ExecutionError) {
+        if let ExecutionError::Grep(GrepError::SearchTimeout {
+            partial: Some(output),
+        }) = error
+        {
+            self.record_output(context, output);
+        }
+    }
+
     fn workspace_error(error: WorkspaceError) -> ExecutionError {
         ExecutionError::Grep(GrepError::Workspace(error))
     }
 
     fn execute(
         &self,
-        permit: &ExecutionPermit,
+        _permit: &ExecutionPermit,
         guard: &WorkspaceGuard,
         _max_read_bytes: u32,
+        search_budgets: SearchBudgets,
     ) -> Result<Self::Output, ExecutionError> {
-        execute_grep(permit, guard, self).map_err(ExecutionError::Grep)
+        execute_grep_with_control(guard, self, search_budgets.grep, CancellationToken::new())
+            .map_err(ExecutionError::Grep)
     }
 
     fn execute_async<'a>(
@@ -345,6 +405,7 @@ impl ToolExecutor for GrepRequest {
         _permit: &'a ExecutionPermit,
         guard: &'a WorkspaceGuard,
         _max_read_bytes: u32,
+        search_budgets: SearchBudgets,
         _bash_runtime: Option<Arc<BashRuntime>>,
         cancel: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<Self::Output, ExecutionError>> + Send + 'a>>
@@ -356,7 +417,8 @@ impl ToolExecutor for GrepRequest {
         let guard = guard.clone();
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
-                execute_grep_cancellable(&guard, &request, cancel).map_err(ExecutionError::Grep)
+                execute_grep_with_control(&guard, &request, search_budgets.grep, cancel)
+                    .map_err(ExecutionError::Grep)
             })
             .await
             .map_err(|_| {
@@ -427,6 +489,7 @@ impl ToolExecutor for WriteRequest {
         permit: &ExecutionPermit,
         guard: &WorkspaceGuard,
         _max_read_bytes: u32,
+        _search_budgets: SearchBudgets,
     ) -> Result<Self::Output, ExecutionError> {
         execute_write(permit, guard, self).map_err(ExecutionError::Write)
     }
@@ -493,6 +556,7 @@ impl ToolExecutor for EditRequest {
         permit: &ExecutionPermit,
         guard: &WorkspaceGuard,
         _max_read_bytes: u32,
+        _search_budgets: SearchBudgets,
     ) -> Result<Self::Output, ExecutionError> {
         execute_edit(permit, guard, self).map_err(ExecutionError::Edit)
     }
@@ -602,6 +666,7 @@ impl ToolExecutor for BashToolRequest {
         _permit: &ExecutionPermit,
         _guard: &WorkspaceGuard,
         _max_read_bytes: u32,
+        _search_budgets: SearchBudgets,
     ) -> Result<Self::Output, ExecutionError> {
         Err(ExecutionError::BashRuntime(
             crate::bash::BashRuntimeError::ProcessFailed,
@@ -620,6 +685,7 @@ impl ToolExecutor for BashToolRequest {
         permit: &'a ExecutionPermit,
         _guard: &'a WorkspaceGuard,
         _max_read_bytes: u32,
+        _search_budgets: SearchBudgets,
         bash_runtime: Option<Arc<BashRuntime>>,
         cancel: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<Self::Output, ExecutionError>> + Send + 'a>>

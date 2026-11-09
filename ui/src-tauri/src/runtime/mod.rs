@@ -1092,6 +1092,7 @@ fn runtime_config_snapshot(config: &AppConfig) -> RuntimeConfigSnapshot {
         tools: config.tools.clone(),
         bash: config.bash.clone(),
         policies: config.policies.clone(),
+        search: config.search.clone(),
     }
 }
 
@@ -1475,6 +1476,7 @@ pub(crate) mod tests {
             policies: harness_control_protocol::PolicyConfig::default(),
             desktop: harness_control_protocol::DesktopConfig::default(),
             history: harness_control_protocol::HistoryConfig::default(),
+            search: harness_control_protocol::SearchConfig::default(),
         }
     }
 

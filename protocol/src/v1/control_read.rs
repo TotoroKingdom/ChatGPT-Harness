@@ -374,6 +374,8 @@ pub enum ActivityFailureCategory {
     BashProcessFailed,
     GrepTimeout,
     GrepCancelled,
+    GlobTimeout,
+    GlobCancelled,
 }
 
 /// A safe display projection, not an audit record or a security decision.

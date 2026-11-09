@@ -209,6 +209,8 @@
       "bashProcessFailed": "Bash 进程失败",
       "grepTimeout": "grep 搜索超时",
       "grepCancelled": "grep 搜索已取消",
+      "globTimeout": "glob 搜索超时",
+      "globCancelled": "glob 搜索已取消",
       "approvalDenied": "审批已拒绝",
       "approvalExpired": "审批已过期",
       "approvalCancelled": "审批已取消"
@@ -615,6 +617,17 @@
   "settings": {
     "appearance": "外观",
     "index": "设置导航",
+    "search": {
+      "title": "搜索工具",
+      "globTimeout": "Glob 超时时间（秒）",
+      "grepTimeout": "Grep 超时时间（秒）",
+      "range": "5–120 秒",
+      "rangeError": "请输入 5 到 120 之间的整数。",
+      "restartHint": "保存后的搜索超时将在重新启动 Harness 后生效，不会中断正在执行的工具调用。",
+      "save": "保存搜索设置",
+      "saved": "搜索设置已保存，重新启动 Harness 后生效。",
+      "saveFailed": "无法保存搜索设置。"
+    },
     "groups": {
       "preferences": "偏好与通知",
       "preferencesHelp": "语言、外观和桌面提醒。",

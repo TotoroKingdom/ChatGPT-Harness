@@ -101,8 +101,8 @@ MCP arguments
 | Tool | Capability | 关键行为 |
 | --- | --- | --- |
 | read_file | WorkspaceRead | bounded workspace file read |
-| glob | WorkspaceRead | workspace path matching |
-| grep | WorkspaceRead | bounded workspace text / regex search |
+| glob | WorkspaceRead | workspace path matching；默认 Git ignore、可配置 5–120s 超时、可取消 |
+| grep | WorkspaceRead | bounded workspace text / regex search；默认 Git ignore、可配置 5–120s 超时、可取消 |
 | write | WorkspaceWrite | atomic UTF-8 create/overwrite |
 | edit | WorkspaceWrite | unique exact replacement + atomic mutation |
 | bash | DeveloperShell | controlled Git Bash async execution |

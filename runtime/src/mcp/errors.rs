@@ -165,7 +165,7 @@ pub(crate) fn grep_error(error: &GrepError) -> CallToolResult {
         GrepError::InvalidScope { .. } => McpErrorCategory::InvalidScope,
         GrepError::Workspace(error) => workspace_error_category(error),
         GrepError::IoFailure { .. } => McpErrorCategory::IoFailure,
-        GrepError::SearchTimeout => McpErrorCategory::SearchTimeout,
+        GrepError::SearchTimeout { .. } => McpErrorCategory::SearchTimeout,
         GrepError::Cancelled => McpErrorCategory::SearchCancelled,
     };
     error_result(category)
@@ -208,6 +208,8 @@ pub(crate) fn glob_error(error: &GlobError) -> CallToolResult {
         GlobError::Workspace(error) => workspace_error_category(error),
         GlobError::TargetNotDirectory { .. } => McpErrorCategory::TargetNotDirectory,
         GlobError::IoFailure { .. } => McpErrorCategory::IoFailure,
+        GlobError::SearchTimeout { .. } => McpErrorCategory::SearchTimeout,
+        GlobError::Cancelled => McpErrorCategory::SearchCancelled,
     };
     error_result(category)
 }

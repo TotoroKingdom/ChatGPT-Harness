@@ -279,6 +279,7 @@ fn runtime_config(workspace: &Path, policy: PolicyDecision) -> RuntimeConfigSnap
         tools: ToolConfig::default(),
         bash: harness_control_protocol::BashConfig::default(),
         policies,
+        search: harness_control_protocol::SearchConfig::default(),
     }
 }
 

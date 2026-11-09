@@ -59,18 +59,21 @@ bash
 | Outside Workspace rejection | 已实现 | no side effect |
 | Target changed detection | 已实现 | fail closed |
 
-## 4. grep
+## 4. glob / grep
 
 | Capability | 当前实现 | 边界 |
 | --- | --- | --- |
 | Workspace text search | 已实现 | 只扫描 active Workspace |
+| Traversal | 已实现 | `ignore::WalkBuilder`，默认遵循 `.gitignore`、嵌套 `.gitignore`、`.ignore` 与 Git exclude，并在进入子目录前剪枝 |
+| Explicit ignored paths | 已实现 | `basePath`、`scope`、固定目录前缀和 include 固定前缀可覆盖 Git ignore；普通宽泛 pattern 不覆盖 |
 | Literal / regex mode | 已实现 | regex 使用 Rust regex 语义 |
 | Scope | 已实现 | Workspace-relative directory，默认 `.` |
 | Include / exclude | 已实现 | glob 过滤，exclude 优先 |
 | Result limit | 已实现 | 默认 100，最大 1000 条匹配行 |
 | Output limit | 已实现 | 默认 64 KiB，最大 256 KiB |
 | Preview safety | 已实现 | 有界 preview，不返回完整文件内容 |
-| Cancellation | 已实现 | MCP cancellation 可中止扫描 |
+| Timeout | 已实现 | glob / grep 独立配置 5–120 秒，默认 30 秒；超时返回部分结果并标记 `truncated` |
+| Cancellation | 已实现 | MCP cancellation 传入阻塞扫描线程；取消后不继续后台扫描 |
 | Evidence | 已实现 | 只持久化 query 字节数、scope、过滤数量等标量 |
 
 ## 5. Bash
@@ -180,7 +183,7 @@ Bash cwd 固定在 active Workspace，但它不是 OS 级 filesystem sandbox。
 | Policies | 已实现 |
 | Approvals | 已实现 |
 | Activity | 已实现，含 Live / History / Metrics 三个视图 |
-| Settings | 已实现，含通知、自动启动、History、诊断与重置 |
+| Settings | 已实现，含通知、自动启动、History、搜索工具超时、诊断与重置 |
 | First-run flow | 已实现 |
 | English | 已实现 |
 | 简体中文 | 已实现 |
@@ -221,6 +224,14 @@ history:
   enabled: true
   retentionDays: 30
   maxStorageMiB: 256
+```
+
+搜索工具默认值：
+
+```text
+search:
+  globTimeoutSeconds: 30
+  grepTimeoutSeconds: 30
 ```
 
 因此 Bash 即使实现存在，也不会在默认 Normal 模式 + disabled 配置下暴露。升级配置中的 `grep` 默认关闭，只有新配置默认启用。

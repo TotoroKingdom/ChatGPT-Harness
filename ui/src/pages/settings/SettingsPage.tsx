@@ -16,6 +16,7 @@ import type { DesktopPreferencesPatch } from "@/services/harness/client";
 import { validateControlPlaneProxy } from "./configuration";
 import { normalizeThemePreference, type ThemePreference } from "@/theme/theme";
 import { HistorySettingsSection } from "./HistorySettingsSection";
+import { SearchSettingsSection } from "./SearchSettingsSection";
 
 export { validateControlPlaneProxy } from "./configuration";
 
@@ -502,6 +503,8 @@ export function SettingsPage({ initialSection, onNavigate }: { initialSection?: 
       </Section>)}
 
       {section("history", <HistorySettingsSection />)}
+
+      {section("search", <SearchSettingsSection />)}
 
           </section>
 

@@ -1,7 +1,9 @@
 use crate::execution::ExecutionError;
 use crate::mcp::context::McpExecutionContext;
 use crate::mcp::errors::execution_error;
-use crate::tools::{GrepRequest, DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_RESULTS};
+use crate::tools::{
+    GrepError, GrepOutput, GrepRequest, DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_RESULTS,
+};
 use harness_control_protocol::GrepMode;
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::schemars;
@@ -112,49 +114,24 @@ fn finish(
     let request_id = report.context.request_id;
     match report.result {
         Ok(output) => {
-            let matches = output
-                .matches
-                .into_iter()
-                .map(|item| {
-                    json!({
-                        "path": item.path,
-                        "lineNumber": item.line_number,
-                        "preview": item.preview,
-                        "previewStartByte": item.preview_start_byte,
-                        "matchStartByte": item.match_start_byte,
-                        "matchEndByte": item.match_end_byte,
-                        "previewTruncated": item.preview_truncated,
-                    })
-                })
-                .collect::<Vec<_>>();
-            let truncation_reasons = output
-                .truncation_reasons
-                .into_iter()
-                .map(|reason| reason.as_str())
-                .collect::<Vec<_>>();
-            let diagnostics = output
-                .diagnostics
-                .into_iter()
-                .map(|item| {
-                    json!({
-                        "path": item.path,
-                        "code": item.code.as_str(),
-                    })
-                })
-                .collect::<Vec<_>>();
-            let mut result = CallToolResult::structured(json!({
-                "matches": matches,
-                "scannedFiles": output.scanned_files,
-                "scannedBytes": output.scanned_bytes,
-                "skippedFiles": output.skipped_files,
-                "truncated": output.truncated,
-                "truncationReasons": truncation_reasons,
-                "diagnostics": diagnostics,
-                "diagnosticsTruncated": output.diagnostics_truncated,
-            }));
+            let mut result = CallToolResult::structured(output_json(&output));
             result
                 .content
                 .push(ContentBlock::text("Searched Workspace text."));
+            context.attach_correlation(&mut result, request_id);
+            result
+        }
+        Err(crate::execution::ExecutionError::Grep(GrepError::SearchTimeout {
+            partial: Some(output),
+        })) => {
+            let mut value = output_json(&output);
+            value["code"] = json!("SEARCH_TIMEOUT");
+            value["message"] = json!("Search exceeded the Runtime wall-clock limit.");
+            value["truncated"] = json!(true);
+            let mut result = CallToolResult::structured_error(value);
+            result.content.push(ContentBlock::text(
+                "Search timed out; returned matches are incomplete.",
+            ));
             context.attach_correlation(&mut result, request_id);
             result
         }
@@ -164,4 +141,47 @@ fn finish(
             result
         }
     }
+}
+
+fn output_json(output: &GrepOutput) -> Value {
+    let matches = output
+        .matches
+        .iter()
+        .map(|item| {
+            json!({
+                "path": &item.path,
+                "lineNumber": item.line_number,
+                "preview": &item.preview,
+                "previewStartByte": item.preview_start_byte,
+                "matchStartByte": item.match_start_byte,
+                "matchEndByte": item.match_end_byte,
+                "previewTruncated": item.preview_truncated,
+            })
+        })
+        .collect::<Vec<_>>();
+    let truncation_reasons = output
+        .truncation_reasons
+        .iter()
+        .map(|reason| reason.as_str())
+        .collect::<Vec<_>>();
+    let diagnostics = output
+        .diagnostics
+        .iter()
+        .map(|item| {
+            json!({
+                "path": &item.path,
+                "code": item.code.as_str(),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "matches": matches,
+        "scannedFiles": output.scanned_files,
+        "scannedBytes": output.scanned_bytes,
+        "skippedFiles": output.skipped_files,
+        "truncated": output.truncated,
+        "truncationReasons": truncation_reasons,
+        "diagnostics": diagnostics,
+        "diagnosticsTruncated": output.diagnostics_truncated,
+    })
 }

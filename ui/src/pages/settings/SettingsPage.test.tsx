@@ -24,6 +24,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     policies: { toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules: [] },
     desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
     history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
+    search: { globTimeoutSeconds: 30, grepTimeoutSeconds: 30 },
     ...overrides,
   };
 }
@@ -125,7 +126,7 @@ describe("M8 Settings section/list workflow", () => {
 
   it("renders the six settings sections without a page-level Save action", () => {
     render(<SettingsPage />);
-    ["general", "notifications", "workspace", "connection", "security", "advanced", "danger"].forEach((name) => {
+    ["general", "notifications", "workspace", "connection", "security", "history", "search", "advanced", "danger"].forEach((name) => {
       expect(document.getElementById(`settings-section-${name}`)).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Save Changes" })).not.toBeInTheDocument();
@@ -172,6 +173,28 @@ describe("M8 Settings section/list workflow", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clear History" }));
     await waitFor(() => expect(historyClear).toHaveBeenCalledOnce());
     expect(screen.getByText("Cleared 2 requests, 5 events and 1 approvals.")).toBeInTheDocument();
+  });
+
+  it("validates and saves generation-effective search timeouts", async () => {
+    const mutateConfig = vi.fn().mockImplementation(async (intent: (latest: AppConfig) => AppConfig) => {
+      intent(state.context.config);
+      return { ok: true };
+    });
+    state.context = makeContext({ mutateConfig });
+    render(<SettingsPage />);
+    expect(document.getElementById("settings-section-search")).toBeInTheDocument();
+    const glob = screen.getByRole("spinbutton", { name: "Glob timeout (seconds)" });
+    const grep = screen.getByRole("spinbutton", { name: "Grep timeout (seconds)" });
+    fireEvent.change(glob, { target: { value: "4" } });
+    expect(screen.getByText("Enter a whole number between 5 and 120.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Search settings" })).toBeDisabled();
+    fireEvent.change(glob, { target: { value: "45" } });
+    fireEvent.change(grep, { target: { value: "60" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Search settings" }));
+    await waitFor(() => expect(mutateConfig).toHaveBeenCalledOnce());
+    const next = mutateConfig.mock.calls[0][0](state.context.config);
+    expect(next.search).toEqual({ globTimeoutSeconds: 45, grepTimeoutSeconds: 60 });
+    expect(screen.getByText("Search settings saved. Restart Harness to apply them.")).toBeInTheDocument();
   });
 
   it("saves approval and connection notification toggles independently", async () => {

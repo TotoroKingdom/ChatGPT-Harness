@@ -25,9 +25,14 @@ desktop: DesktopConfig,
  * Local History persistence preferences. Changes are generation-effective
  * and never part of `RuntimeConfigSnapshot` or authorization truth.
  */
-history: HistoryConfig, };
+history: HistoryConfig,
+/**
+ * Runtime search budgets. Optional so existing v3 files keep loading.
+ */
+search: SearchConfig, };
 export type DesktopConfig = { approvalNotifications: boolean, connectionNotifications: boolean, backgroundNoticeAcknowledged: boolean, autoStartHarnessOnAppLaunch: boolean, };
 export type HistoryConfig = { enabled: boolean, retentionDays: number, maxStorageMiB: number, };
+export type SearchConfig = { globTimeoutSeconds: number, grepTimeoutSeconds: number, };
 export type ToolPolicyDefaults = { readFile: PolicyDecision, glob: PolicyDecision, grep: PolicyDecision, write: PolicyDecision, edit: PolicyDecision, bash: PolicyDecision, };
 export type PolicyConfig = { toolDefaults: ToolPolicyDefaults, userRules: Array<UserPolicyRuleConfig>, };
 export type ToolEnabledConfig = { enabled: boolean, };
@@ -42,7 +47,7 @@ export type UiLanguage = "en" | "zh-CN";
 export type UiConfig = { theme?: string, language?: UiLanguage, };
 export type StartEligibilityStatus = "setup_required" | "configuration_invalid" | "runtime_distribution_invalid" | "tunnel_id_required" | "api_key_required" | "tunnel_distribution_invalid" | "ready_to_start" | "runtime_already_running" | "harness_already_running" | "lifecycle_conflict";
 export type StartEligibility = { status: StartEligibilityStatus, canStart: boolean, message: string, };
-export type RuntimeConfigSnapshot = { configRevision: string, workspace: WorkspaceConfig, security: SecurityConfig, runtimeLimits: RuntimeLimits, tools: ToolConfig, bash: BashConfig, policies: PolicyConfig, };
+export type RuntimeConfigSnapshot = { configRevision: string, workspace: WorkspaceConfig, security: SecurityConfig, runtimeLimits: RuntimeLimits, tools: ToolConfig, bash: BashConfig, policies: PolicyConfig, search: SearchConfig, };
 export type RuntimeLimits = { maxConcurrentRequests: number, maxActivityEvents: number, maxReadBytes: number, };
 export type ClientInfo = { name: string, title: string, version: string, };
 export type ServerInfo = { name: string, title: string, version: string, };
@@ -87,7 +92,7 @@ export type AuditEventType = "request_received" | "workspace_validated" | "polic
 export type AuditLifecycleState = "received" | "validating" | "workspace_validating" | "policy_evaluating" | "denied" | "awaiting_approval" | "executing" | "completed" | "failed";
 export type AuditOutcome = "in_progress" | "success" | "failed" | "denied" | "approval_required";
 export type ActivityCategory = "request" | "workspace" | "policy" | "execution" | "approval";
-export type ActivityFailureCategory = "approval_denied" | "approval_expired" | "approval_cancelled" | "tool_disabled" | "target_changed" | "atomic_failure" | "io_failure" | "workspace_violation" | "invalid_arguments" | "execution_failed" | "bash_unavailable" | "bash_invalid_command" | "bash_command_too_long" | "bash_timeout" | "bash_output_limit" | "bash_concurrency_limit" | "bash_spawn_failed" | "bash_cancelled" | "bash_process_failed" | "grep_timeout" | "grep_cancelled";
+export type ActivityFailureCategory = "approval_denied" | "approval_expired" | "approval_cancelled" | "tool_disabled" | "target_changed" | "atomic_failure" | "io_failure" | "workspace_violation" | "invalid_arguments" | "execution_failed" | "bash_unavailable" | "bash_invalid_command" | "bash_command_too_long" | "bash_timeout" | "bash_output_limit" | "bash_concurrency_limit" | "bash_spawn_failed" | "bash_cancelled" | "bash_process_failed" | "grep_timeout" | "grep_cancelled" | "glob_timeout" | "glob_cancelled";
 export type BashActivityEvidence = { mode: SecurityMode, modeEligible: boolean, capability: ToolCapability, cwd: BashWorkingDirectory, commandPreview?: string | null, classification?: BashClassification | null, riskFlags?: Array<BashRiskFlag>, approvalRequestId?: string | null, sessionGrantHit: boolean, exitCode?: number | null, durationMs?: number, };
 export type ToolCapability = "workspace_read" | "workspace_write" | "developer_shell";
 export type ActivityEntry = { eventId: string, requestId: string,

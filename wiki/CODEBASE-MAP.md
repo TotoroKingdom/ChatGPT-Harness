@@ -79,6 +79,7 @@ unavailable_disabled
 - `runtime/src/tools/read_file.rs`
 - `runtime/src/tools/glob.rs`
 - `runtime/src/tools/grep.rs`
+- `runtime/src/tools/search/{walker,filters,control}.rs`
 - `runtime/src/tools/write.rs`
 - `runtime/src/tools/edit.rs`
 - `runtime/src/tools/atomic_file.rs`

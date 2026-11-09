@@ -217,6 +217,9 @@ fn handle_request<W: Write>(
                 )?;
                 return Ok(false);
             }
+            if let Err(message) = params.runtime_config.search.validate() {
+                return write_invalid_params(output, id, message.into());
+            }
             if let Err(error) = core.initialize_with_host_capabilities(
                 params.runtime_config,
                 params.host_context,
@@ -725,6 +728,7 @@ mod tests {
             tools: ToolConfig::default(),
             bash: harness_control_protocol::BashConfig::default(),
             policies: harness_control_protocol::PolicyConfig::default(),
+            search: harness_control_protocol::SearchConfig::default(),
         }
     }
 

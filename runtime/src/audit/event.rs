@@ -82,6 +82,8 @@ pub(crate) enum AuditFailureCategory {
     BashProcessFailed,
     GrepTimeout,
     GrepCancelled,
+    GlobTimeout,
+    GlobCancelled,
 }
 
 /// Structured, serde-serializable audit evidence for one pipeline observation.
@@ -168,7 +170,9 @@ impl AuditEvent {
                 WorkspaceValidation::Passed,
                 None,
             ),
-            PipelineEvent::ExecutionFailed | PipelineEvent::ExecutionCancelled => (
+            PipelineEvent::ExecutionFailed
+            | PipelineEvent::ExecutionCancelled
+            | PipelineEvent::ExecutionTimedOut => (
                 AuditEventType::ExecutionFailed,
                 AuditOutcome::Failed,
                 WorkspaceValidation::Passed,
@@ -236,6 +240,7 @@ impl AuditEvent {
                 | PipelineEvent::ExecutionCompleted
                 | PipelineEvent::ExecutionFailed
                 | PipelineEvent::ExecutionCancelled
+                | PipelineEvent::ExecutionTimedOut
                 | PipelineEvent::RequestDenied
                 | PipelineEvent::ApprovalExpired
                 | PipelineEvent::ApprovalCancelled
@@ -264,9 +269,12 @@ impl AuditEvent {
                     .as_millis()
                     .min(u64::MAX as u128) as u64
             }),
-            result_evidence: matches!(event, PipelineEvent::ExecutionCompleted)
-                .then(|| context.result_evidence.clone())
-                .flatten(),
+            result_evidence: matches!(
+                event,
+                PipelineEvent::ExecutionCompleted | PipelineEvent::ExecutionTimedOut
+            )
+            .then(|| context.result_evidence.clone())
+            .flatten(),
             event_id: Uuid::new_v4(),
             request_id: context.request_id,
             timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -299,11 +307,14 @@ impl AuditEvent {
                     Some(AuditFailureCategory::ApprovalDenied)
                 }
                 PipelineEvent::WorkspaceValidated { passed: false }
-                | PipelineEvent::ExecutionFailed => context.failure_category,
+                | PipelineEvent::ExecutionFailed
+                | PipelineEvent::ExecutionTimedOut => context.failure_category,
                 PipelineEvent::ExecutionCancelled => Some(if context.tool_name == "bash" {
                     AuditFailureCategory::BashCancelled
                 } else if context.tool_name == "grep" {
                     AuditFailureCategory::GrepCancelled
+                } else if context.tool_name == "glob" {
+                    AuditFailureCategory::GlobCancelled
                 } else {
                     AuditFailureCategory::ExecutionFailed
                 }),

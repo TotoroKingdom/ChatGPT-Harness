@@ -23,6 +23,7 @@ function config(userRules: UserPolicyRuleConfig[] = []): AppConfig {
     policies: { toolDefaults: { readFile: "allow", glob: "allow", grep: "allow", write: "allow", edit: "allow", bash: "ask" }, userRules },
     desktop: { approvalNotifications: true, connectionNotifications: true, backgroundNoticeAcknowledged: false, autoStartHarnessOnAppLaunch: false },
     history: { enabled: true, retentionDays: 30, maxStorageMiB: 256 },
+    search: { globTimeoutSeconds: 30, grepTimeoutSeconds: 30 },
   };
 }
 

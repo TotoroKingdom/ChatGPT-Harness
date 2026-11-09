@@ -176,6 +176,13 @@
         "runtimeLimits": {
           "$ref": "#/$defs/RuntimeLimits"
         },
+        "search": {
+          "$ref": "#/$defs/SearchConfig",
+          "default": {
+            "globTimeoutSeconds": 30,
+            "grepTimeoutSeconds": 30
+          }
+        },
         "security": {
           "$ref": "#/$defs/SecurityConfig"
         },
@@ -246,6 +253,25 @@
         "maxActivityEvents",
         "maxReadBytes"
       ],
+      "type": "object"
+    },
+    "SearchConfig": {
+      "additionalProperties": false,
+      "description": "Independent wall-clock budgets for the two search tools.",
+      "properties": {
+        "globTimeoutSeconds": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "grepTimeoutSeconds": {
+          "default": 30,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "SecurityConfig": {

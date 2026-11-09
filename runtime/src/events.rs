@@ -38,11 +38,13 @@ impl ActivityEventInput {
             InternalAuditEventType::ExecutionFailed => match event.failure_category {
                 Some(
                     crate::audit::AuditFailureCategory::BashTimeout
-                    | crate::audit::AuditFailureCategory::GrepTimeout,
+                    | crate::audit::AuditFailureCategory::GrepTimeout
+                    | crate::audit::AuditFailureCategory::GlobTimeout,
                 ) => ActivityEventType::ExecutionTimedOut,
                 Some(
                     crate::audit::AuditFailureCategory::BashCancelled
-                    | crate::audit::AuditFailureCategory::GrepCancelled,
+                    | crate::audit::AuditFailureCategory::GrepCancelled
+                    | crate::audit::AuditFailureCategory::GlobCancelled,
                 ) => ActivityEventType::ExecutionCancelled,
                 _ => ActivityEventType::ExecutionFailed,
             },
@@ -218,6 +220,8 @@ fn failure_category_name(category: crate::audit::AuditFailureCategory) -> &'stat
         crate::audit::AuditFailureCategory::BashProcessFailed => "bash_process_failed",
         crate::audit::AuditFailureCategory::GrepTimeout => "grep_timeout",
         crate::audit::AuditFailureCategory::GrepCancelled => "grep_cancelled",
+        crate::audit::AuditFailureCategory::GlobTimeout => "glob_timeout",
+        crate::audit::AuditFailureCategory::GlobCancelled => "glob_cancelled",
     }
 }
 
