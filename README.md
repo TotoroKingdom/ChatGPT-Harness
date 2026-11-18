@@ -132,14 +132,4 @@ npm run tauri:build       # NSIS 安装包
 
 ## 版本进展与开发文档
 
-当前 0.1.3 代码提供上述本地 Harness 能力。V4 的开发、测试与验收文档已整体归档；归档不改变各 Milestone 的原始结论，也不代表 V4 已验收、发布或冻结。
-
-文档入口：
-
-- [V4 历史归档](docs/archive/v4-2026-11/README.md)
-- [历史文档索引](docs/archive/README.md)
-- [下一版本文档工作区](docs-codex/README.md)
-- [开发 Agent 规则](AGENTS.md)
-- [当前实现 Wiki](wiki/README.md)
-
-**说明：** 开发文档中的计划、测试用例和验收状态不等同于用户可用的已发布功能；本地自动化测试通过也不等于外部 ChatGPT 连接或人工验收已完成。
+当前 0.1.3
